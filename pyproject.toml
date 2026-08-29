@@ -1,0 +1,9 @@
+[project]
+name = "ComfyUI-XXXXXLCatNodes"
+description = "ComfyUI menu bar system monitor: CPU / RAM / GPU / VRAM / temperature with live progress bars"
+version = "1.0.0"
+dependencies = []
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/XXXXXLCat/ComfyUI-XXXXXLCatNodes"
