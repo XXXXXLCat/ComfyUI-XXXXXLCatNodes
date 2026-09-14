@@ -7,10 +7,14 @@ subprocess. Nothing like psutil is pulled in.
   per-GPU utilization / VRAM / temperature, and system-drive free space.
 - The menu bar (web/monitor.js) renders these live and offers one-tap VRAM / RAM
   cleanup buttons executed inside the ComfyUI process.
-- Four custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
-  🐈‍⬛XXXXXLCat/Sampling), all built on the new V3 node API (comfy_api /
-  io.ComfyNode): Meow Stats🐈‍⬛, Purr VRAM🐈‍⬛, Tidy RAM🐈‍⬛,
-  and H3 Image to Video🐈‍⬛.
+- Front-end strings (node names, descriptions, widget labels and tooltips) are
+  localised through ``locales/<lang>/nodeDefs.json``, picked up by the core
+  ``/i18n`` route, so they follow the language selected in ComfyUI.
+- Six custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
+  🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
+  🐈‍⬛XXXXXLCat/node), all built on the new V3 node API (comfy_api / io.ComfyNode):
+  Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛, H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛,
+  Group Control 🐈‍⬛, and Node Control 🐈‍⬛.
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
@@ -40,10 +44,12 @@ print(f"\n{_SEP}\n{_BANNER}\n{_SEP}\n")
 
 from . import sensors, telemetry, reclamation, infra  # noqa: E402,F401
 from .nodes import (  # noqa: E402
-    XXXXXLCatSystemMonitor,
     XXXXXLCatVRAMSweep,
     XXXXXLCatRAMReclaim,
     XXXXXLCatH3ImageToVideo,
+    XXXXXLCatAnySwitch,
+    XXXXXLCatGroupControl,
+    XXXXXLCatNodeControl,
 )
 
 
@@ -56,12 +62,18 @@ class XXXXXLCatExtension(ComfyExtension):
     """Registers all 🐈‍⬛XXXXXLCat nodes through the new V3 node API."""
 
     async def get_node_list(self):
-        return [
-            XXXXXLCatSystemMonitor,
-            XXXXXLCatVRAMSweep,
-            XXXXXLCatRAMReclaim,
-            XXXXXLCatH3ImageToVideo,
-        ]
+        return list(_NODE_CLASSES)
+
+
+# Kept in one place so the load log can never drift from the real registration.
+_NODE_CLASSES = [
+    XXXXXLCatVRAMSweep,
+    XXXXXLCatRAMReclaim,
+    XXXXXLCatH3ImageToVideo,
+    XXXXXLCatAnySwitch,
+    XXXXXLCatGroupControl,
+    XXXXXLCatNodeControl,
+]
 
 
 async def comfy_entrypoint() -> XXXXXLCatExtension:
@@ -78,5 +90,7 @@ except Exception:
     _PKG_VERSION = "unknown"
 
 print(f"[XXXXXLCat] ComfyUI-XXXXXLCatNodes v{_PKG_VERSION} loaded")
-print("[XXXXXLCat] 4 nodes registered via comfy_entrypoint (new V3 node API)")
+print(
+    f"[XXXXXLCat] {len(_NODE_CLASSES)} nodes registered via comfy_entrypoint (new V3 node API)"
+)
 print("[XXXXXLCat] Menu-bar telemetry ready at /xxxxxlcat-monitor")

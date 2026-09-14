@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tidy RAM🐈‍⬛ — on-demand physical memory reclamation node."""
+"""Reclaim RAM 🐈‍⬛ — on-demand physical memory reclamation node."""
 
 from comfy_api.latest import io
 
@@ -23,7 +23,7 @@ class XXXXXLCatRAMReclaim(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="🐈‍⬛RAMReclaim",
-            display_name="Tidy RAM🐈‍⬛",
+            display_name="Reclaim RAM 🐈‍⬛",
             category="🐈‍⬛XXXXXLCat/Memory",
             description=(
                 "Reclaim physical memory on demand and return a STRING report of what "

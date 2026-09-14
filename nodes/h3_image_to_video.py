@@ -108,7 +108,7 @@ class XXXXXLCatH3ImageToVideo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="🐈‍⬛H3ImageToVideo",
-            display_name="H3 Image to Video🐈‍⬛",
+            display_name="H3 Image to Video 🐈‍⬛",
             category="🐈‍⬛XXXXXLCat/Sampling",
             description=(
                 "Image-/text-to-Video conditioning for MiniMax H3 with dual-stage "

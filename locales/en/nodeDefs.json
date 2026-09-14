@@ -1,0 +1,214 @@
+{
+  "🐈‍⬛VRAMSweep": {
+    "display_name": "Sweep VRAM 🐈‍⬛",
+    "description": "Release GPU VRAM on demand and return a STRING report of what was recovered. Two toggles choose the release scope (unload models, sweep CUDA caches); Force GC adds an extra collect + synchronize. Each stage is isolated, so one failing does not abort the rest.",
+    "inputs": {
+      "offload_model": {
+        "name": "Unload models",
+        "tooltip": "Unload all models from VRAM before releasing."
+      },
+      "offload_cache": {
+        "name": "Sweep CUDA caches",
+        "tooltip": "Sweep CUDA caches before releasing."
+      },
+      "force_gc": {
+        "name": "Force GC",
+        "tooltip": "Run an extra gc.collect() + cuda.synchronize() afterwards for a deeper squeeze."
+      },
+      "anything": {
+        "name": "anything",
+        "tooltip": "Optional value passed through unchanged, so this node can sit inside a chain."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "anything",
+        "tooltip": "The passthrough input, returned unchanged."
+      },
+      "1": {
+        "name": "report",
+        "tooltip": "Text report of how much VRAM was released."
+      }
+    }
+  },
+  "🐈‍⬛RAMReclaim": {
+    "display_name": "Reclaim RAM 🐈‍⬛",
+    "description": "Reclaim physical memory on demand and return a STRING report of what was recovered. Three toggles pick the passes (file cache, process working sets, own DLLs); Retry times repeats them. Dry Run reports the baseline without trimming. Windows-only (ctypes); no-ops elsewhere.",
+    "inputs": {
+      "clean_file_cache": {
+        "name": "Clean file cache",
+        "tooltip": "Trim the system file cache. Needs administrator rights; silently skipped when it fails."
+      },
+      "clean_processes": {
+        "name": "Trim process working sets",
+        "tooltip": "Trim every process's working set."
+      },
+      "clean_dlls": {
+        "name": "Trim own DLLs",
+        "tooltip": "Trim this process's own loaded DLLs."
+      },
+      "retry_times": {
+        "name": "Retry times",
+        "tooltip": "How many times to repeat the selected pass(es)."
+      },
+      "dry_run": {
+        "name": "Dry Run",
+        "tooltip": "Skip the actual trimming and only report the current physical-memory baseline."
+      },
+      "anything": {
+        "name": "anything",
+        "tooltip": "Optional value passed through unchanged, so this node can sit inside a chain."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "anything",
+        "tooltip": "The passthrough input, returned unchanged."
+      },
+      "1": {
+        "name": "report",
+        "tooltip": "Text report of how much RAM was reclaimed."
+      }
+    }
+  },
+  "🐈‍⬛H3ImageToVideo": {
+    "display_name": "H3 Image to Video 🐈‍⬛",
+    "description": "Image-/text-to-video conditioning for MiniMax H3 with dual-stage outputs. Stage-1 uses 'positive' + 'av_latent' built at width/height; Stage-2 (refine) uses 'positive2', a separate conditioning object baked at stage2_width/stage2_height so its keyframes line up with the upscaled latent. For t2v (no keyframes) positive2 is an independent copy and the stage2 resolution is unused. Do NOT fan a single output to two samplers — the H3 sampler mutates keyframes in place.",
+    "inputs": {
+      "clip": {
+        "name": "clip",
+        "tooltip": "MiniMax H3 CLIP (Qwen3-VL text + image encoder)."
+      },
+      "vae": {
+        "name": "vae",
+        "tooltip": "Video VAE used to encode keyframe images."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "Text prompt. Reference tags follow the MiniMax H3 convention."
+      },
+      "width": {
+        "name": "width",
+        "tooltip": "Stage-1 (sampling) target width."
+      },
+      "height": {
+        "name": "height",
+        "tooltip": "Stage-1 (sampling) target height."
+      },
+      "length": {
+        "name": "length",
+        "tooltip": "Frame count at 24 fps, snapped to the model's 17k+5 grid (124 ≈ 5s; trained range ≈ 124-362, longer is untested)."
+      },
+      "stage2_width": {
+        "name": "stage2_width",
+        "tooltip": "Stage-2 (refine) target width. The keyframe condition is re-encoded at this size to match the upscaled latent."
+      },
+      "stage2_height": {
+        "name": "stage2_height",
+        "tooltip": "Stage-2 (refine) target height. Ignored for t2v (no keyframes)."
+      },
+      "first_frame": {
+        "name": "first_frame",
+        "tooltip": "Optional start keyframe."
+      },
+      "last_frame": {
+        "name": "last_frame",
+        "tooltip": "Optional end keyframe."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "positive",
+        "tooltip": "Conditioning for the Stage-1 sampler, baked at width / height."
+      },
+      "1": {
+        "name": "positive2",
+        "tooltip": "Separate conditioning object for the Stage-2 (refine) sampler, baked at the stage-2 resolution."
+      },
+      "2": {
+        "name": "av_latent",
+        "tooltip": "Empty joint video+audio latent for Stage-1."
+      }
+    }
+  },
+  "🐈‍⬛AnySwitch": {
+    "display_name": "Any Switch 🐈‍⬛",
+    "description": "Generic single-active-input switch for ANY data type. Wire several branch outputs in at once; at runtime forward the single one that carries data and raise an error if none or more than one is populated. The first connection decides the node's type: the front end then locks every port to that same type and labels every port as <type>_<index> and the output with the type name, so the node visibly shows what it switches. Ports grow automatically as you connect (two by default, one extra empty slot each time, up to nine). Flip the active branch upstream — no rewiring, no toggle.",
+    "inputs": {
+      "input_1": {
+        "name": "input 1",
+        "tooltip": "Candidate #1. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_2": {
+        "name": "input 2",
+        "tooltip": "Candidate #2. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_3": {
+        "name": "input 3",
+        "tooltip": "Candidate #3. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_4": {
+        "name": "input 4",
+        "tooltip": "Candidate #4. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_5": {
+        "name": "input 5",
+        "tooltip": "Candidate #5. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_6": {
+        "name": "input 6",
+        "tooltip": "Candidate #6. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_7": {
+        "name": "input 7",
+        "tooltip": "Candidate #7. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_8": {
+        "name": "input 8",
+        "tooltip": "Candidate #8. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      },
+      "input_9": {
+        "name": "input 9",
+        "tooltip": "Candidate #9. The first connection decides the node type; every other port is then locked to that same type and each port (and the output) is labeled with that type name and slot index. Only the input that actually carries data is forwarded."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "output",
+        "tooltip": "The single branch that actually carries data."
+      }
+    }
+  },
+  "🐈‍⬛GroupControl": {
+    "display_name": "Group Control 🐈‍⬛",
+    "description": "Open or close canvas groups from a single panel. Each group on the canvas (including subgraphs) becomes a row with its name and one toggle; the list can be filtered by group colour and name keyword and ordered by name or canvas position. A mode decides how toggles interact: free control, always exactly one open, or at most one open. Closing a group either bypasses or mutes every node inside it, which is chosen in the panel settings. The signal input is a pass-through so the node can live inside an execution chain without changing the data that flows through it; all group switching happens in the front end.",
+    "inputs": {
+      "signal": {
+        "name": "signal",
+        "tooltip": "Optional pass-through. Whatever is wired here is returned unchanged so the node can sit inside a chain; it is not involved in group switching."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "signal",
+        "tooltip": "The pass-through signal, returned unchanged."
+      }
+    }
+  },
+  "🐈‍⬛NodeControl": {
+    "display_name": "Node Control 🐈‍⬛",
+    "description": "Open or close individual canvas nodes from a single panel. Each node on the canvas becomes a row with its title and one toggle; the list can be filtered by node colour (an uncoloured node inherits its group's colour) and by name / type keyword, and ordered by name or canvas position. A mode decides how toggles interact: free control, always exactly one open, or at most one open. Closing a node either bypasses or mutes it, which is chosen in the panel settings. Notes, reroutes, primitives and the control node itself are never listed. The signal input is a pass-through so the node can live inside an execution chain without changing the data that flows through it; all switching happens in the front end.",
+    "inputs": {
+      "signal": {
+        "name": "signal",
+        "tooltip": "Optional pass-through. Whatever is wired here is returned unchanged so the node can sit inside a chain; it is not involved in node switching."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "signal",
+        "tooltip": "The pass-through signal, returned unchanged."
+      }
+    }
+  }
+}
