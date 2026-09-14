@@ -3,12 +3,16 @@
 
 from .vram_sweep import XXXXXLCatVRAMSweep
 from .ram_reclaim import XXXXXLCatRAMReclaim
-from .system_monitor import XXXXXLCatSystemMonitor
 from .h3_image_to_video import XXXXXLCatH3ImageToVideo
+from .any_switch import XXXXXLCatAnySwitch
+from .group_control import XXXXXLCatGroupControl
+from .node_control import XXXXXLCatNodeControl
 
 __all__ = [
     "XXXXXLCatVRAMSweep",
     "XXXXXLCatRAMReclaim",
-    "XXXXXLCatSystemMonitor",
     "XXXXXLCatH3ImageToVideo",
+    "XXXXXLCatAnySwitch",
+    "XXXXXLCatGroupControl",
+    "XXXXXLCatNodeControl",
 ]

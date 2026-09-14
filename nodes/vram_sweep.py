@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Purr VRAM🐈‍⬛ — on-demand GPU VRAM release node."""
+"""Sweep VRAM 🐈‍⬛ — on-demand GPU VRAM release node."""
 
 import gc
 
@@ -24,7 +24,7 @@ class XXXXXLCatVRAMSweep(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="🐈‍⬛VRAMSweep",
-            display_name="Purr VRAM🐈‍⬛",
+            display_name="Sweep VRAM 🐈‍⬛",
             category="🐈‍⬛XXXXXLCat/Memory",
             description=(
                 "Release GPU VRAM on demand and return a STRING report of what was "
