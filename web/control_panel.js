@@ -173,8 +173,8 @@ function cssFor(p) {
 .${p}-field { margin-bottom: 12px; }
 .${p}-field > span { display: block; margin-bottom: 6px; font-size: 11px;
   color: var(--p-text-muted-color, #9a9a9a); }
-.${p}-seg { display: flex; gap: 4px; }
-.${p}-segbtn { flex: 1 1 0; padding: 5px 0; border-radius: 6px; cursor: pointer;
+.${p}-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.${p}-segbtn { padding: 5px 0; border-radius: 6px; cursor: pointer;
   font-family: inherit; font-size: 12px;
   background: var(--button-surface, #262626);
   color: var(--button-surface-contrast, #bbb);
@@ -339,10 +339,10 @@ export function createControlPanel(node, opts) {
 
   /* ---- filtering ---- */
 
-  /* 关键词支持多个：中英文逗号/换行/分号都算分隔符，任一命中即显示（OR）。 */
+  /* 关键词支持多个：仅以分号 `;` 作分隔符，任一命中即显示（OR）。 */
   function keywordList() {
     return (cfg.keyword || "")
-      .split(/[,，;；\n\r\t]+/)
+      .split(";")
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean);
   }

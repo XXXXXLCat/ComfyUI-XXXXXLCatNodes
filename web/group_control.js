@@ -88,8 +88,8 @@ registerControl({
       emptyFiltered: "No matching groups",
       emptyNoKeyword: "Type a name keyword to list groups",
       unitHint: (shown, total) => `Showing ${shown} / ${total} groups`,
-      keywordLabel: "Name keywords (comma-separated, any match)",
-      keywordPlaceholder: "Separate names with commas, e.g. character, background, LORA",
+      keywordLabel: "Name keywords (semicolon-separated, any match)",
+      keywordPlaceholder: "Separate names with ; e.g. character; background; LORA",
       colorLabel: "Color filter (multi-select)",
       paletteEmpty: "No groups on the canvas have a color set",
 

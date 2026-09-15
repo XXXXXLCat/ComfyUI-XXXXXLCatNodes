@@ -80,8 +80,8 @@ registerControl({
       emptyFiltered: "No matching nodes",
       emptyNoKeyword: "Type a name keyword to list nodes",
       unitHint: (shown, total) => `Showing ${shown} / ${total} nodes`,
-      keywordLabel: "Name / type keywords (comma-separated, any match)",
-      keywordPlaceholder: "Separate keywords with commas, e.g. KSampler, sampling, LORA",
+      keywordLabel: "Name / type keywords (semicolon-separated, any match)",
+      keywordPlaceholder: "Separate keywords with ; e.g. KSampler; sampling; LORA",
       colorLabel: "Color filter (multi-select; uncolored nodes inherit their group's color)",
       paletteEmpty: "No nodes or groups on the canvas have a color set",
 
