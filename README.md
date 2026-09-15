@@ -9,6 +9,7 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - Menu-bar live monitor with 5 metrics (CPU / RAM / GPU / VRAM / temperature), refreshing every 0.5s; one-tap **VRAM Cleanup** and **RAM Cleanup** buttons
 - Two on-demand memory tools — `Sweep VRAM 🐈‍⬛` (unload models + clear CUDA cache, optional forced GC) and `Reclaim RAM 🐈‍⬛` (reclaim file cache / working sets / own DLLs, with dry-run)
 - MiniMax H3 sampling helper: `H3 Image to Video 🐈‍⬛`
+- `Any Switch 🐈‍⬛`: a 9-way any-type router that forwards the single populated input and errors if zero or more than one branch runs — switch branches upstream, no rewiring
 - Canvas switches: `Group Control 🐈‍⬛` (open/close whole canvas groups) and `Node Control 🐈‍⬛` (open/close individual nodes) — one row and one switch each, filterable by colour and name keyword
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
@@ -26,6 +27,10 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 ### H3 Image to Video 🐈‍⬛
 **Principle:** builds MiniMax H3 image/text-to-video conditioning. Because the H3 sampler mutates keyframes in place, it emits **two independent conditioning objects** — `positive` (stage 1, baked at the target width/height) and `positive2` (stage-2 refine, baked at stage2_width/stage2_height) — plus an empty `av_latent`, so the two stages never share and corrupt each other's state.
 **Usage:** fill the prompt and optional first/last keyframes; wire `positive` to the stage-1 sampler, `positive2` to the stage-2 refine sampler, and `av_latent` to the sampler. t2v (no keyframes) ignores the stage-2 resolution.
+
+### Any Switch 🐈‍⬛
+**Principle:** a generic single-active-input switch for any data type. It exposes up to nine any-type inputs; the **first connection decides the node's type**, and the front end then locks every other port to that same type and labels each port (and the output) with the type name and slot index (e.g. `LATENT_01`), so the node visibly shows what it switches. Ports grow automatically as you connect (two by default, one extra empty slot each time, up to nine).
+**Usage:** wire several branch outputs in at once; only the branch that actually ran produces a value. At runtime the node forwards that one input and raises an error if zero or more than one input is populated. Pick the active branch by running it upstream — no rewiring, no toggle.
 
 ### Group Control 🐈‍⬛
 **Principle:** a front-end panel that flips whole canvas groups. Every group that owns at least one node becomes a row with its name and one switch; the list can be narrowed by group colour and by name keyword (several keywords, comma separated, any one of them matches) and ordered by name or canvas position. A mode decides how the switches interact — free control, always exactly one open, or at most one open — and closing a group either bypasses or mutes every node inside it, sub-groups included.
