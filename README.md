@@ -63,6 +63,7 @@ ComfyUI/custom_nodes/
     └── web/
         ├── monitor.js        # menu-bar telemetry strip + cleanup buttons (auto-loaded by ComfyUI)
         ├── group_control.js  # panel for Group Control 🐈‍⬛
+        ├── node_control.js    # panel for Node Control 🐈‍⬛
         └── any_switch.js     # dynamic ports for Any Switch 🐈‍⬛
 ```
 

@@ -70,19 +70,20 @@ function groupTint(n, groups) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.NodeControl",
-  settingsLabel: `${BRAND} Node Control 设置`,
+  settingsLabel: `${BRAND} Node Control Settings`,
   build(node) {
     return createControlPanel(node, {
       store: STORE,
       prefix: P,
-      settingsTitle: "Node Control 设置",
-      emptyIdle: "画布上还没有可控制的节点",
-      emptyFiltered: "没有匹配的节点",
-      unitHint: (shown, total) => `当前显示 ${shown} / ${total} 个节点`,
-      keywordLabel: "名称 / 类型关键词（逗号分隔，任一命中）",
-      keywordPlaceholder: "多个关键词用逗号分隔，如：KSampler, 采样, LORA",
-      colorLabel: "颜色筛选（可多选，未上色的节点沿用所属组颜色）",
-      paletteEmpty: "画布上的节点和组都还没有设置颜色",
+      settingsTitle: "Node Control Settings",
+      emptyIdle: "No controllable nodes on the canvas",
+      emptyFiltered: "No matching nodes",
+      emptyNoKeyword: "Type a name keyword to list nodes",
+      unitHint: (shown, total) => `Showing ${shown} / ${total} nodes`,
+      keywordLabel: "Name / type keywords (comma-separated, any match)",
+      keywordPlaceholder: "Separate keywords with commas, e.g. KSampler, sampling, LORA",
+      colorLabel: "Color filter (multi-select; uncolored nodes inherit their group's color)",
+      paletteEmpty: "No nodes or groups on the canvas have a color set",
 
       palette() {
         const groups = readGroups();
@@ -97,7 +98,7 @@ registerControl({
         for (const n of g._nodes) {
           if (n === node) continue; // never switch itself off
           if (SKIP_TYPES.has(n.type)) continue;
-          const title = (n.title || "").trim() || (n.type || "").trim() || "未命名节点";
+          const title = (n.title || "").trim() || (n.type || "").trim() || "Untitled node";
           const type = (n.type || "").trim();
           out.push({
             key: String(n.id != null ? n.id : title),

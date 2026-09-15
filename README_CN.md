@@ -52,7 +52,8 @@ ComfyUI/custom_nodes/
     │   ├── ram_reclaim.py
     │   ├── h3_image_to_video.py
     │   ├── any_switch.py
-    │   └── group_control.py
+    │   ├── group_control.py
+    │   └── node_control.py
     ├── locales/         # 前端文案，经 ComfyUI 核心 /i18n 路由下发
     │   ├── en/nodeDefs.json
     │   └── zh/nodeDefs.json
