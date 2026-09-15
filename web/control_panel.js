@@ -29,10 +29,13 @@ export const MODES = [
   ["free", "Free"],
   ["always_one", "Always one on"],
   ["at_most_one", "At most one on"],
+  ["at_least_one", "At least one on"],
 ];
 export const SORTS = [
   ["name", "By name"],
   ["position", "By position"],
+  ["state", "By state"],
+  ["color", "By color"],
 ];
 export const CLOSES = [
   ["bypass", "Bypass"],
@@ -43,6 +46,7 @@ const DEFAULTS = {
   keyword: "",
   colors: [],
   sort: "name",
+  sortReverse: false,
   mode: "free",
   close: "bypass",
   on: null,
@@ -309,7 +313,8 @@ export function createControlPanel(node, opts) {
     const next = { ...DEFAULTS };
     if (typeof st[prop("keyword")] === "string") next.keyword = st[prop("keyword")];
     if (Array.isArray(st[prop("colors")])) next.colors = st[prop("colors")].map(normColor).filter(Boolean);
-    if (st[prop("sort")] === "name" || st[prop("sort")] === "position") next.sort = st[prop("sort")];
+    if (SORTS.some((s) => s[0] === st[prop("sort")])) next.sort = st[prop("sort")];
+    if (typeof st[prop("sortReverse")] === "boolean") next.sortReverse = st[prop("sortReverse")];
     if (MODES.some((m) => m[0] === st[prop("mode")])) next.mode = st[prop("mode")];
     if (st[prop("close")] === "bypass" || st[prop("close")] === "mute") next.close = st[prop("close")];
     if (Array.isArray(st[prop("on")])) next.on = st[prop("on")].slice();
@@ -321,6 +326,7 @@ export function createControlPanel(node, opts) {
     st[prop("keyword")] = cfg.keyword;
     st[prop("colors")] = cfg.colors.slice();
     st[prop("sort")] = cfg.sort;
+    st[prop("sortReverse")] = cfg.sortReverse;
     st[prop("mode")] = cfg.mode;
     st[prop("close")] = cfg.close;
     st[prop("on")] = (cfg.on || []).slice();
@@ -356,8 +362,31 @@ export function createControlPanel(node, opts) {
     }
     const byName = (a, b) =>
       (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base", numeric: true });
-    const byPos = (a, b) => a.pos[1] - b.pos[1] || a.pos[0] - b.pos[0];
-    list.sort(cfg.sort === "position" ? byPos : byName);
+    const byPos = (a, b) =>
+      (a.pos ? a.pos[1] : 0) - (b.pos ? b.pos[1] : 0) ||
+      (a.pos ? a.pos[0] : 0) - (b.pos ? b.pos[0] : 0);
+    /* By state：开（在当前 on 集合里）的浮到顶，关的沉底；同状态内按名稳定排序。 */
+    const onSet = new Set(cfg.on || []);
+    const byState = (a, b) => {
+      const ao = onSet.has(a.key) ? 0 : 1;
+      const bo = onSet.has(b.key) ? 0 : 1;
+      return ao - bo || byName(a, b);
+    };
+    /* By color：按 tint 十六进制聚类，无颜色（透明）的排到最后；同色按名排序。 */
+    const byColor = (a, b) => {
+      const ca = (a.tint || "").toLowerCase();
+      const cb = (b.tint || "").toLowerCase();
+      if (!ca && !cb) return byName(a, b);
+      if (!ca) return 1;
+      if (!cb) return -1;
+      return ca.localeCompare(cb) || byName(a, b);
+    };
+    const cmp =
+      cfg.sort === "position" ? byPos :
+      cfg.sort === "state" ? byState :
+      cfg.sort === "color" ? byColor : byName;
+    list.sort(cmp);
+    if (cfg.sortReverse) list.reverse();
     return list;
   }
 
@@ -404,6 +433,9 @@ export function createControlPanel(node, opts) {
         const first = list.find((it) => onSet.has(it.key));
         cfg.on = [first ? first.key : cfg.on[0]];
       }
+    } else if (cfg.mode === "at_least_one") {
+      /* 不允许全部关掉：列表非空但 on 为空时，保留排序后最靠前的那一个。 */
+      if (list.length && cfg.on.length === 0) cfg.on = [list[0].key];
     }
   }
 
@@ -534,6 +566,9 @@ export function createControlPanel(node, opts) {
       cfg.on = [key];
     } else if (cfg.mode === "at_most_one") {
       cfg.on = open ? [] : [key];
+    } else if (cfg.mode === "at_least_one") {
+      if (open && cfg.on.length <= 1) return; // 必须至少留一个开着
+      cfg.on = open ? cfg.on.filter((k) => k !== key) : cfg.on.concat([key]);
     } else {
       cfg.on = open ? cfg.on.filter((k) => k !== key) : cfg.on.concat([key]);
     }
@@ -657,6 +692,16 @@ export function createControlPanel(node, opts) {
     );
     panel.appendChild(
       field("Sort", segmented(SORTS, () => cfg.sort, (v) => { cfg.sort = v; commit(); }))
+    );
+    panel.appendChild(
+      field(
+        "Reverse order",
+        segmented(
+          [["off", "Off"], ["on", "On"]],
+          () => (cfg.sortReverse ? "on" : "off"),
+          (v) => { cfg.sortReverse = v === "on"; commit(); }
+        )
+      )
     );
 
     const kw = document.createElement("input");
