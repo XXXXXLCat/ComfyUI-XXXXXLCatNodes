@@ -42,7 +42,7 @@ function readGroups() {
   const raw = (g && (g._groups || g.groups)) || [];
   return raw.map((gr) => ({
     ref: gr,
-    title: (gr.title || "").trim() || "未命名组",
+    title: (gr.title || "").trim() || "Untitled group",
     bounds: gBounds(gr),
     color: normColor(gr.color),
   }));
@@ -78,19 +78,20 @@ function stateOf(nodes) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.GroupControl",
-  settingsLabel: `${BRAND} Group Control 设置`,
+  settingsLabel: `${BRAND} Group Control Settings`,
   build(node) {
     return createControlPanel(node, {
       store: STORE,
       prefix: P,
-      settingsTitle: "Group Control 设置",
-      emptyIdle: "画布上还没有编组",
-      emptyFiltered: "没有匹配的组",
-      unitHint: (shown, total) => `当前显示 ${shown} / ${total} 个组`,
-      keywordLabel: "名称关键词（逗号分隔，任一命中）",
-      keywordPlaceholder: "多个名称用逗号分隔，如：角色, 背景, LORA",
-      colorLabel: "颜色筛选（可多选）",
-      paletteEmpty: "画布上的组都还没有设置颜色",
+      settingsTitle: "Group Control Settings",
+      emptyIdle: "No groups on the canvas",
+      emptyFiltered: "No matching groups",
+      emptyNoKeyword: "Type a name keyword to list groups",
+      unitHint: (shown, total) => `Showing ${shown} / ${total} groups`,
+      keywordLabel: "Name keywords (comma-separated, any match)",
+      keywordPlaceholder: "Separate names with commas, e.g. character, background, LORA",
+      colorLabel: "Color filter (multi-select)",
+      paletteEmpty: "No groups on the canvas have a color set",
 
       palette: () => readGroups().map((g) => g.color).filter(Boolean),
 

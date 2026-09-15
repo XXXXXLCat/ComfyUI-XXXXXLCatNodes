@@ -26,17 +26,17 @@ export const FOOT_H = 32;
 export const LIST_PAD = 6;
 
 export const MODES = [
-  ["free", "单独控制"],
-  ["always_one", "始终开启一个"],
-  ["at_most_one", "最多开启一个"],
+  ["free", "Free"],
+  ["always_one", "Always one on"],
+  ["at_most_one", "At most one on"],
 ];
 export const SORTS = [
-  ["name", "按名称"],
-  ["position", "按位置"],
+  ["name", "By name"],
+  ["position", "By position"],
 ];
 export const CLOSES = [
-  ["bypass", "绕过"],
-  ["mute", "禁用"],
+  ["bypass", "Bypass"],
+  ["mute", "Mute"],
 ];
 
 const DEFAULTS = {
@@ -264,6 +264,7 @@ export function registerControl({ nodeId, name, settingsLabel, build }) {
      settingsTitle     — 设置弹窗标题
      emptyIdle         — 画布上还没有可控制对象时的文案
      emptyFiltered     — 有对象但被筛选条件挡完时的文案
+     emptyNoKeyword    — Name keywords 为空时的文案（不列出任何对象）
      unitHint          — (shown, total) => 弹窗提示文案
      keywordLabel      — 关键词字段标题
      keywordPlaceholder
@@ -287,7 +288,6 @@ export function createControlPanel(node, opts) {
      所以把「用户最后认可的宽度」单独存在 properties 里，随工作流一起存档。
      appliedW/H 记录最后一次由本面板写入的尺寸，用来区分「用户改的」和「我们自己写的」。 */
   let appliedW = 0;
-  let appliedH = 0;
 
   const root = document.createElement("div");
   root.className = p;
@@ -438,23 +438,10 @@ export function createControlPanel(node, opts) {
 
   /* ---- rendering ---- */
 
-  function chromeH() {
-    return LIST_PAD * 2 + FOOT_H + 4;
-  }
-
-  /* 不做内部滚动：所有匹配项一次性全部列出，节点高度随条目数增长。 */
-  function contentHeight(count) {
-    return chromeH() + Math.max(count, 1) * ROW_H;
-  }
-
-  /* 高度默认是内容撑出来的；用户只能往上拖大（多出来的留白），
-     不能往下拖小——没有内部滚动，拖小就等于把行藏起来。 */
-  function desiredHeight() {
-    const saved = (node.properties || {})[prop("h")];
-    const content = contentHeight(shown.length);
-    if (typeof saved === "number" && saved > content) return Math.round(saved);
-    return content;
-  }
+  /* 高度交给 ComfyUI / DOM 自动：节点高度由面板 DOM 内容的实际渲染高度决定，
+     本面板不进行任何 setSize 高度操作，也不把高度存进 properties，从而杜绝
+     「刷新一次就涨一点」的反馈循环（强制高度与 DOM 实际高度互相覆盖并被工作流
+     存档累积）。宽度仍由用户掌控（见 desiredWidth / node.onResize）。 */
 
   /* 宽度归用户：litegraph 随时可能重算 node.size，本面板每次 render 也会写尺寸，
      所以「用户最后认可的宽度」必须单独存档，否则一拉宽就被打回默认值。 */
@@ -464,18 +451,16 @@ export function createControlPanel(node, opts) {
     return NODE_W;
   }
 
-  function size() {
-    return [desiredWidth(), desiredHeight()];
-  }
-
+  /* 只改宽度：高度一律不动，留给 ComfyUI 按 DOM 内容自动测量。 */
   function resize() {
     const w = Math.round(desiredWidth());
-    const h = Math.round(desiredHeight());
-    if (w === appliedW && h === appliedH) return; // 只在真的变了时写，避免重绘抖动
+    if (w === appliedW) return; // 只在宽度真的变了时写，避免重绘抖动
     appliedW = w;
-    appliedH = h;
-    if (typeof node.setSize === "function") node.setSize([w, h]);
-    else node.size = [w, h];
+    if (typeof node.setSize === "function" && node.size) {
+      node.setSize([w, node.size[1]]);
+    } else if (node.size) {
+      node.size[0] = w;
+    }
     markCanvas();
   }
 
@@ -483,7 +468,13 @@ export function createControlPanel(node, opts) {
     listEl.textContent = "";
     footEl.textContent = "";
 
-    if (!shown.length) {
+    if (!keywordList().length) {
+      /* Name keywords 为空：不列出任何对象，只给一行提示。 */
+      const empty = document.createElement("div");
+      empty.className = `${p}-empty`;
+      empty.textContent = opts.emptyNoKeyword;
+      listEl.appendChild(empty);
+    } else if (!shown.length) {
       const empty = document.createElement("div");
       empty.className = `${p}-empty`;
       empty.textContent = all.length ? opts.emptyFiltered : opts.emptyIdle;
@@ -520,7 +511,7 @@ export function createControlPanel(node, opts) {
     const gear = document.createElement("button");
     gear.className = `${p}-gear`;
     gear.type = "button";
-    gear.textContent = "⚙ 设置";
+    gear.textContent = "⚙ Settings";
     gear.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -557,7 +548,8 @@ export function createControlPanel(node, opts) {
     const changed = syncOn(shown);
     enforceMode(shown);
     if (changed) save();
-    if (forceApply || wantsApply(shown)) apply(shown);
+    /* Name keywords 为空时面板不列出对象，也不再向画布写任何 mode。 */
+    if (keywordList().length && (forceApply || wantsApply(shown))) apply(shown);
     render();
   }
 
@@ -658,13 +650,13 @@ export function createControlPanel(node, opts) {
     };
 
     panel.appendChild(
-      field("关闭方式", segmented(CLOSES, () => cfg.close, (v) => { cfg.close = v; commit(); }))
+      field("Close method", segmented(CLOSES, () => cfg.close, (v) => { cfg.close = v; commit(); }))
     );
     panel.appendChild(
-      field("模式", segmented(MODES, () => cfg.mode, (v) => { cfg.mode = v; commit(); }))
+      field("Mode", segmented(MODES, () => cfg.mode, (v) => { cfg.mode = v; commit(); }))
     );
     panel.appendChild(
-      field("排序", segmented(SORTS, () => cfg.sort, (v) => { cfg.sort = v; commit(); }))
+      field("Sort", segmented(SORTS, () => cfg.sort, (v) => { cfg.sort = v; commit(); }))
     );
 
     const kw = document.createElement("input");
@@ -686,7 +678,7 @@ export function createControlPanel(node, opts) {
     clear.type = "button";
     clear.className = `${p}-segbtn`;
     clear.style.marginTop = "8px";
-    clear.textContent = "清除颜色筛选";
+    clear.textContent = "Clear color filter";
     clear.addEventListener("click", () => {
       cfg.colors = [];
       swatches.sync();
@@ -700,7 +692,7 @@ export function createControlPanel(node, opts) {
     const done = document.createElement("button");
     done.type = "button";
     done.className = "primary";
-    done.textContent = "完成";
+    done.textContent = "Done";
     done.addEventListener("click", close);
     actions.appendChild(done);
     panel.appendChild(actions);
@@ -777,7 +769,8 @@ export function createControlPanel(node, opts) {
     serialize: false,
     hideOnZoom: false,
   });
-  if (domWidget) domWidget.computeSize = size;
+  /* 不覆盖 computeSize：让 DOM widget 走 ComfyUI 默认测量（高度跟随内容，由
+     _arrangeWidgets 基于 DOM 实际渲染高度决定）——即「交给 ComfyUI 自动控制」。 */
 
   const hadSaved = Array.isArray((node.properties || {})[prop("on")]);
 
@@ -791,6 +784,7 @@ export function createControlPanel(node, opts) {
         baseOnResize.call(this, sz);
       } catch (_) {}
     }
+    /* 只记录用户拖出来的宽度；高度交给 ComfyUI 自动，不读不存不回写。 */
     const raw = sz && Math.round(sz[0]);
     if (raw > 0) {
       const w = Math.max(MIN_W, raw);
@@ -800,13 +794,6 @@ export function createControlPanel(node, opts) {
         appliedW = 0; // 让下一次 render 把（可能被夹到 MIN_W 的）宽度写回去
         dirty = true;
       }
-    }
-    const rawH = sz && Math.round(sz[1]);
-    if (rawH > 0 && rawH !== appliedH) {
-      node.properties = node.properties || {};
-      node.properties[prop("h")] = rawH;
-      appliedH = 0;
-      dirty = true;
     }
   };
 

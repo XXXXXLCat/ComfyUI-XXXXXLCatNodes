@@ -12,14 +12,14 @@ subprocess. Nothing like psutil is pulled in.
   ``/i18n`` route, so they follow the language selected in ComfyUI.
 - Six custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
   🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
-  🐈‍⬛XXXXXLCat/node), all built on the new V3 node API (comfy_api / io.ComfyNode):
-  Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛, H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛,
-  Group Control 🐈‍⬛, and Node Control 🐈‍⬛.
+  🐈‍⬛XXXXXLCat/node): all built on the new V3 node API (comfy_api / io.ComfyNode)
+  — Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛, H3 Image to Video 🐈‍⬛,
+  Any Switch 🐈‍⬛, Group Control 🐈‍⬛, and Node Control 🐈‍⬛.
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
 This file is only the entry point: it prints the banner, imports those modules,
-and exposes the ComfyUI extension via ``comfy_entrypoint``.
+and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 6 V3 nodes).
 """
 
 import os
@@ -59,7 +59,7 @@ from comfy_api.latest import ComfyExtension  # noqa: E402
 
 
 class XXXXXLCatExtension(ComfyExtension):
-    """Registers all 🐈‍⬛XXXXXLCat nodes through the new V3 node API."""
+    """Registers the V3 🐈‍⬛XXXXXLCat nodes through the new V3 node API."""
 
     async def get_node_list(self):
         return list(_NODE_CLASSES)
@@ -84,6 +84,7 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
 
 try:
     import tomllib
+
     with open(os.path.join(os.path.dirname(__file__), "pyproject.toml"), "rb") as _pf:
         _PKG_VERSION = tomllib.load(_pf).get("project", {}).get("version", "unknown")
 except Exception:
