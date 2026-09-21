@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 batch/*.db
 .workbuddy/memory/
+.workbuddy/tmp/

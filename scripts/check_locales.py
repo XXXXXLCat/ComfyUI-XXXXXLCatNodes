@@ -17,7 +17,7 @@ import sys
 import types
 
 PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-COMFY_ROOT = os.environ.get("COMFY_ROOT", r"E:/Portable/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable/ComfyUI")
+COMFY_ROOT = os.environ.get("COMFY_ROOT", r"E:/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable/ComfyUI")
 DEPLOYED = os.path.join(COMFY_ROOT, "custom_nodes", "ComfyUI-XXXXXLCatNodes")
 
 sys.path.insert(0, COMFY_ROOT)
