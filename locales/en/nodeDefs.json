@@ -210,5 +210,381 @@
         "tooltip": "The pass-through signal, returned unchanged."
       }
     }
+  },
+  "🐈‍⬛StackLoras": {
+    "display_name": "Load LoRA Stack 🐈‍⬛",
+    "description": "Apply several LoRAs to one MODEL in a single node — one row per LoRA with its own strength and on/off switch. Rows run top to bottom and give exactly the same result as chaining Lora Loader (Model Only) nodes, but the model is cloned once instead of once per LoRA, off or empty rows are never read from disk, loaded files are cached, and every row logs how many of its keys matched the model. MODEL only — no CLIP.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "The diffusion model every enabled row is applied to."
+      },
+      "lora_01": {
+        "name": "LoRA 1",
+        "tooltip": "Row 1: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_01": {
+        "name": "Strength 1",
+        "tooltip": "Row 1: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_01": {
+        "name": "On 1",
+        "tooltip": "Row 1: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_02": {
+        "name": "LoRA 2",
+        "tooltip": "Row 2: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_02": {
+        "name": "Strength 2",
+        "tooltip": "Row 2: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_02": {
+        "name": "On 2",
+        "tooltip": "Row 2: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_03": {
+        "name": "LoRA 3",
+        "tooltip": "Row 3: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_03": {
+        "name": "Strength 3",
+        "tooltip": "Row 3: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_03": {
+        "name": "On 3",
+        "tooltip": "Row 3: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_04": {
+        "name": "LoRA 4",
+        "tooltip": "Row 4: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_04": {
+        "name": "Strength 4",
+        "tooltip": "Row 4: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_04": {
+        "name": "On 4",
+        "tooltip": "Row 4: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_05": {
+        "name": "LoRA 5",
+        "tooltip": "Row 5: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_05": {
+        "name": "Strength 5",
+        "tooltip": "Row 5: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_05": {
+        "name": "On 5",
+        "tooltip": "Row 5: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_06": {
+        "name": "LoRA 6",
+        "tooltip": "Row 6: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_06": {
+        "name": "Strength 6",
+        "tooltip": "Row 6: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_06": {
+        "name": "On 6",
+        "tooltip": "Row 6: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_07": {
+        "name": "LoRA 7",
+        "tooltip": "Row 7: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_07": {
+        "name": "Strength 7",
+        "tooltip": "Row 7: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_07": {
+        "name": "On 7",
+        "tooltip": "Row 7: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_08": {
+        "name": "LoRA 8",
+        "tooltip": "Row 8: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_08": {
+        "name": "Strength 8",
+        "tooltip": "Row 8: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_08": {
+        "name": "On 8",
+        "tooltip": "Row 8: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_09": {
+        "name": "LoRA 9",
+        "tooltip": "Row 9: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_09": {
+        "name": "Strength 9",
+        "tooltip": "Row 9: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_09": {
+        "name": "On 9",
+        "tooltip": "Row 9: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_10": {
+        "name": "LoRA 10",
+        "tooltip": "Row 10: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_10": {
+        "name": "Strength 10",
+        "tooltip": "Row 10: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_10": {
+        "name": "On 10",
+        "tooltip": "Row 10: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_11": {
+        "name": "LoRA 11",
+        "tooltip": "Row 11: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_11": {
+        "name": "Strength 11",
+        "tooltip": "Row 11: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_11": {
+        "name": "On 11",
+        "tooltip": "Row 11: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_12": {
+        "name": "LoRA 12",
+        "tooltip": "Row 12: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_12": {
+        "name": "Strength 12",
+        "tooltip": "Row 12: how strongly the LoRA is applied. Negative values invert it, 0 skips the row without reading the file."
+      },
+      "on_12": {
+        "name": "On 12",
+        "tooltip": "Row 12: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "The model with every enabled row applied, in row order."
+      }
+    }
+  },
+  "🐈‍⬛StackLorasClip": {
+    "display_name": "Load LoRA Stack (Model and CLIP) 🐈‍⬛",
+    "description": "Apply several LoRAs to a MODEL and a CLIP in a single node — one row per LoRA with its own model strength, CLIP strength and on/off switch. Rows run top to bottom and match chaining Load LoRA (Model and CLIP) nodes, except the model and the CLIP are each cloned once instead of once per LoRA, off or empty rows are never read from disk, a side at strength 0 is not patched at all, loaded files are cached, and every row logs how many of its keys matched each side. Use the model-only Load LoRA Stack 🐈‍⬛ when the text encoder must not be touched.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "The diffusion model every enabled row is applied to."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "The text encoder every enabled row is applied to as well."
+      },
+      "lora_01": {
+        "name": "LoRA 1",
+        "tooltip": "Row 1: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_01": {
+        "name": "Model Strength 1",
+        "tooltip": "Row 1: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_01": {
+        "name": "CLIP Strength 1",
+        "tooltip": "Row 1: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_01": {
+        "name": "On 1",
+        "tooltip": "Row 1: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_02": {
+        "name": "LoRA 2",
+        "tooltip": "Row 2: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_02": {
+        "name": "Model Strength 2",
+        "tooltip": "Row 2: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_02": {
+        "name": "CLIP Strength 2",
+        "tooltip": "Row 2: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_02": {
+        "name": "On 2",
+        "tooltip": "Row 2: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_03": {
+        "name": "LoRA 3",
+        "tooltip": "Row 3: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_03": {
+        "name": "Model Strength 3",
+        "tooltip": "Row 3: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_03": {
+        "name": "CLIP Strength 3",
+        "tooltip": "Row 3: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_03": {
+        "name": "On 3",
+        "tooltip": "Row 3: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_04": {
+        "name": "LoRA 4",
+        "tooltip": "Row 4: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_04": {
+        "name": "Model Strength 4",
+        "tooltip": "Row 4: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_04": {
+        "name": "CLIP Strength 4",
+        "tooltip": "Row 4: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_04": {
+        "name": "On 4",
+        "tooltip": "Row 4: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_05": {
+        "name": "LoRA 5",
+        "tooltip": "Row 5: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_05": {
+        "name": "Model Strength 5",
+        "tooltip": "Row 5: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_05": {
+        "name": "CLIP Strength 5",
+        "tooltip": "Row 5: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_05": {
+        "name": "On 5",
+        "tooltip": "Row 5: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_06": {
+        "name": "LoRA 6",
+        "tooltip": "Row 6: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_06": {
+        "name": "Model Strength 6",
+        "tooltip": "Row 6: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_06": {
+        "name": "CLIP Strength 6",
+        "tooltip": "Row 6: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_06": {
+        "name": "On 6",
+        "tooltip": "Row 6: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_07": {
+        "name": "LoRA 7",
+        "tooltip": "Row 7: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_07": {
+        "name": "Model Strength 7",
+        "tooltip": "Row 7: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_07": {
+        "name": "CLIP Strength 7",
+        "tooltip": "Row 7: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_07": {
+        "name": "On 7",
+        "tooltip": "Row 7: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_08": {
+        "name": "LoRA 8",
+        "tooltip": "Row 8: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_08": {
+        "name": "Model Strength 8",
+        "tooltip": "Row 8: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_08": {
+        "name": "CLIP Strength 8",
+        "tooltip": "Row 8: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_08": {
+        "name": "On 8",
+        "tooltip": "Row 8: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_09": {
+        "name": "LoRA 9",
+        "tooltip": "Row 9: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_09": {
+        "name": "Model Strength 9",
+        "tooltip": "Row 9: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_09": {
+        "name": "CLIP Strength 9",
+        "tooltip": "Row 9: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_09": {
+        "name": "On 9",
+        "tooltip": "Row 9: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_10": {
+        "name": "LoRA 10",
+        "tooltip": "Row 10: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_10": {
+        "name": "Model Strength 10",
+        "tooltip": "Row 10: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_10": {
+        "name": "CLIP Strength 10",
+        "tooltip": "Row 10: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_10": {
+        "name": "On 10",
+        "tooltip": "Row 10: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_11": {
+        "name": "LoRA 11",
+        "tooltip": "Row 11: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_11": {
+        "name": "Model Strength 11",
+        "tooltip": "Row 11: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_11": {
+        "name": "CLIP Strength 11",
+        "tooltip": "Row 11: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_11": {
+        "name": "On 11",
+        "tooltip": "Row 11: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      },
+      "lora_12": {
+        "name": "LoRA 12",
+        "tooltip": "Row 12: the LoRA file to apply. Leave it at None to skip this row; rows run top to bottom."
+      },
+      "strength_model_12": {
+        "name": "Model Strength 12",
+        "tooltip": "Row 12: how strongly the LoRA is applied to the model. Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "strength_clip_12": {
+        "name": "CLIP Strength 12",
+        "tooltip": "Row 12: how strongly the LoRA is applied to the CLIP (text encoder). Negative values invert it; the row is skipped (without reading the file) only when every strength on it is 0."
+      },
+      "on_12": {
+        "name": "On 12",
+        "tooltip": "Row 12: switch this row on or off. Switching a row off skips it entirely — the file is not even opened."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "The model with every enabled row applied, in row order."
+      },
+      "1": {
+        "name": "clip",
+        "tooltip": "The CLIP with every enabled row applied, in row order."
+      }
+    }
   }
 }

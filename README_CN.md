@@ -2,7 +2,7 @@
 
 <p align="center"><strong>🇨🇳 中文</strong> ·<a href="README.md">🇺🇸 English</a></p>
 
-轻量级 ComfyUI 自定义节点，用于系统遥测与资源回收，外加 MiniMax H3 图/文生视频双阶段条件注入。
+轻量级 ComfyUI 自定义节点，用于系统遥测与资源回收，外加 MiniMax H3 图/文生视频双阶段条件注入，以及单节点内的多 LoRA 堆叠。
 
 ## 功能特性
 
@@ -11,6 +11,8 @@
 - MiniMax H3 采样辅助：`H3 Image to Video 🐈‍⬛`
 - `Any Switch 🐈‍⬛`：九路任意类型路由器，只转发真正携带数据的那一路，零路或多路同时有数据时报错——在上游切换分支即可，无需改线
 - 画布开关：`Group Control 🐈‍⬛`（整组开/关）与 `Node Control 🐈‍⬛`（单个节点开/关）——每行一个开关，可按颜色与名称关键词筛选
+- `LoRA 堆叠加载器（仅模型） 🐈‍⬛`：一个节点堆叠多个 LoRA——每行一个 LoRA，各自带强度与独立开关，自上而下依次生效；模型只克隆一次，关闭或空置的行不读盘，每行还会报出命中模型的键数
+- `LoRA 堆叠加载器 🐈‍⬛`：同一个堆叠，但同时打到 MODEL 与 CLIP 上（样式类 LoRA 需要文本编码器也看见它）；每行**模型强度与 CLIP 强度各一列**、互不影响，某一侧设 0 就等于只让另一侧生效，同样只克隆一次
 - 零第三方依赖（ctypes + nvidia-smi）
 - 节点名、描述与控件标签跟随 ComfyUI 界面语言自动切换（`locales/zh`、`locales/en`）
 
@@ -40,6 +42,15 @@
 **原理**：同一套面板往下探一层，每行是一个单独的画布节点而非组。关键词同时匹配节点标题**与类型**，多个关键词取「或」；未被上色的节点沿用其所在组的颜色，所以颜色筛选仍能一把捞起某个彩色组里的所有节点。便签、Reroute、Primitive 节点以及控制节点自身不会被列入。
 **用法**：用于那些始终没进组的零散节点——在设置里输入 `KSampler, 采样` 只保留这些行，再一并开/关。模式与绕过/禁用选择和 Group Control 一致；你拖出来的面板宽度会随工作流存档记住。
 
+### LoRA 堆叠加载器（仅模型） 🐈‍⬛
+**原理**：把若干个「LoRA加载器（仅模型）」压成一个节点——每行一个 LoRA，带自己的强度与开关，各行自上而下依次生效。结果与串联官方节点完全一致（补丁按同样顺序追加到同一份按层键表里），但模型**只克隆一次**，而不是每个 LoRA 克隆一次；关闭、空置或强度为 0 的行既不读盘也不打补丁；已加载的文件按「路径 + 修改时间」做小容量缓存，重跑不必重读；每行还会报出「命中该模型的键数 / LoRA 自身键数」，一眼看出某个 LoRA 吃不吃当前模型。
+**用法**：`model` 进、`model` 出，只处理模型，不涉及 CLIP。默认排 4 行，底部 **Add LoRA** 在末尾加一个空行，**Remove empty rows** 一次性清掉所有空槽——非空行保持原顺序向前压实，各自的强度与开关跟着一起走；如果一个都没选，就只留一行。最多 12 行。没用到的高号行会被隐藏，但**已经填了 LoRA 的行永远不会被隐藏**，所以屏幕上看不到的 LoRA 绝不会被应用。想临时停掉某一行，直接关它自己的开关即可。
+
+### LoRA 堆叠加载器 🐈‍⬛
+**原理**：和上面同一个堆叠，只是每行同时打到 **MODEL 与 CLIP** 上——样式类 LoRA 要让文本编码器也看见它，否则提示词还在描述旧风格；而「文本编码器该看多重」和「模型该看多重」本来就是两件事，所以每行给了两列强度。用一份键表同时覆盖两侧，模型与 CLIP **各自只克隆一次**（不是每个 LoRA 克隆一次），然后按行序分别叠加；关闭、空置的行依旧不读盘、不打补丁，**某一侧强度为 0 时那一侧完全不打补丁**（日志里记作 `-`，不会误读成「没命中」），两侧都为 0 才整行跳过。
+**用法**：`model` 与 `clip` 一起进、一起出，把它们分别接回采样器与文本编码链路即可。每行两列强度：**模型强度**（`Model Strength`）与 **CLIP 强度**（`CLIP Strength`），各自独立，与官方双输出节点一致；只想让模型生效就把 CLIP 强度设 0，反之亦然。行行为与仅模型版完全相同，只是每行多一列。
+
+
 ## 安装
 
 把整个 `ComfyUI-XXXXXLCatNodes` 文件夹复制到 `ComfyUI/custom_nodes/`，然后重启 ComfyUI。
@@ -58,17 +69,25 @@ ComfyUI/custom_nodes/
     │   ├── h3_image_to_video.py
     │   ├── any_switch.py
     │   ├── group_control.py
-    │   └── node_control.py
+    │   ├── node_control.py
+    │   ├── lora_rows.py       # 两个 LoRA 堆叠节点共用的行引擎（schema / 行读取 / 文件缓存）
+    │   ├── lora_stack.py      # 仅模型
+    │   └── lora_stack_clip.py  # 模型 + CLIP
     ├── locales/         # 前端文案，经 ComfyUI 核心 /i18n 路由下发
     │   ├── en/nodeDefs.json
     │   └── zh/nodeDefs.json
     ├── scripts/
-    │   └── check_locales.py   # 校验语言包与节点 schema 是否一致
+    │   ├── check_locales.py        # 校验语言包与节点 schema 是否一致
+    │   ├── test_lora_stack.py      # 两个 LoRA 堆叠节点后端：等价性（含两侧）/行选择/缓存
+    │   └── test_lora_stack_ui.mjs  # 两个堆叠节点前端：增行/清空空槽/隐藏/收高
     ├── pyproject.toml   # 节点元数据（被 ComfyUI-Manager 识别）
     └── web/
         ├── monitor.js        # 菜单栏遥测条 + 清理按钮（由 ComfyUI 自动加载）
         ├── group_control.js  # 组控制 🐈‍⬛ 的面板
         ├── node_control.js   # 节点控制 🐈‍⬛ 的面板
+        ├── lora_rows.js      # 两个 LoRA 堆叠节点共用的行引擎
+        ├── lora_stack.js     # 仅模型版：登记到共用引擎
+        ├── lora_stack_clip.js# 模型 + CLIP 版：登记到共用引擎
         └── any_switch.js     # 任意切换 🐈‍⬛ 的动态端口
 ```
 
@@ -80,7 +99,7 @@ ComfyUI/custom_nodes/
 
 ## 注意事项
 
-- 全部六个节点均基于新 **V3 节点 API**（`comfy_api` / `io.ComfyNode`）实现，通过 `comfy_entrypoint()` 注册（与官方 MiniMax H3 节点同模式）。需要较新的、自带 `comfy_api` 的 ComfyUI——旧版没有它的构建会无法加载本包。
+- 全部八个节点均基于新 **V3 节点 API**（`comfy_api` / `io.ComfyNode`）实现，通过 `comfy_entrypoint()` 注册（与官方 MiniMax H3 节点同模式）。需要较新的、自带 `comfy_api` 的 ComfyUI——旧版没有它的构建会无法加载本包。
 - 清理按钮通过 `/prompt` 在 ComfyUI 进程内运行，效果即时（非延迟标志）
 - 裁剪系统文件缓存进行内存清理需要管理员权限；失败时静默跳过，不影响其余清理
 
