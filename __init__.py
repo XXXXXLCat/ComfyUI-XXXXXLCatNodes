@@ -10,18 +10,22 @@ subprocess. Nothing like psutil is pulled in.
 - Front-end strings (node names, descriptions, widget labels and tooltips) are
   localised through ``locales/<lang>/nodeDefs.json``, picked up by the core
   ``/i18n`` route, so they follow the language selected in ComfyUI.
-- Eight custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
+- Ten custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
   🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
-  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/lora): all built on the new V3 node API
+  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/lora, 🐈‍⬛XXXXXLCat/text,
+  🐈‍⬛XXXXXLCat/utilities): all built on the new V3 node API
   (comfy_api / io.ComfyNode) — Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛,
   H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛, Group Control 🐈‍⬛,
-  Node Control 🐈‍⬛, Load LoRA Stack 🐈‍⬛, and
-  Load LoRA Stack (Model and CLIP) 🐈‍⬛.
+  Node Control 🐈‍⬛, Load LoRA Stack 🐈‍⬛,
+  Load LoRA Stack (Model and CLIP) 🐈‍⬛, Generate Text 🐈‍⬛ (the
+  official text-generation node, with a multi-image socket), and
+  Resolution Selector 🐈‍⬛ (the official resolution node, with a 2-decimal
+  megapixel step).
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
 This file is only the entry point: it prints the banner, imports those modules,
-and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 8 V3 nodes).
+and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 9 V3 nodes).
 """
 
 import os
@@ -54,6 +58,8 @@ from .nodes import (  # noqa: E402
     XXXXXLCatNodeControl,
     XXXXXLCatStackLoras,
     XXXXXLCatStackLorasClip,
+    XXXXXLCatTextGenerate,
+    XXXXXLCatResolutionSelector,
 )
 
 
@@ -79,6 +85,8 @@ _NODE_CLASSES = [
     XXXXXLCatNodeControl,
     XXXXXLCatStackLoras,
     XXXXXLCatStackLorasClip,
+    XXXXXLCatTextGenerate,
+    XXXXXLCatResolutionSelector,
 ]
 
 

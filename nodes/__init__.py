@@ -9,6 +9,8 @@ from .group_control import XXXXXLCatGroupControl
 from .node_control import XXXXXLCatNodeControl
 from .lora_stack import XXXXXLCatStackLoras
 from .lora_stack_clip import XXXXXLCatStackLorasClip
+from .text_generate import XXXXXLCatTextGenerate
+from .resolution_selector import XXXXXLCatResolutionSelector
 
 __all__ = [
     "XXXXXLCatVRAMSweep",
@@ -19,4 +21,6 @@ __all__ = [
     "XXXXXLCatNodeControl",
     "XXXXXLCatStackLoras",
     "XXXXXLCatStackLorasClip",
+    "XXXXXLCatTextGenerate",
+    "XXXXXLCatResolutionSelector",
 ]

@@ -586,5 +586,133 @@
         "tooltip": "The CLIP with every enabled row applied, in row order."
       }
     }
+  },
+  "🐈‍⬛TextGenerate": {
+    "display_name": "Generate Text 🐈‍⬛",
+    "description": "The official Generate Text node with a multi-image socket: same text encoder, prompt, video, audio, max length, sampling panel and output, but the image slot accepts several images and the encoder reads all of them in one pass. Frames are scaled to fit a shared canvas and padded, never stretched or enlarged.",
+    "inputs": {
+      "clip": {
+        "name": "clip",
+        "tooltip": "The text encoder / multimodal model that reads the prompt and the media."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "What to ask about the connected media."
+      },
+      "images": {
+        "name": "images",
+        "tooltip": "The image input of the official node, repeatable: connect as many images as you need and the encoder reads them in the same generation. Order follows the socket number. A video takes precedence over images, exactly as on the official node."
+      },
+      "video": {
+        "name": "video",
+        "tooltip": "Video frames as image batch. Assumed to be 24 FPS; subsampled to 1 FPS internally."
+      },
+      "audio": {
+        "name": "audio",
+        "tooltip": "Audio for the encoder to listen to."
+      },
+      "max_length": {
+        "name": "max_length",
+        "tooltip": "Maximum tokens to generate."
+      },
+      "sampling_mode": {
+        "name": "Sampling Mode",
+        "tooltip": "Sampling on: sample with the settings below. Sampling off: greedy, always the same answer."
+      },
+      "temperature": {
+        "name": "Temperature",
+        "tooltip": "Sampling temperature. Higher is more random, lower is more deterministic. 0.7 is a balanced default."
+      },
+      "top_k": {
+        "name": "Top-K",
+        "tooltip": "Limit sampling to the K most likely next tokens. 0 disables the cap."
+      },
+      "top_p": {
+        "name": "Top-P",
+        "tooltip": "Nucleus sampling: only consider tokens whose cumulative probability reaches this cutoff."
+      },
+      "min_p": {
+        "name": "Min-P",
+        "tooltip": "Minimum probability floor (relative to the most likely token) a token must exceed to be sampled."
+      },
+      "repetition_penalty": {
+        "name": "Repetition Penalty",
+        "tooltip": "Penalizes repeated tokens to discourage loops. 1.0 = no penalty."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "Random seed for reproducible sampling. 0 = random each run."
+      },
+      "presence_penalty": {
+        "name": "Presence Penalty",
+        "tooltip": "Penalizes tokens by whether they have appeared at all, encouraging new topics."
+      },
+      "thinking": {
+        "name": "thinking",
+        "tooltip": "Operate in thinking mode if the model supports it."
+      },
+      "use_default_template": {
+        "name": "use_default_template",
+        "tooltip": "Use the built in system prompt/template if the model has one."
+      },
+      "mtp": {
+        "name": "mtp",
+        "tooltip": "Speculative decoding with the checkpoint's multi-token-prediction head. No effect without MTP weights. auto adapts the draft depth; 2-5 pins it. Sampled output stays correctly distributed but differs from non-MTP output for the same seed."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "generated_text",
+        "tooltip": "What the model wrote about the prompt and the media."
+      }
+    }
+  },
+  "🐈‍⬛ResolutionSelector": {
+    "display_name": "Resolution Selector 🐈‍⬛",
+    "description": "Calculate width and height from aspect ratio and megapixel target, with the megapixel target adjustable in steps of 0.01 (two decimal places) instead of the official node's 0.1. Useful for setting up Empty Latent Image dimensions. Pick the 'Custom' aspect ratio to enter an explicit width and height instead of a megapixel target; the megapixel input is hidden while Custom is selected. Otherwise identical to the official Resolution Selector: same aspect ratios, live resolution preview, and nearest-multiple rounding of the result.",
+    "inputs": {
+      "aspect_ratio": {
+        "name": "Aspect Ratio",
+        "tooltip": "The aspect ratio for the output dimensions. Choose 'Custom' to set an explicit width and height."
+      },
+      "megapixels": {
+        "name": "Megapixels",
+        "tooltip": "Target total megapixels, adjustable to two decimal places (0.01 steps). 1.0 MP ≈ 1024x1024 for square. Ignored — and hidden — when the aspect ratio is 'Custom'."
+      },
+      "preview": {
+        "name": "Preview",
+        "tooltip": "Live preview of the calculated output resolution, including Custom mode."
+      },
+      "multiple": {
+        "name": "Multiple",
+        "tooltip": "Nearest multiple of the result to set the selected resolution to."
+      },
+      "custom_width": {
+        "name": "Width",
+        "tooltip": "Custom output width in pixels (rounded to the nearest multiple)."
+      },
+      "custom_height": {
+        "name": "Height",
+        "tooltip": "Custom output height in pixels (rounded to the nearest multiple)."
+      },
+      "preview_ratio": {
+        "name": "Preview Ratio",
+        "tooltip": "Internal: the ratio the resolution preview reads. Hidden; kept in step with the aspect ratio by the node itself."
+      },
+      "preview_megapixels": {
+        "name": "Preview Megapixels",
+        "tooltip": "Internal: the megapixel value the resolution preview reads. Hidden; kept in step with the aspect ratio by the node itself."
+      }
+    },
+  "outputs": {
+      "0": {
+        "name": "width",
+        "tooltip": "Calculated width in pixels multiplied by the selected multiple."
+      },
+      "1": {
+        "name": "height",
+        "tooltip": "Calculated height in pixels multiplied by the selected multiple."
+      }
+    }
   }
 }
