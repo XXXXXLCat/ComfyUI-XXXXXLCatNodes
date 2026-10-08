@@ -45,6 +45,21 @@ spec.loader.exec_module(m)
 ext = asyncio.run(m.comfy_entrypoint())
 schemas = [N.define_schema() for N in asyncio.run(ext.get_node_list())]
 
+
+def collect_input_ids(schema):
+    """Top-level inputs plus any DynamicCombo sub-inputs (regular Combo options
+    are plain strings, so they are skipped automatically)."""
+    ids = set()
+    for i in schema.inputs or []:
+        ids.add(i.id)
+        for opt in getattr(i, "options", None) or []:
+            sub_inputs = getattr(opt, "inputs", None)
+            if sub_inputs:
+                for sub in sub_inputs:
+                    ids.add(sub.id)
+    return ids
+
+
 problems = []
 locales_dir = os.path.join(PKG_ROOT, "locales")
 langs = sorted(d for d in os.listdir(locales_dir) if os.path.isdir(os.path.join(locales_dir, d)))
@@ -74,16 +89,17 @@ for lang in langs:
             problems.append(f"[{lang}] {s.node_id}: description 无效")
 
         ins = entry.get("inputs") or {}
-        for i in s.inputs or []:
-            slot = ins.get(i.id)
+        input_ids = collect_input_ids(s)
+        for iid in input_ids:
+            slot = ins.get(iid)
             if slot is None:
-                problems.append(f"[{lang}] {s.node_id}: 缺少输入 {i.id!r}")
+                problems.append(f"[{lang}] {s.node_id}: 缺少输入 {iid!r}")
                 continue
             if not isinstance(slot.get("name"), str) or not slot["name"]:
-                problems.append(f"[{lang}] {s.node_id}.{i.id}: name 无效")
+                problems.append(f"[{lang}] {s.node_id}.{iid}: name 无效")
             if not isinstance(slot.get("tooltip"), str) or not slot["tooltip"]:
-                problems.append(f"[{lang}] {s.node_id}.{i.id}: tooltip 无效")
-        for extra in set(ins) - {i.id for i in s.inputs or []}:
+                problems.append(f"[{lang}] {s.node_id}.{iid}: tooltip 无效")
+        for extra in set(ins) - input_ids:
             problems.append(f"[{lang}] {s.node_id}: 多余输入 {extra!r}")
 
         outs = entry.get("outputs") or {}
