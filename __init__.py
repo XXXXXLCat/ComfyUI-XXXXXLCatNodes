@@ -81,6 +81,16 @@ _NODE_CLASSES = [
 
 
 async def comfy_entrypoint() -> XXXXXLCatExtension:
+    # Per-user password auth gate — must be installed BEFORE the asset-isolation
+    # patches so the validated user id feeds input/<user>/ & output/<user>/.
+    # Only active when ComfyUI is launched with --multi-user.
+    try:
+        from .nodes import multi_user_auth
+
+        multi_user_auth.install()
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[XXXXXLCat] multi-user password auth skipped: {exc}")
+
     # Per-user asset isolation (input/<user>/ & output/<user>/) — only when
     # ComfyUI is launched with --multi-user. No-op (and zero impact) otherwise.
     try:

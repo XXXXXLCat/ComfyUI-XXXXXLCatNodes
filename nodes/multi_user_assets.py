@@ -37,6 +37,8 @@ import logging
 import os
 from typing import Optional
 
+from aiohttp import web
+
 logger = logging.getLogger("XXXXXLCat.multi_user_assets")
 
 # Carries the active user id for the current request / execution.
@@ -241,8 +243,20 @@ def _user_from_request(request) -> Optional[str]:
         return None
 
 
+def _auth_user() -> Optional[str]:
+    """Return the password-authenticated user id, if the auth module is active."""
+    try:
+        from .multi_user_auth import _XAUTH_USER
+    except Exception:
+        return None
+    return _XAUTH_USER.get()
+
+
+@web.middleware
 async def _user_middleware(request, handler):
-    user = _user_from_request(request)
+    # Prefer the password-authenticated identity published by multi_user_auth;
+    # only fall back to the (spoofable) comfy-user header when auth is absent.
+    user = _auth_user() or _user_from_request(request)
     token = _XUSER.set(user)
     try:
         return await handler(request)

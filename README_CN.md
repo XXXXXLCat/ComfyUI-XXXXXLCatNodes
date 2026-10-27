@@ -15,6 +15,7 @@
 - 零第三方依赖（ctypes + nvidia-smi）
 - 节点名、描述与控件标签跟随 ComfyUI 界面语言自动切换（`locales/zh`、`locales/en`）
 - **多用户资产隔离**（服务端功能，`--multi-user` 下自动启用）：`input/` 与 `output/` 变为 `input/<user>` / `output/<user>`，每个用户的上传与生成物相互独立；原有的全局 `input/` / `output/` 保留为可读的共享池
+- **多用户密码登录**（服务端功能，`--multi-user` 下自动启用）：在 ComfyUI 原本「只有 `comfy-user` 头、无密码」的多用户模式之上加一层真正的密码门禁。每个账号各自设密码，登录后服务端用 HttpOnly Cookie 维持会话；前端自动弹出登录遮罩。与资产隔离配合后，A 的密码打不开 B 的资产
 
 ## 多用户资产隔离
 
@@ -26,6 +27,36 @@
 - 普通单用户启动下完全无害（`install()` 在 `--multi-user` 关闭时直接返回），不会影响非多用户环境。
 
 > 实现说明：本功能改写 `folder_paths.get_input_directory` / `get_output_directory`（返回每用户子目录）、`get_annotated_filepath` / `exists_annotated_filepath`（共享池回退）、`LoadImage.INPUT_TYPES`（选择器合并）、`/view` 路由（回退）；并加装 aiohttp 中间件（把 `comfy-user` 头写入上下文）、改写 `PromptServer.trigger_on_prompt`（把用户写入 `extra_data`）与 `PromptExecutor.execute_async`（执行期恢复用户上下文）。每个补丁都包了 `try/except`，若未来 ComfyUI 版本挪动了被改写的符号，会自动回退到官方行为。
+
+## 多用户密码登录
+
+ComfyUI 的 `--multi-user` 仅靠 `comfy-user` 请求头区分用户，其值是 `users.json` 里的 UUID——**没有任何密码**，谁拿到 id 谁就能冒用该用户。本功能在其之上加一层密码门禁。无需添加任何节点——同样是启动时自动安装的服务端补丁 + 一个前端登录遮罩（`web/multi_user_auth.js`）。
+
+- **每个账号独立密码**：密码以 PBKDF2-HMAC-SHA256（每用户随机盐）哈希后存于 `user/user_passwords.json`（与官方 `users.json` 同目录），明文密码绝不落盘。
+- **会话用 HttpOnly Cookie 维持**：登录成功后服务端下发签名令牌（`xcat_token`，HMAC 防篡改、默认 30 天有效）写入 HttpOnly Cookie。因为 Cookie 同源于 ComfyUI，浏览器会**自动**把它附在后续每个 `fetch` 与 WebSocket 握手上——前端无需改动 API 客户端。
+- **登录遮罩**：前端加载后若未登录，会弹出深色中性风格的登录框（用户名 + 密码），也可切换到「新建账号」直接带密码注册。登录成功后记住 ComfyUI 用户并刷新页面。
+- **门禁范围**：除登录 / 状态 / 登出 / 注册接口、前端静态资源（`/`、`/index.html`、`/extensions/`、`*.js|css|...`）与 `OPTIONS` 预检外，**所有路由都要求有效会话**——`/prompt`、`/view`、`/history`、`/ws`、`/users` 读取、用户设置与工作流等无一例外。未带 Cookie 一律 `401`。
+- **与资产隔离联动**：登录后的用户身份会覆盖 `comfy-user` 头，成为 `input/<user>/` `output/<user>/` 隔离的依据，因此 A 的密码既进不了 B 的登录，也读不到 B 的资产。
+
+### 迁移路径（重要）
+
+- **全新账号**：注册时即要求密码，登录必须正确密码。
+- **历史无密码账号**（本功能启用前已存在的）：允许先用**空密码**登录一次，登录后立刻在「新建账号/改密」里设置密码；设过后空密码即失效。也可让管理员用下方接口统一设置。
+- **管理员引导设置**（可选）：在 `user/auth_config.json` 里放 `"admin_password": "你的管理员密码"`，即可调用 `POST /xcat/admin/set_password`（`{admin_password, user_id, password}`）为任意账号设密码，适合批量把老账号锁上密码。
+- 会话有效期等可在 `user/auth_config.json` 用 `"token_ttl_seconds"` 调整。
+
+### 接口一览（均位于 `/xcat/` 下）
+
+| 方法 & 路径 | 说明 |
+| --- | --- |
+| `POST /xcat/register` | 带密码新建账号 `{username, password}` |
+| `POST /xcat/login` | 用户名 + 密码登录，下发 Cookie |
+| `GET  /xcat/auth_status` | 当前请求是否已登录（前端遮罩据此判断） |
+| `POST /xcat/set_password` | 修改自己密码（需先登录；若已设密码则需旧密码） |
+| `POST /xcat/admin/set_password` | 管理员为任意账号设密码（需 `admin_password`） |
+| `POST /xcat/logout` | 清除 Cookie |
+
+> 单用户启动下本功能完全不启用，`/xcat/*` 路由不存在，前端遮罩检测到 404 会自动隐藏，行为与官方一致。
 
 ## 节点详解
 

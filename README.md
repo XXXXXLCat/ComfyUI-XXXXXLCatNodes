@@ -15,6 +15,7 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
 - **Per-user asset isolation** (server-side, auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>` / `output/<user>` so each user's uploads and generations are private; the pre-existing global `input/` / `output/` stays readable as a shared pool
+- **Per-user password login** (server-side, auto-enabled under `--multi-user`): a real password gate on top of ComfyUI's header-only multi-user mode, where each account has its own password and the session is kept in an HttpOnly cookie; a frontend login overlay is provided automatically. Combined with asset isolation, A's password cannot open B's assets
 
 ## Multi-user asset isolation
 
@@ -40,6 +41,54 @@ ComfyUI already separates. No node to add — it is a server-side patch installe
 > `extra_data`), and `PromptExecutor.execute_async` (restore user for execution). Every patch
 > is wrapped in `try/except` and degrades to the official behaviour if a future ComfyUI version
 > moves a patched symbol.
+
+## Multi-user password login
+
+ComfyUI's `--multi-user` distinguishes users solely by the `comfy-user` request header, whose
+value is a UUID from `users.json` — **there is no password**, so anyone who obtains an id can
+impersonate that user. This feature adds a real password gate on top. No node to add — it is a
+server-side patch plus a frontend login overlay (`web/multi_user_auth.js`).
+
+- **Per-account passwords**, hashed with PBKDF2-HMAC-SHA256 and a per-user random salt, stored in
+  `user/user_passwords.json` (next to the official `users.json`). Plaintext is never persisted.
+- **Cookie-based sessions**: on login the server issues a signed token (`xcat_token`, HMAC-signed,
+  30-day TTL by default) as an HttpOnly cookie. Because the cookie is same-origin, the browser
+  automatically attaches it to every later `fetch` *and* WebSocket handshake — no API-client
+  patching required.
+- **Login overlay**: when the frontend loads unauthenticated, a dark neutral login box appears
+  (username + password), with a "create account" mode that registers with a password. On success
+  it remembers the ComfyUI user and reloads.
+- **Gate scope**: everything except the login/status/logout/register endpoints, the frontend
+  static assets (`/`, `/index.html`, `/extensions/`, `*.js|css|...`) and `OPTIONS` preflight
+  requires a valid session — `/prompt`, `/view`, `/history`, `/ws`, `/users` reads, settings and
+  workflows included. Requests without the cookie get `401`.
+- **Tied to asset isolation**: the authenticated identity overrides the `comfy-user` header and
+  drives `input/<user>/` / `output/<user>/`, so A's password neither logs into B nor reads B's
+  assets.
+
+### Migration path
+
+- **New accounts** require a password at registration and on every login.
+- **Legacy passwordless accounts** (created before this feature) may log in **once with an empty
+  password**, then set a password via `POST /xcat/set_password`; afterwards the empty password no
+  longer works. An admin can instead set passwords for all accounts via the endpoint below.
+- **Admin bootstrap** (optional): put `"admin_password": "..."` in `user/auth_config.json`, then
+  call `POST /xcat/admin/set_password` with `{admin_password, user_id, password}` for any account.
+- Session lifetime is adjustable via `"token_ttl_seconds"` in `user/auth_config.json`.
+
+### Endpoints (all under `/xcat/`)
+
+| Method & path | Purpose |
+| --- | --- |
+| `POST /xcat/register` | Create an account with a password `{username, password}` |
+| `POST /xcat/login` | Username + password; sets the session cookie |
+| `GET  /xcat/auth_status` | Whether the current request is authenticated |
+| `POST /xcat/set_password` | Change your own password (login required; old password if set) |
+| `POST /xcat/admin/set_password` | Admin sets any account's password (needs `admin_password`) |
+| `POST /xcat/logout` | Clear the cookie |
+
+> In a single-user launch the feature is entirely off: no `/xcat/*` routes exist, and the overlay
+> hides itself on a 404, so behaviour matches vanilla ComfyUI.
 
 ## Node reference
 
