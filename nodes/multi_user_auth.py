@@ -24,10 +24,13 @@ Design
       optional ``admin_password`` from ``auth_config.json``).
     * ``GET  /xcat/auth_status``  is the current request authenticated?
     * ``POST /xcat/logout``    clears the cookie.
-* **Middleware** rejects every non-public request that lacks a valid cookie.
-  Public routes are limited to the login/status/logout/register endpoints, the
-  frontend static assets, and ``OPTIONS`` preflight — everything else (``/prompt``,
-  ``/view``, ``/history``, ``/ws``, ``/users`` reads, ...) requires a session.
+* **Middleware** rejects every request that lacks a valid cookie, except the
+  auth endpoints, ``OPTIONS`` preflight and genuine static file mounts
+  (``web.static``: the app shell, ``/assets/``, ``/extensions`` — the extension
+  list itself has to stay reachable or the login overlay could never load).
+  Everything else (``/prompt``, ``/view``, ``/userdata``, ``/history``, ``/ws``,
+  ``/users``, ...) requires a session, including paths that merely *look*
+  static such as ``/api/userdata/user.css``.
 
 The validated user id is published through the ``_XAUTH_USER`` contextvar so the
 sibling ``multi_user_assets`` module isolates ``input/`` & ``output/`` for the
@@ -65,14 +68,31 @@ _ROUTES_DONE = False
 # Default session lifetime (30 days) — overridable via auth_config.json.
 _DEFAULT_TTL = 30 * 24 * 3600
 
-# Static asset extensions that may be served without a session (the app shell,
-# custom-node web bundles, locales, etc.). Anything with a real API path and no
-# extension stays protected.
+# Auth endpoints a browser must reach *before* it has a session.
+_AUTH_PUBLIC = (
+    "/xcat/login", "/xcat/register", "/xcat/auth_status", "/xcat/logout",
+)
+
+# Static mounts served by ``web.static`` before login. ``/extensions`` (the
+# JSON list of custom-node scripts) must be public too — otherwise the frontend
+# can never load the login overlay itself and the instance locks itself out.
+_STATIC_PREFIXES = (
+    "/assets/", "/extensions", "/customnode/", "/templates/", "/docs/",
+    "/scripts/", "/locales/", "/favicon.ico",
+)
+
+# Fallback only: used when aiohttp does not expose the matched resource.
 _STATIC_EXT = {
     ".js", ".css", ".html", ".htm", ".svg", ".ico", ".woff", ".woff2",
     ".ttf", ".eot", ".map", ".json", ".png", ".jpg", ".jpeg", ".gif",
     ".webp", ".bmp",
 }
+
+# Namespaces that reach user data / runtime state and must never be treated as
+# static just because the path happens to end in ``.css`` / ``.json`` (e.g.
+# ``/api/userdata/user.css``).
+_PROTECTED_PREFIXES = ("/api/", "/userdata", "/view", "/prompt", "/history",
+                       "/queue", "/settings", "/users", "/upload/")
 
 
 # ---------------------------------------------------------------- helpers
@@ -265,22 +285,48 @@ def _authenticated_user(request) -> Optional[str]:
 
 # ---------------------------------------------------------------- public check
 
-def _is_public(method: str, path: str) -> bool:
+def _route_is_static(request) -> Optional[bool]:
+    """True when the matched route is a ``web.static`` mount, ``None`` if unknown.
+
+    aiohttp resolves the route *before* middlewares run, so ``match_info.route``
+    tells us precisely whether a request will be served as a file or by a real
+    API handler. That is far safer than guessing from the path's file extension:
+    ``/api/userdata/user.css`` ends in ``.css`` but is a dynamic handler that
+    needs a user.
+    """
+    try:
+        from aiohttp.web_urldispatcher import StaticResource
+
+        route = request.match_info.route
+        resource = getattr(route, "resource", None)
+        if resource is None:
+            return None
+        return isinstance(resource, StaticResource)
+    except Exception:
+        return None
+
+
+def _is_public(request) -> bool:
+    method = request.method
+    path = request.path
     if method == "OPTIONS":
         return True
     if path in ("/", "/index.html"):
         return True
-    if path.startswith(("/xcat/login", "/xcat/auth_status", "/xcat/logout",
-                         "/xcat/register", "/extensions/", "/assets/")):
+    if path.startswith(_AUTH_PUBLIC):
         return True
-    # Open account registration (POST only) so a fresh install can bootstrap.
-    if method == "POST" and path == "/users":
+    if path.startswith(_STATIC_PREFIXES):
         return True
-    # Static frontend / custom-node assets.
-    ext = os.path.splitext(path)[1].lower()
-    if ext in _STATIC_EXT:
-        return True
-    return False
+
+    static = _route_is_static(request)
+    if static is not None:
+        return static
+
+    # Fallback (aiohttp internals unavailable): only extension-looking paths
+    # outside the user-data / API namespaces may go unauthenticated.
+    if path.startswith(_PROTECTED_PREFIXES):
+        return False
+    return os.path.splitext(path)[1].lower() in _STATIC_EXT
 
 
 # ---------------------------------------------------------------- middleware
@@ -290,7 +336,7 @@ async def _auth_middleware(request, handler):
     uid = _authenticated_user(request)
     token = _XAUTH_USER.set(uid)
     try:
-        if _is_public(request.method, request.path):
+        if _is_public(request):
             return await handler(request)
         if uid is None:
             return web.json_response({"error": "unauthorized"}, status=401)
@@ -460,12 +506,35 @@ def _install_user_manager() -> None:
     orig = UserManager.get_request_user_id
 
     def _patched(self, request):
+        users = getattr(self, "users", None) or {}
+
         au = _XAUTH_USER.get()
-        if au is not None:
-            if au in getattr(self, "users", {}):
-                return au
-            raise KeyError("Unknown user: " + au)
-        return orig(self, request)
+        if au is not None and au in users:
+            return au
+
+        # Official behaviour, except that a hard "default" lookup failure must
+        # not turn into a 500. In --multi-user mode ComfyUI defaults the id to
+        # "default" whenever the request carries no ``comfy-user`` header, but
+        # that id does not exist in users.json — a plain <link>/<img> request, or
+        # any custom node calling a user-scoped route, would explode with
+        # ``KeyError: 'Unknown user: default'``.
+        try:
+            uid = orig(self, request)
+        except KeyError:
+            uid = None
+        if uid in users:
+            return uid
+
+        header_uid = request.headers.get("comfy-user")
+        if header_uid in users:
+            return header_uid
+
+        # Single-account installs: nothing to disambiguate, so serve that user
+        # instead of failing. With several accounts, report "no user" (handlers
+        # answer 403) rather than guessing and leaking another account's data.
+        if len(users) == 1:
+            return next(iter(users))
+        return None
 
     if getattr(UserManager.get_request_user_id, "_xcat_wrapped", False):
         return
