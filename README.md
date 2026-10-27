@@ -20,12 +20,8 @@ A small set of ComfyUI custom nodes, plus three interface features (menu-bar mon
 
 - **Menu-bar monitor**: CPU / RAM / GPU utilization / VRAM / temperature, refreshed every 0.5s, with one-tap **VRAM Cleanup** and **RAM Cleanup** buttons on the left. Hovering shows used/total and the VRAM session peak.
 - **History Gallery** (sidebar tab): lists **every** file under `output/`, not just what the current session produced — earlier batches, files copied in by hand, videos written by custom nodes all show up.
-  - Three view modes: list / small grid / large grid. Filter by All · Images · Videos · Audio · Other, and search by filename live.
-  - Every kind renders: images fit their long edge (never cropped), video shows a real first frame, audio draws its real waveform and plays right in the tile, text prints its opening lines, 3D models fall back to a glyph. Hovering scales the thumbnail slightly.
-  - Clicking opens a lightbox: zoom images, play video/audio, "open in new tab" and "download". Read-only — nothing here deletes, renames or moves.
 - **Per-user asset isolation** (auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>/` and `output/<user>/`, so each user's uploads and generations are private; the pre-existing global folders stay readable as a shared pool.
 - **Per-user password login** (auto-enabled under `--multi-user`): every account needs a password, stored hashed with the session kept in an HttpOnly cookie. Opening any page while signed out returns the login page, and accounts can be created there. Signing out really signs out, and ComfyUI's "pick a username to switch" route is closed — entering another account requires its password.
-- **Interface language**: node names, descriptions and widget labels follow the ComfyUI interface language (Chinese / English); other Chinese variants such as `zh-TW` reuse the Chinese bundle instead of falling back to English.
 
 ## Installation
 
