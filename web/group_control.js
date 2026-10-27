@@ -79,7 +79,7 @@ function stateOf(nodes) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.GroupControl",
-  settingsLabel: pick({ zh: `${BRAND} 组控制设置`, en: `${BRAND} Group Control Settings` }),
+  settingsLabel: () => pick({ zh: `${BRAND} 组控制设置`, en: `${BRAND} Group Control Settings` }),
   build(node) {
     return createControlPanel(node, {
       store: STORE,

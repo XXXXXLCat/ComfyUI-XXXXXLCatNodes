@@ -1,27 +1,85 @@
 /* Shared zh/en lookup for the 🐈‍⬛ front-end panels.
 
-   ComfyUI's own language list has no `zh-CN`: Simplified Chinese is the `zh`
-   bundle, Traditional is `zh-TW`. Anything that is not Chinese falls back to
-   English, which is also what the node bundles do server-side.
+   The language comes from ComfyUI's own `Comfy.Locale` **setting** — that is the
+   only authoritative source: the current frontend keeps settings on the server
+   (`/api/settings`), and `localStorage["Comfy.Locale"]` is a leftover from older
+   versions that is never updated (it can hold a stale "zh" while the UI runs in
+   English). So: setting first, localStorage / <html lang> / navigator only as
+   fallbacks for the first paint or an older frontend.
+
+   ComfyUI's language list has no `zh-CN`: Simplified Chinese is `zh`, Traditional
+   is `zh-TW`. Anything that starts with `zh` is treated as Chinese, matching the
+   server-side `locale_alias.py` that fills `zh-TW` from the `zh` bundle.
 
    The language never changes at runtime (ComfyUI reloads the page when the
-   setting changes), so the value is resolved once and cached.
+   setting changes), so the value is resolved once and cached — but only when it
+   came from a real source, never from a guess made before `app` was ready.
 */
+
+import { app } from "../../scripts/app.js";
 
 let _lang = null;
 
+function norm(value) {
+    return String(value || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function fromSetting() {
+    try {
+        const value = app?.extensionManager?.setting?.get?.("Comfy.Locale");
+        if (value) return value;
+    } catch {
+        /* extensionManager not ready */
+    }
+    try {
+        const value = app?.ui?.settings?.getSettingValue?.("Comfy.Locale");
+        if (value) return value;
+    } catch {
+        /* legacy settings API gone */
+    }
+    return "";
+}
+
+function fromStorage() {
+    try {
+        // `xcat.locale` is written by us from the real setting, so it beats the
+        // stale `Comfy.Locale` key older frontends used to keep in sync.
+        return localStorage.getItem("xcat.locale") || localStorage.getItem("Comfy.Locale") || "";
+    } catch {
+        return "";
+    }
+}
+
+/* Last locale we rendered in, kept for the server-rendered login page: that page
+   is served before sign-in, so `/api/settings` is out of reach there. */
+function remember(lang) {
+    try {
+        localStorage.setItem("xcat.locale", lang);
+    } catch {
+        /* private mode */
+    }
+}
+
 export function langCode() {
     if (_lang) return _lang;
-    let probe = "";
-    try {
-        probe = localStorage.getItem("Comfy.Locale") || "";
-    } catch {
-        probe = "";
+
+    const setting = fromSetting();
+    if (setting) {
+        _lang = norm(setting);
+        remember(_lang);
+        return _lang;
     }
-    if (!probe) probe = document.documentElement?.lang || "";
-    if (!probe) probe = navigator.language || "";
-    _lang = String(probe).toLowerCase().startsWith("zh") ? "zh" : "en";
-    return _lang;
+
+    const stored = fromStorage();
+    if (stored) {
+        _lang = norm(stored);
+        remember(_lang);
+        return _lang;
+    }
+
+    // Nothing definitive yet (module imported before the settings loaded) — do
+    // not cache, so the next call can still pick up the real setting.
+    return norm(document.documentElement?.lang || navigator.language || "");
 }
 
 /* `pick({ zh, en })` → the string for the current language. Plain strings pass

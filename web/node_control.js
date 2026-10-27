@@ -71,7 +71,7 @@ function groupTint(n, groups) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.NodeControl",
-  settingsLabel: pick({ zh: `${BRAND} 节点控制设置`, en: `${BRAND} Node Control Settings` }),
+  settingsLabel: () => pick({ zh: `${BRAND} 节点控制设置`, en: `${BRAND} Node Control Settings` }),
   build(node) {
     return createControlPanel(node, {
       store: STORE,

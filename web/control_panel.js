@@ -264,7 +264,9 @@ export function registerControl({ nodeId, name, settingsLabel, build }) {
       nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
         const out = baseMenu ? baseMenu.apply(this, arguments) : undefined;
         options.unshift({
-          content: settingsLabel,
+          // Resolved here, not at module load: extensions may be imported before
+          // the settings store is ready, and the menu is built on demand.
+          content: typeof settingsLabel === "function" ? settingsLabel() : settingsLabel,
           callback: () => {
             if (this._ctl) this._ctl.openSettings();
           },

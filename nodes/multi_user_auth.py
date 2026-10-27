@@ -405,7 +405,11 @@ _LOGIN_PAGE = """<!doctype html>
   // The ComfyUI locale setting wins (same origin, so it is readable before the
   // app boots); otherwise fall back to the browser's own language.
   var loc = "";
-  try { loc = localStorage.getItem("Comfy.Locale") || ""; } catch (e) {}
+  // xcat.locale is written by the web/i18n.js helper from the real Comfy.Locale
+  // setting; settings live server-side now, so localStorage["Comfy.Locale"] is
+  // only a legacy fallback here (and unavailable pre-login anyway).
+  try { loc = localStorage.getItem("xcat.locale") || ""; } catch (e) {}
+  if (!loc) { try { loc = localStorage.getItem("Comfy.Locale") || ""; } catch (e) {} }
   loc = (loc || navigator.language || "").toLowerCase();
   var lang = loc.indexOf("zh") === 0 ? "zh" : "en";
   var S = L[lang];

@@ -9,7 +9,10 @@ subprocess. Nothing like psutil is pulled in.
   cleanup buttons executed inside the ComfyUI process.
 - Front-end strings (node names, descriptions, widget labels and tooltips) are
   localised through ``locales/<lang>/nodeDefs.json``, picked up by the core
-  ``/i18n`` route, so they follow the language selected in ComfyUI.
+  ``/i18n`` route, so they follow the language selected in ComfyUI. Only ``zh``
+  and ``en`` bundles exist; ``locale_alias.py`` copies the ``zh`` node entries
+  into every other ``zh-*`` locale (``zh-TW`` included) so a Traditional UI shows
+  Simplified Chinese instead of falling back to English.
 - Seven custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
   🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
   🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/utilities): all built on the new V3 node API
@@ -84,6 +87,16 @@ _NODE_CLASSES = [
 
 
 async def comfy_entrypoint() -> XXXXXLCatExtension:
+    # The packs only ship zh + en, and core looks a bundle up by its exact folder
+    # name — so a zh-TW UI would show our nodes in English. Alias every zh-*
+    # locale to the zh bundle (matches what web/i18n.js and the login page do).
+    try:
+        from . import locale_alias
+
+        locale_alias.install()
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
+
     # Per-user password auth gate — must be installed BEFORE the asset-isolation
     # patches so the validated user id feeds input/<user>/ & output/<user>/.
     # Only active when ComfyUI is launched with --multi-user.

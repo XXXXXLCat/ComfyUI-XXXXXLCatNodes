@@ -72,12 +72,9 @@ const STRINGS = {
     },
 };
 
-let _lang = null;
-function lang() {
-    if (!_lang) _lang = langCode();
-    return _lang;
-}
-const t = (key) => (STRINGS[lang()] || STRINGS.en)[key] ?? key;
+// Resolved per call — `langCode()` caches itself once the setting is readable,
+// and returns a guess (uncached) while the app is still booting.
+const t = (key) => (STRINGS[langCode()] || STRINGS.en)[key] ?? key;
 
 // ------------------------------------------------------------------ helpers
 
