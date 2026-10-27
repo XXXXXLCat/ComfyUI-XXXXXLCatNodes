@@ -1,4 +1,4 @@
-// Output Gallery 🐈‍⬛ — a sidebar tab that lists every file in ComfyUI's
+// History Gallery 🐈‍⬛ — a sidebar tab that lists every file in ComfyUI's
 // output/ tree, not just the ones the Assets panel saw during this session.
 //
 // Data comes from the read-only endpoint installed by nodes/output_gallery.py
@@ -23,7 +23,10 @@ const CACHE_TTL = 5000;
 
 const STRINGS = {
     zh: {
-        title: "输出画廊",
+        // Sidebar strip label is deliberately short — the full name would wrap
+        // to two lines and push the whole tab column around.
+        title: "画廊",
+        panelTitle: "历史画廊",
         tooltip: "浏览 output 目录里的所有文件",
         all: "全部",
         image: "图片",
@@ -51,7 +54,8 @@ const STRINGS = {
         viewGridLarge: "网格（大）",
     },
     en: {
-        title: "Output Gallery",
+        title: "Gallery",
+        panelTitle: "History Gallery",
         tooltip: "Browse every file in the output directory",
         all: "All",
         image: "Images",
@@ -774,7 +778,7 @@ function buildPanel(host) {
         <div class="xog-status"></div>
         <div class="xog-sentinel"></div>`;
 
-    host.querySelector(".xog-title").textContent = t("title");
+    host.querySelector(".xog-title").textContent = t("panelTitle");
     const refreshBtn = host.querySelector(".xog-refresh");
     refreshBtn.title = t("refresh");
     refreshBtn.setAttribute("aria-label", t("refresh"));

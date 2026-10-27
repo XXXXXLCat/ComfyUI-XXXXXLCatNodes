@@ -20,7 +20,7 @@ subprocess. Nothing like psutil is pulled in.
   H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛, Group Control 🐈‍⬛,
   Node Control 🐈‍⬛, and Resolution Selector 🐈‍⬛ (the official
   resolution node, with a 2-decimal megapixel step).
-- A read-only **Output Gallery** sidebar tab (nodes/output_gallery.py +
+- A read-only **History Gallery** sidebar tab (nodes/output_gallery.py +
   web/output_gallery.js) that lists every file in output/, which ComfyUI's own
   Assets panel only does for the current session.
 
@@ -116,7 +116,7 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
 
-    # Read-only output browser used by the "Output Gallery" sidebar tab. Works in
+    # Read-only output browser used by the "History Gallery" sidebar tab. Works in
     # both modes: it lists the whole output/ tree, or (multi-user) the caller's
     # own directory plus the shared legacy pool.
     try:

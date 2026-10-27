@@ -104,7 +104,7 @@ frontend session produced (derived from the queue history, wiped on reload), `Im
 was uploaded into `input/`. **Files that already sit on disk never show up** — outputs from an
 earlier batch, files copied in by hand, videos written by a custom node.
 
-This feature adds an **Output Gallery** sidebar tab that enumerates the whole `output/` tree.
+This feature adds a **History Gallery** sidebar tab that enumerates the whole `output/` tree.
 No node to add.
 
 - **Grid browsing**: each card shows a thumbnail, filename, size and timestamp, newest first.
