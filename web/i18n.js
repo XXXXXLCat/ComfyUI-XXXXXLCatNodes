@@ -11,9 +11,13 @@
    is `zh-TW`. Anything that starts with `zh` is treated as Chinese, matching the
    server-side `locale_alias.py` that fills `zh-TW` from the `zh` bundle.
 
-   The language never changes at runtime (ComfyUI reloads the page when the
-   setting changes), so the value is resolved once and cached — but only when it
-   came from a real source, never from a guess made before `app` was ready.
+   The language never changes mid-render, but it *can* change mid-session: newer
+   frontends (1.5x) switch `Comfy.Locale` in place instead of reloading, so
+   anything captured as a plain string when a node/tab was created keeps the old
+   language. Resolve the value on every lookup, or expose labels as accessors
+   (see `bindLiveLabels` in `output_gallery.js`) so a re-render picks them up.
+   Only a value that came from a real source is cached, never a guess made before
+   `app` was ready.
 */
 
 import { app } from "../../scripts/app.js";
@@ -66,9 +70,14 @@ export function langCode() {
     // cached at that moment would otherwise stick for the whole page.
     const setting = fromSetting();
     if (setting) {
-        _lang = norm(setting);
-        remember(_lang);
-        return _lang;
+        const lang = norm(setting);
+        // Only touch localStorage when the value actually moved: this runs on
+        // every label lookup, which is a lot of renders during a session.
+        if (_lang !== lang) {
+            _lang = lang;
+            remember(lang);
+        }
+        return lang;
     }
 
     if (_lang) return _lang;

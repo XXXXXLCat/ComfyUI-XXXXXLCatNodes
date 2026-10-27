@@ -1141,34 +1141,47 @@ function placeAboveAssets() {
     return true;
 }
 
-// The label is a plain string captured at registration time, which happens
-// before `/api/settings` is guaranteed to have resolved — re-apply it once the
-// real locale is readable so the tab follows the interface language.
-function refreshTabLabels() {
-    const tabs = sidebarTabArray();
-    const tab = tabs?.find((item) => item?.id === TAB_ID);
-    if (!tab) return;
-    const title = t("title");
-    const tooltip = t("tooltip");
-    if (tab.title !== title) tab.title = title;
-    if (tab.tooltip !== tooltip) tab.tooltip = tooltip;
+// The tab button renders `tab.title` / `tab.tooltip` as plain strings, and this
+// frontend switches language **in place** — no page reload, so nothing re-runs
+// our registration and a captured string would stay in the old language for the
+// rest of the session (core tabs look fine because theirs are i18n keys resolved
+// lazily). Publish both labels as accessors instead: the tab strip re-renders on
+// a locale change and reads them again, so the button follows the language with
+// no polling and no timers.
+function bindLiveLabels(tab) {
+    const bind = (key, read) => {
+        Object.defineProperty(tab, key, {
+            configurable: true,
+            enumerable: true,
+            get: read,
+            // The core may write the field back when re-registering; swallow it
+            // so the accessor survives instead of being replaced by a string.
+            set() {},
+        });
+    };
+    bind("title", () => t("title"));
+    bind("tooltip", () => t("tooltip"));
 }
 
 function registerTab() {
     const manager = app?.extensionManager;
     if (!manager || typeof manager.registerSidebarTab !== "function") return false;
     const tabs = sidebarTabArray();
-    if (tabs && tabs.some((tab) => tab?.id === TAB_ID)) {
+    const existing = tabs?.find((tab) => tab?.id === TAB_ID);
+    if (existing) {
+        // Another load of this extension beat us to it — make sure its labels
+        // still resolve through the current language.
+        bindLiveLabels(existing);
         placeAboveAssets();
         return true;
     }
 
     let cleanup = null;
-    manager.registerSidebarTab({
+    const spec = {
         id: TAB_ID,
         icon: "pi pi-images",
-        title: t("title"),
-        tooltip: t("tooltip"),
+        title: "",
+        tooltip: "",
         type: "custom",
         render: (el) => {
             cleanup?.();
@@ -1178,12 +1191,13 @@ function registerTab() {
             cleanup?.();
             cleanup = null;
         },
-    });
+    };
+    bindLiveLabels(spec);
+    manager.registerSidebarTab(spec);
     placeAboveAssets();
     // Extensions load in folder-name order, so a tab registered later could
     // still land above us — re-assert the slot once the dust settles.
     setTimeout(placeAboveAssets, 1000);
-    for (const delay of [400, 1500, 4000]) setTimeout(refreshTabLabels, delay);
     return true;
 }
 
