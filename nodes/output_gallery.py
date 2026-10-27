@@ -14,8 +14,9 @@ tree, plus the sidebar tab in ``web/output_gallery.js`` that renders it:
     Each entry is ``{filename, subfolder, scope, kind, size, mtime}``.
 
 ``GET /xcat/outputs/file?scope=&subfolder=&filename=[&preview=1]``
-    Streams the file. With ``preview=1`` an image is downscaled to a compact
-    WebP so a grid of a few hundred entries stays cheap; everything else is
+    Streams the file. With ``preview=1`` an image is downscaled, and a video gets
+    one frame decoded (PyAV, already a ComfyUI dependency) — both returned as a
+    compact WebP so a grid of a few hundred entries stays cheap. Anything else is
     served as a normal (range-capable) file response.
 
 Under ``--multi-user`` the listing follows the same isolation rules as the asset
@@ -29,6 +30,7 @@ The whole feature is read-only: no route here writes, renames or deletes.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import mimetypes
@@ -62,6 +64,19 @@ _PREVIEW_LIMIT = 400  # in-memory thumbnail cache entries
 
 _THUMBS: Dict[Tuple[str, int, int], bytes] = {}
 _THUMB_ORDER: List[Tuple[str, int, int]] = []
+
+# Decoding is CPU bound (a video frame costs ~150 ms), so thumbnails run in
+# worker threads and only a few at a time — a grid of clips must never stall the
+# event loop that also drives prompt execution.
+_THUMB_WORKERS = 3
+_THUMB_SLOTS: Optional[asyncio.Semaphore] = None
+
+
+def _thumb_slots() -> asyncio.Semaphore:
+    global _THUMB_SLOTS
+    if _THUMB_SLOTS is None:
+        _THUMB_SLOTS = asyncio.Semaphore(_THUMB_WORKERS)
+    return _THUMB_SLOTS
 
 _INSTALLED = False
 _ROUTES_DONE = False
@@ -203,7 +218,67 @@ def _resolve(scope: str, subfolder: str, filename: str) -> Optional[str]:
     return path
 
 
-def _thumbnail(path: str) -> Optional[bytes]:
+def _encode_webp(img) -> bytes:
+    from PIL import Image
+
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGB")
+    img.thumbnail((PREVIEW_MAX, PREVIEW_MAX), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="WEBP", quality=72, method=4)
+    return buf.getvalue()
+
+
+def _video_frame(path: str):
+    """One representative frame from a video, as a PIL image.
+
+    PyAV ships with ComfyUI (that is how the video nodes decode), so no extra
+    dependency is needed. The frame is taken slightly into the clip because the
+    very first frame of a fade-in is often black.
+    """
+    try:
+        import av
+    except Exception:
+        return None
+
+    try:
+        with av.open(path) as container:
+            stream = next(
+                (s for s in container.streams if s.type == "video"), None
+            )
+            if stream is None:
+                return None
+
+            duration = 0.0
+            try:
+                if stream.duration and stream.time_base:
+                    duration = float(stream.duration * stream.time_base)
+            except Exception:
+                duration = 0.0
+
+            offset = min(1.0, duration * 0.1) if duration > 0 else 0.0
+            if offset > 0.05:
+                try:
+                    container.seek(
+                        int(offset * 1_000_000),
+                        stream=stream,
+                        backward=True,
+                        any_frame=False,
+                    )
+                except Exception:
+                    pass
+
+            for frame in container.decode(stream):
+                try:
+                    return frame.to_image()
+                except Exception:
+                    return None
+    except Exception as exc:
+        logger.debug("[XXXXXLCat] video frame failed for %s: %s", path, exc)
+    return None
+
+
+def _thumbnail(path: str, kind: str = "image") -> Optional[bytes]:
     try:
         stat = os.stat(path)
     except OSError:
@@ -214,24 +289,30 @@ def _thumbnail(path: str) -> Optional[bytes]:
     if cached is not None:
         return cached
 
-    try:
-        from PIL import Image, ImageOps
-
-        with Image.open(path) as img:
-            # JPEGs can be decoded straight at a smaller size — much faster.
+    data: Optional[bytes] = None
+    if kind == "video":
+        frame = _video_frame(path)
+        if frame is not None:
             try:
-                img.draft("RGB", (PREVIEW_MAX * 2, PREVIEW_MAX * 2))
-            except Exception:
-                pass
-            img = ImageOps.exif_transpose(img) or img
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGBA")
-            img.thumbnail((PREVIEW_MAX, PREVIEW_MAX), Image.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, format="WEBP", quality=72, method=4)
-            data = buf.getvalue()
-    except Exception as exc:  # unreadable / unsupported image
-        logger.debug("[XXXXXLCat] thumbnail failed for %s: %s", path, exc)
+                data = _encode_webp(frame)
+            except Exception as exc:
+                logger.debug("[XXXXXLCat] video thumb failed for %s: %s", path, exc)
+    else:
+        try:
+            from PIL import Image, ImageOps
+
+            with Image.open(path) as img:
+                # JPEGs can be decoded straight at a smaller size — much faster.
+                try:
+                    img.draft("RGB", (PREVIEW_MAX * 2, PREVIEW_MAX * 2))
+                except Exception:
+                    pass
+                img = ImageOps.exif_transpose(img) or img
+                data = _encode_webp(img)
+        except Exception as exc:  # unreadable / unsupported image
+            logger.debug("[XXXXXLCat] thumbnail failed for %s: %s", path, exc)
+
+    if data is None:
         return None
 
     if len(_THUMB_ORDER) >= _PREVIEW_LIMIT:
@@ -245,11 +326,16 @@ def _thumbnail(path: str) -> Optional[bytes]:
 # ---------------------------------------------------------------- handlers
 
 async def _h_list(request: web.Request) -> web.Response:
-    files: List[dict] = []
     skip = _known_user_ids()
-    for scope, root, _label in _roots():
-        files.extend(_scan(root, scope, skip_dirs=skip if scope == "shared" else None))
 
+    def collect() -> List[dict]:
+        found: List[dict] = []
+        for scope, root, _label in _roots():
+            found.extend(_scan(root, scope, skip_dirs=skip if scope == "shared" else None))
+        return found
+
+    # big trees take a while to stat — keep the event loop free
+    files = await asyncio.to_thread(collect)
     files.sort(key=lambda f: f["mtime"], reverse=True)
     total = len(files)
     truncated = total > MAX_FILES
@@ -278,16 +364,18 @@ async def _h_file(request: web.Request) -> web.Response:
         return web.Response(status=404)
 
     if request.query.get("preview") in ("1", "true"):
-        if _kind(filename) == "image":
-            data = _thumbnail(path)
+        kind = _kind(filename)
+        if kind in ("image", "video"):
+            async with _thumb_slots():
+                data = await asyncio.to_thread(_thumbnail, path, kind)
             if data:
                 return web.Response(
                     body=data,
                     content_type="image/webp",
                     headers={"Cache-Control": "private, max-age=300"},
                 )
-        # Non-images (and unreadable images) fall through to the real file so the
-        # grid can still show a <video> poster / a download link.
+        # Non-media (and files we could not decode) fall through to the real
+        # file so the grid can still show a download link.
 
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return web.FileResponse(

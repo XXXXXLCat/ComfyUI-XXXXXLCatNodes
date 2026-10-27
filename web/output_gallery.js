@@ -313,6 +313,21 @@ const CSS = `
     color: var(--xog-muted);
 }
 .xog-glyph .pi { font-size: 24px; }
+.xog-play {
+    position: absolute;
+    inset-block-end: 4px;
+    inset-inline-end: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.62);
+    color: #f5f5f5;
+    pointer-events: none;
+}
+.xog-play .pi { font-size: 9px; }
 .xog-badge {
     position: absolute;
     inset-block-start: 4px;
@@ -644,6 +659,43 @@ function buildPanel(host) {
         status.style.display = "";
     }
 
+    function addGlyph(thumb, kind) {
+        const glyph = document.createElement("div");
+        glyph.className = "xog-glyph";
+        const icon = document.createElement("i");
+        icon.className =
+            kind === "video"
+                ? "pi pi-video"
+                : kind === "audio"
+                  ? "pi pi-volume-up"
+                  : "pi pi-file";
+        glyph.appendChild(icon);
+        thumb.appendChild(glyph);
+    }
+
+    // Videos mirror the native Assets panel's grid cell: a real frame from the
+    // clip instead of a generic filmstrip glyph, plus a small play mark so the
+    // cell reads as a video. Clicking still opens the player in the lightbox.
+    function addVideoThumb(thumb, file) {
+        const still = document.createElement("img");
+        still.loading = "lazy";
+        still.decoding = "async";
+        still.alt = file.filename;
+        still.src = fileUrl(file, true);
+        // No decodable frame (rare codec, or PyAV missing) — fall back to the
+        // glyph rather than an empty tile.
+        still.addEventListener("error", () => {
+            still.remove();
+            addGlyph(thumb, "video");
+        });
+        thumb.appendChild(still);
+
+        const playBadge = document.createElement("span");
+        playBadge.className = "xog-play";
+        playBadge.innerHTML = '<i class="pi pi-play"></i>';
+        thumb.appendChild(playBadge);
+    }
+
     function makeCard(file) {
         const card = document.createElement("button");
         card.type = "button";
@@ -660,18 +712,10 @@ function buildPanel(host) {
             img.alt = file.filename;
             img.src = fileUrl(file, true);
             thumb.appendChild(img);
+        } else if (file.kind === "video") {
+            addVideoThumb(thumb, file);
         } else {
-            const glyph = document.createElement("div");
-            glyph.className = "xog-glyph";
-            const icon = document.createElement("i");
-            icon.className =
-                file.kind === "video"
-                    ? "pi pi-video"
-                    : file.kind === "audio"
-                      ? "pi pi-volume-up"
-                      : "pi pi-file";
-            glyph.appendChild(icon);
-            thumb.appendChild(glyph);
+            addGlyph(thumb, file.kind);
         }
 
         if (file.scope === "shared") {
@@ -844,6 +888,19 @@ function placeAboveAssets() {
     return true;
 }
 
+// The label is a plain string captured at registration time, which happens
+// before `/api/settings` is guaranteed to have resolved — re-apply it once the
+// real locale is readable so the tab follows the interface language.
+function refreshTabLabels() {
+    const tabs = sidebarTabArray();
+    const tab = tabs?.find((item) => item?.id === TAB_ID);
+    if (!tab) return;
+    const title = t("title");
+    const tooltip = t("tooltip");
+    if (tab.title !== title) tab.title = title;
+    if (tab.tooltip !== tooltip) tab.tooltip = tooltip;
+}
+
 function registerTab() {
     const manager = app?.extensionManager;
     if (!manager || typeof manager.registerSidebarTab !== "function") return false;
@@ -873,6 +930,7 @@ function registerTab() {
     // Extensions load in folder-name order, so a tab registered later could
     // still land above us — re-assert the slot once the dust settles.
     setTimeout(placeAboveAssets, 1000);
+    for (const delay of [400, 1500, 4000]) setTimeout(refreshTabLabels, delay);
     return true;
 }
 

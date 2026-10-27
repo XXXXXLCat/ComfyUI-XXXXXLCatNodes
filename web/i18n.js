@@ -61,8 +61,9 @@ function remember(lang) {
 }
 
 export function langCode() {
-    if (_lang) return _lang;
-
+    // Always ask the setting first, even when a value is already cached: the
+    // extension can be imported before `/api/settings` resolves, and anything we
+    // cached at that moment would otherwise stick for the whole page.
     const setting = fromSetting();
     if (setting) {
         _lang = norm(setting);
@@ -70,15 +71,14 @@ export function langCode() {
         return _lang;
     }
 
-    const stored = fromStorage();
-    if (stored) {
-        _lang = norm(stored);
-        remember(_lang);
-        return _lang;
-    }
+    if (_lang) return _lang;
 
-    // Nothing definitive yet (module imported before the settings loaded) — do
-    // not cache, so the next call can still pick up the real setting.
+    // `xcat.locale` / `Comfy.Locale` are leftovers from the previous page load —
+    // good enough for the first paint, but they must NOT be cached: switching the
+    // language and reloading leaves them stale until the new setting is read.
+    const stored = fromStorage();
+    if (stored) return norm(stored);
+
     return norm(document.documentElement?.lang || navigator.language || "");
 }
 
