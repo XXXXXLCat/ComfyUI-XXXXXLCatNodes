@@ -33,13 +33,14 @@ const STRINGS = {
         video: "视频",
         audio: "音频",
         other: "其他",
-        search: "搜索文件名…",
+        // Native panel builds this as `搜索 {subject}...` — the space is part
+        // of the official wording, not a typo.
+        search: "搜索 文件名…",
         refresh: "刷新",
         shared: "共享",
         files: "个文件",
         showing: "显示前",
         empty: "这里还没有文件",
-        emptyHint: "生成或上传文件后会显示在这里",
         noMatch: "没有符合条件的文件",
         loading: "读取中…",
         unauthorized: "登录已过期，请重新登录",
@@ -72,7 +73,6 @@ const STRINGS = {
         files: "files",
         showing: "showing first",
         empty: "No files here yet",
-        emptyHint: "Generated or uploaded files will show up here",
         noMatch: "No matching files",
         loading: "Loading…",
         unauthorized: "Session expired — sign in again",
@@ -428,7 +428,9 @@ const CSS = `
     font-size: 12px;
     outline: none;
 }
-.xog-search::placeholder { color: var(--xog-muted); }
+/* No ::placeholder colour on purpose: the native SearchInput does not set one
+   either, so both fall through to the UA default (#757575 in Chromium). Pinning
+   a token here made the hint noticeably brighter than the official panel. */
 .xog-viewwrap {
     position: relative;
     flex: none;
@@ -736,15 +738,10 @@ const CSS = `
     font-size: 48px;
 }
 .xog-empty h3 {
-    margin: 0 0 8px;
+    margin: 0;
     color: var(--xog-fg);
     font-size: 18px;
     font-weight: 700;
-}
-.xog-empty p {
-    margin: 0;
-    color: var(--xog-fg);
-    font-size: 16px;
 }
 .xog-sentinel { height: 1px; }
 
@@ -1115,8 +1112,7 @@ function buildPanel(host) {
         status.style.display = text ? "" : "none";
     }
 
-    // Mirrors the native Assets panel's empty state: big info glyph, heading,
-    // one-line hint.
+    // Mirrors the native Assets panel's empty state: info glyph + heading.
     function setEmpty() {
         const box = document.createElement("div");
         box.className = "xog-empty";
@@ -1124,9 +1120,7 @@ function buildPanel(host) {
         icon.className = "pi pi-info-circle";
         const heading = document.createElement("h3");
         heading.textContent = t("empty");
-        const hint = document.createElement("p");
-        hint.textContent = t("emptyHint");
-        box.append(icon, heading, hint);
+        box.append(icon, heading);
         status.replaceChildren(box);
         status.style.display = "";
     }
