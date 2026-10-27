@@ -26,6 +26,7 @@ import {
   rectIn,
   nodeActive,
 } from "./control_panel.js";
+import { pick } from "./i18n.js";
 
 /* ---------------------------------------------------------------- constants */
 
@@ -42,7 +43,7 @@ function readGroups() {
   const raw = (g && (g._groups || g.groups)) || [];
   return raw.map((gr) => ({
     ref: gr,
-    title: (gr.title || "").trim() || "Untitled group",
+    title: (gr.title || "").trim() || pick({ zh: "未命名组", en: "Untitled group" }),
     bounds: gBounds(gr),
     color: normColor(gr.color),
   }));
@@ -78,20 +79,26 @@ function stateOf(nodes) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.GroupControl",
-  settingsLabel: `${BRAND} Group Control Settings`,
+  settingsLabel: pick({ zh: `${BRAND} 组控制设置`, en: `${BRAND} Group Control Settings` }),
   build(node) {
     return createControlPanel(node, {
       store: STORE,
       prefix: P,
-      settingsTitle: "Group Control Settings",
-      emptyIdle: "No groups on the canvas",
-      emptyFiltered: "No matching groups",
-      emptyNoKeyword: "Type a name keyword to list groups",
-      unitHint: (shown, total) => `Showing ${shown} / ${total} groups`,
-      keywordLabel: "Name keywords (semicolon-separated, any match)",
-      keywordPlaceholder: "Separate names with ; e.g. character; background; LORA",
-      colorLabel: "Color filter (multi-select)",
-      paletteEmpty: "No groups on the canvas have a color set",
+      settingsTitle: { zh: "组控制设置", en: "Group Control Settings" },
+      emptyIdle: { zh: "画布上还没有组", en: "No groups on the canvas" },
+      emptyFiltered: { zh: "没有符合筛选条件的组", en: "No matching groups" },
+      emptyNoKeyword: { zh: "输入名称关键词以列出组", en: "Type a name keyword to list groups" },
+      unitHint: (shown, total) => ({
+        zh: `显示 ${shown} / ${total} 个组`,
+        en: `Showing ${shown} / ${total} groups`,
+      }),
+      keywordLabel: { zh: "名称关键词（分号分隔，任一命中）", en: "Name keywords (semicolon-separated, any match)" },
+      keywordPlaceholder: {
+        zh: "用 ; 分隔多个名称，例如 角色; 背景; LORA",
+        en: "Separate names with ; e.g. character; background; LORA",
+      },
+      colorLabel: { zh: "颜色筛选（可多选）", en: "Color filter (multi-select)" },
+      paletteEmpty: { zh: "画布上没有任何组设置过颜色", en: "No groups on the canvas have a color set" },
 
       palette: () => readGroups().map((g) => g.color).filter(Boolean),
 

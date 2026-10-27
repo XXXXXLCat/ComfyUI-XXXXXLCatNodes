@@ -12,6 +12,21 @@
 */
 
 import { app } from "../../../scripts/app.js";
+import { pick } from "./i18n.js";
+
+/* Chrome strings for the panel itself. Subject-specific copy comes from the
+   calling node as `{ zh, en }` pairs and is resolved with `pick` at render. */
+const UI = {
+  settings: { zh: "设置", en: "Settings" },
+  closeMethod: { zh: "关闭方式", en: "Close method" },
+  mode: { zh: "互斥模式", en: "Mode" },
+  sort: { zh: "排序", en: "Sort" },
+  reverse: { zh: "反向排序", en: "Reverse order" },
+  off: { zh: "关", en: "Off" },
+  on: { zh: "开", en: "On" },
+  clearColors: { zh: "清除颜色筛选", en: "Clear color filter" },
+  done: { zh: "完成", en: "Done" },
+};
 
 /* ---------------------------------------------------------------- constants */
 
@@ -26,20 +41,20 @@ export const FOOT_H = 32;
 export const LIST_PAD = 6;
 
 export const MODES = [
-  ["free", "Free"],
-  ["always_one", "Always one on"],
-  ["at_most_one", "At most one on"],
-  ["at_least_one", "At least one on"],
+  ["free", { zh: "自由", en: "Free" }],
+  ["always_one", { zh: "恒定开启一个", en: "Always one on" }],
+  ["at_most_one", { zh: "最多一个开启", en: "At most one on" }],
+  ["at_least_one", { zh: "至少一个开启", en: "At least one on" }],
 ];
 export const SORTS = [
-  ["name", "By name"],
-  ["position", "By position"],
-  ["state", "By state"],
-  ["color", "By color"],
+  ["name", { zh: "按名称", en: "By name" }],
+  ["position", { zh: "按位置", en: "By position" }],
+  ["state", { zh: "按状态", en: "By state" }],
+  ["color", { zh: "按颜色", en: "By color" }],
 ];
 export const CLOSES = [
-  ["bypass", "Bypass"],
-  ["mute", "Mute"],
+  ["bypass", { zh: "绕过", en: "Bypass" }],
+  ["mute", { zh: "禁用", en: "Mute" }],
 ];
 
 const DEFAULTS = {
@@ -262,7 +277,8 @@ export function registerControl({ nodeId, name, settingsLabel, build }) {
 
 /* ------------------------------------------------------------------- panel */
 
-/* opts (subject-specific half):
+/* opts (subject-specific half). Every copy field takes `{ zh, en }` (a plain
+   string still works and is shown as-is):
      store             — properties 键前缀，如 "gc" / "nc"
      prefix            — CSS 类名前缀，如 "xxlgc" / "xxlnc"
      settingsTitle     — 设置弹窗标题
@@ -504,12 +520,12 @@ export function createControlPanel(node, opts) {
       /* Name keywords 为空：不列出任何对象，只给一行提示。 */
       const empty = document.createElement("div");
       empty.className = `${p}-empty`;
-      empty.textContent = opts.emptyNoKeyword;
+      empty.textContent = pick(opts.emptyNoKeyword);
       listEl.appendChild(empty);
     } else if (!shown.length) {
       const empty = document.createElement("div");
       empty.className = `${p}-empty`;
-      empty.textContent = all.length ? opts.emptyFiltered : opts.emptyIdle;
+      empty.textContent = all.length ? pick(opts.emptyFiltered) : pick(opts.emptyIdle);
       listEl.appendChild(empty);
     } else {
       const onSet = new Set(cfg.on || []);
@@ -543,7 +559,7 @@ export function createControlPanel(node, opts) {
     const gear = document.createElement("button");
     gear.className = `${p}-gear`;
     gear.type = "button";
-    gear.textContent = "⚙ Settings";
+    gear.textContent = `⚙ ${pick(UI.settings)}`;
     gear.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -599,7 +615,7 @@ export function createControlPanel(node, opts) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = `${p}-segbtn`;
-      btn.textContent = label;
+      btn.textContent = pick(label);
       btn.addEventListener("click", () => {
         onPick(val);
         sync();
@@ -631,7 +647,7 @@ export function createControlPanel(node, opts) {
     if (!palette.length) {
       const none = document.createElement("span");
       none.className = `${p}-none`;
-      none.textContent = opts.paletteEmpty;
+      none.textContent = pick(opts.paletteEmpty);
       wrap.appendChild(none);
       return { el: wrap, sync: () => {} };
     }
@@ -666,7 +682,7 @@ export function createControlPanel(node, opts) {
     panel.className = `${p}-panel`;
 
     const title = document.createElement("h3");
-    title.textContent = opts.settingsTitle;
+    title.textContent = pick(opts.settingsTitle);
     panel.appendChild(title);
 
     const hint = document.createElement("div");
@@ -681,23 +697,23 @@ export function createControlPanel(node, opts) {
       updateHint();
     };
     const updateHint = () => {
-      hint.textContent = opts.unitHint(shown.length, all.length);
+      hint.textContent = pick(opts.unitHint(shown.length, all.length));
     };
 
     panel.appendChild(
-      field("Close method", segmented(CLOSES, () => cfg.close, (v) => { cfg.close = v; commit(); }))
+      field(pick(UI.closeMethod), segmented(CLOSES, () => cfg.close, (v) => { cfg.close = v; commit(); }))
     );
     panel.appendChild(
-      field("Mode", segmented(MODES, () => cfg.mode, (v) => { cfg.mode = v; commit(); }))
+      field(pick(UI.mode), segmented(MODES, () => cfg.mode, (v) => { cfg.mode = v; commit(); }))
     );
     panel.appendChild(
-      field("Sort", segmented(SORTS, () => cfg.sort, (v) => { cfg.sort = v; commit(); }))
+      field(pick(UI.sort), segmented(SORTS, () => cfg.sort, (v) => { cfg.sort = v; commit(); }))
     );
     panel.appendChild(
       field(
-        "Reverse order",
+        pick(UI.reverse),
         segmented(
-          [["off", "Off"], ["on", "On"]],
+          [["off", UI.off], ["on", UI.on]],
           () => (cfg.sortReverse ? "on" : "off"),
           (v) => { cfg.sortReverse = v === "on"; commit(); }
         )
@@ -707,7 +723,7 @@ export function createControlPanel(node, opts) {
     const kw = document.createElement("input");
     kw.className = `${p}-input`;
     kw.type = "text";
-    kw.placeholder = opts.keywordPlaceholder;
+    kw.placeholder = pick(opts.keywordPlaceholder);
     kw.value = cfg.keyword;
     kw.addEventListener("input", () => {
       cfg.keyword = kw.value;
@@ -715,15 +731,15 @@ export function createControlPanel(node, opts) {
     });
     // Keep ComfyUI's global shortcuts (b / m / delete …) out of the text field.
     kw.addEventListener("keydown", (e) => e.stopPropagation());
-    panel.appendChild(field(opts.keywordLabel, kw));
+    panel.appendChild(field(pick(opts.keywordLabel), kw));
 
     const swatches = swatchRow();
-    const colorField = field(opts.colorLabel, swatches.el);
+    const colorField = field(pick(opts.colorLabel), swatches.el);
     const clear = document.createElement("button");
     clear.type = "button";
     clear.className = `${p}-segbtn`;
     clear.style.marginTop = "8px";
-    clear.textContent = "Clear color filter";
+    clear.textContent = pick(UI.clearColors);
     clear.addEventListener("click", () => {
       cfg.colors = [];
       swatches.sync();
@@ -737,7 +753,7 @@ export function createControlPanel(node, opts) {
     const done = document.createElement("button");
     done.type = "button";
     done.className = "primary";
-    done.textContent = "Done";
+    done.textContent = pick(UI.done);
     done.addEventListener("click", close);
     actions.appendChild(done);
     panel.appendChild(actions);

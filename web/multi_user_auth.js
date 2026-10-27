@@ -7,6 +7,8 @@
 // /xcat/auth_status means auth is disabled (single-user or module off) and the
 // overlay stays hidden.
 
+import { pick } from "./i18n.js";
+
 (function () {
   "use strict";
 
@@ -31,32 +33,34 @@
     if (document.getElementById(OVERLAY_ID)) return;
 
     const userInput = h("input", {
-      type: "text", autocomplete: "username", placeholder: "用户名", id: "xcat-user",
+      type: "text", autocomplete: "username", placeholder: pick({ zh: "用户名", en: "Username" }), id: "xcat-user",
       style: inputStyle(),
     });
     const passInput = h("input", {
-      type: "password", autocomplete: "current-password", placeholder: "密码", id: "xcat-pass",
+      type: "password", autocomplete: "current-password", placeholder: pick({ zh: "密码", en: "Password" }), id: "xcat-pass",
       style: inputStyle(),
     });
     const newPassInput = h("input", {
-      type: "password", autocomplete: "new-password", placeholder: "设置密码", id: "xcat-newpass",
+      type: "password", autocomplete: "new-password", placeholder: pick({ zh: "设置密码", en: "New password" }), id: "xcat-newpass",
       style: Object.assign(inputStyle(), { display: "none" }),
     });
     const errBox = h("div", {
       style: { color: "#ff8080", fontSize: "12px", minHeight: "16px", marginTop: "4px" },
     });
-    const submitBtn = h("button", { type: "submit", style: btnStyle() }, "登录");
+    const SIGN_IN = { zh: "登录", en: "Sign in" };
+    const CREATE = { zh: "新建账号", en: "Create account" };
+    const submitBtn = h("button", { type: "submit", style: btnStyle() }, pick(SIGN_IN));
     const toggle = h("button", {
       type: "button", style: linkStyle(),
       onclick: () => switchMode(mode === "login" ? "register" : "login"),
-    }, "新建账号");
+    }, pick(CREATE));
 
     let mode = "login";
     function switchMode(m) {
       mode = m;
       newPassInput.style.display = m === "register" ? "" : "none";
-      submitBtn.textContent = m === "register" ? "注册并登录" : "登录";
-      toggle.textContent = m === "register" ? "返回登录" : "新建账号";
+      submitBtn.textContent = pick(m === "register" ? { zh: "注册并登录", en: "Sign up & sign in" } : SIGN_IN);
+      toggle.textContent = pick(m === "register" ? { zh: "返回登录", en: "Back to sign in" } : CREATE);
       errBox.textContent = "";
     }
 
@@ -71,10 +75,18 @@
         try {
           if (mode === "register") {
             const rp = await fetch("/xcat/register", post({ username, password: newPassInput.value }));
-            if (!rp.ok) { errBox.textContent = (await rp.json().catch(() => ({}))).error || "注册失败"; return; }
+            if (!rp.ok) {
+              errBox.textContent =
+                (await rp.json().catch(() => ({}))).error || pick({ zh: "注册失败", en: "Sign-up failed" });
+              return;
+            }
           }
           const lp = await fetch("/xcat/login", post({ username, password }));
-          if (!lp.ok) { errBox.textContent = (await lp.json().catch(() => ({}))).error || "登录失败"; return; }
+          if (!lp.ok) {
+            errBox.textContent =
+              (await lp.json().catch(() => ({}))).error || pick({ zh: "登录失败", en: "Sign-in failed" });
+            return;
+          }
           const j = await lp.json();
           // Match what the official userStore expects, so the app goes straight
           // to the canvas instead of bouncing to /user-select.
@@ -85,7 +97,7 @@
           } catch (e) {}
           location.reload();
         } catch (e) {
-          errBox.textContent = "网络错误，请重试";
+          errBox.textContent = pick({ zh: "网络错误，请重试", en: "Network error — please retry" });
         } finally {
           submitBtn.disabled = false;
         }
@@ -99,8 +111,14 @@
         border: "1px solid #333", fontFamily: "inherit",
       },
     }, [
-      h("div", { style: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" }, text: "🐈‍⬛ 多用户登录" }),
-      h("div", { style: { fontSize: "12px", color: "#aaaaaa", marginBottom: "18px" }, text: "请输入该账号的用户名和密码" }),
+      h("div", {
+        style: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" },
+        text: pick({ zh: "🐈‍⬛ 多用户登录", en: "🐈‍⬛ Multi-user sign-in" }),
+      }),
+      h("div", {
+        style: { fontSize: "12px", color: "#aaaaaa", marginBottom: "18px" },
+        text: pick({ zh: "请输入该账号的用户名和密码", en: "Enter this account's username and password" }),
+      }),
       form,
       h("div", { style: { marginTop: "14px", textAlign: "center" } }, [toggle]),
     ]);

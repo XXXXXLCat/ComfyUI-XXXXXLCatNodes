@@ -373,19 +373,51 @@ _LOGIN_PAGE = """<!doctype html>
 </head>
 <body>
   <div class="card">
-    <h1>🐈‍⬛ 多用户登录</h1>
-    <p class="sub">请输入该账号的用户名和密码</p>
+    <h1 data-t="title">🐈‍⬛ 多用户登录</h1>
+    <p class="sub" data-t="sub">请输入该账号的用户名和密码</p>
     <form id="f" autocomplete="on">
-      <input id="u" name="username" placeholder="用户名" autocomplete="username" autofocus>
-      <input id="p" name="password" type="password" placeholder="密码" autocomplete="current-password">
-      <input id="np" name="newpassword" type="password" placeholder="设置密码" autocomplete="new-password" hidden>
+      <input id="u" name="username" data-t-ph="user" placeholder="用户名" autocomplete="username" autofocus>
+      <input id="p" name="password" type="password" data-t-ph="pass" placeholder="密码" autocomplete="current-password">
+      <input id="np" name="newpassword" type="password" data-t-ph="newpass" placeholder="设置密码" autocomplete="new-password" hidden>
       <div class="err" id="e"></div>
-      <button id="b" type="submit">登录</button>
+      <button id="b" type="submit" data-t="login">登录</button>
     </form>
-    <div class="foot"><button class="link" id="t" type="button">新建账号</button></div>
+    <div class="foot"><button class="link" id="t" type="button" data-t="create">新建账号</button></div>
   </div>
 <script>
 (function () {
+  // Bilingual copy: Chinese for zh-* browsers, English otherwise. The inline
+  // text above is the Chinese fallback, repainted on load.
+  var L = {
+    zh: {
+      title: "🐈‍⬛ 多用户登录", sub: "请输入该账号的用户名和密码",
+      user: "用户名", pass: "密码", newpass: "设置密码",
+      login: "登录", register: "注册并登录", create: "新建账号", back: "返回登录",
+      regFail: "注册失败", loginFail: "登录失败", net: "网络错误，请重试",
+    },
+    en: {
+      title: "🐈‍⬛ Multi-user sign-in", sub: "Enter this account's username and password",
+      user: "Username", pass: "Password", newpass: "New password",
+      login: "Sign in", register: "Sign up & sign in", create: "Create account", back: "Back to sign in",
+      regFail: "Sign-up failed", loginFail: "Sign-in failed", net: "Network error — please retry",
+    },
+  };
+  // The ComfyUI locale setting wins (same origin, so it is readable before the
+  // app boots); otherwise fall back to the browser's own language.
+  var loc = "";
+  try { loc = localStorage.getItem("Comfy.Locale") || ""; } catch (e) {}
+  loc = (loc || navigator.language || "").toLowerCase();
+  var lang = loc.indexOf("zh") === 0 ? "zh" : "en";
+  var S = L[lang];
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.title = S.title;
+  Array.prototype.forEach.call(document.querySelectorAll("[data-t]"), function (el) {
+    el.textContent = S[el.getAttribute("data-t")];
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-t-ph]"), function (el) {
+    el.placeholder = S[el.getAttribute("data-t-ph")];
+  });
+
   var user = document.getElementById("u"),
       pass = document.getElementById("p"),
       np = document.getElementById("np"),
@@ -397,8 +429,8 @@ _LOGIN_PAGE = """<!doctype html>
   function setMode(m) {
     mode = m;
     np.hidden = m !== "register";
-    btn.textContent = m === "register" ? "注册并登录" : "登录";
-    toggle.textContent = m === "register" ? "返回登录" : "新建账号";
+    btn.textContent = m === "register" ? S.register : S.login;
+    toggle.textContent = m === "register" ? S.back : S.create;
     err.textContent = "";
   }
   toggle.addEventListener("click", function () {
@@ -422,11 +454,11 @@ _LOGIN_PAGE = """<!doctype html>
       var username = user.value.trim(), password = pass.value;
       if (mode === "register") {
         var rp = await post("/xcat/register", { username: username, password: np.value });
-        if (!rp.ok) { err.textContent = (await rp.json().catch(function () { return {}; })).error || "注册失败"; return; }
+        if (!rp.ok) { err.textContent = (await rp.json().catch(function () { return {}; })).error || S.regFail; return; }
       }
       var lp = await post("/xcat/login", { username: username, password: password });
       var body = await lp.json().catch(function () { return {}; });
-      if (!lp.ok) { err.textContent = body.error || "登录失败"; return; }
+      if (!lp.ok) { err.textContent = body.error || S.loginFail; return; }
       // The official frontend reads the active user from
       // localStorage["Comfy.userId"] (see userStore: needsLogin is
       // !Comfy.userId && isMultiUserServer). Without this it would bounce to
@@ -438,7 +470,7 @@ _LOGIN_PAGE = """<!doctype html>
       } catch (e) {}
       location.replace("/");
     } catch (e) {
-      err.textContent = "网络错误，请重试";
+      err.textContent = S.net;
     } finally {
       btn.disabled = false;
     }

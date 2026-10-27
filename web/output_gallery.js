@@ -11,6 +11,7 @@
 // frontend version that has `app.extensionManager.registerSidebarTab`.
 
 import { app } from "../../scripts/app.js";
+import { langCode } from "./i18n.js";
 
 const LIST_URL = "/xcat/outputs";
 const FILE_URL = "/xcat/outputs/file";
@@ -73,15 +74,7 @@ const STRINGS = {
 
 let _lang = null;
 function lang() {
-    if (_lang) return _lang;
-    try {
-        const stored = localStorage.getItem("Comfy.Locale") || "";
-        const nav = navigator.language || "";
-        const probe = (stored || nav || document.documentElement.lang || "en").toLowerCase();
-        _lang = probe.startsWith("zh") ? "zh" : "en";
-    } catch {
-        _lang = "en";
-    }
+    if (!_lang) _lang = langCode();
     return _lang;
 }
 const t = (key) => (STRINGS[lang()] || STRINGS.en)[key] ?? key;
