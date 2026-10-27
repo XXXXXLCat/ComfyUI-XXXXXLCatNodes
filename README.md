@@ -41,6 +41,12 @@ ComfyUI already separates. No node to add — it is a server-side patch installe
 > `extra_data`), and `PromptExecutor.execute_async` (restore user for execution). Every patch
 > is wrapped in `try/except` and degrades to the official behaviour if a future ComfyUI version
 > moves a patched symbol.
+>
+> Each user also gets an independent prompt cache (`CacheSet`). The stock cache is shared by
+> the whole server, which leaks directories across accounts: node **instances** are kept per
+> node id for the server's lifetime (`SaveImage` stores `get_output_directory()` in `__init__`),
+> and node **outputs** are keyed by inputs only — so the second user running an identical
+> workflow would be served the first user's cached result and write into the first user's folder.
 
 ## Multi-user password login
 

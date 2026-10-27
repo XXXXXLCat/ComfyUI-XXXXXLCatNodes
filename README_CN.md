@@ -27,6 +27,8 @@
 - 普通单用户启动下完全无害（`install()` 在 `--multi-user` 关闭时直接返回），不会影响非多用户环境。
 
 > 实现说明：本功能改写 `folder_paths.get_input_directory` / `get_output_directory`（返回每用户子目录）、`get_annotated_filepath` / `exists_annotated_filepath`（共享池回退）、`LoadImage.INPUT_TYPES`（选择器合并）、`/view` 路由（回退）；并加装 aiohttp 中间件（把 `comfy-user` 头写入上下文）、改写 `PromptServer.trigger_on_prompt`（把用户写入 `extra_data`）与 `PromptExecutor.execute_async`（执行期恢复用户上下文）。每个补丁都包了 `try/except`，若未来 ComfyUI 版本挪动了被改写的符号，会自动回退到官方行为。
+>
+> 另外每个用户各有一套独立的提示词缓存（`CacheSet`）。官方缓存是整服务共用的，会造成跨用户串目录：节点**实例**按节点 id 长期复用（`SaveImage` 在 `__init__` 里就把输出目录存进了实例），节点**输出**又只按输入签名命中——于是第二个用户跑同样的工作流会被直接喂回第一个用户的缓存结果，文件也写进第一个用户的目录。
 
 ## 多用户密码登录
 

@@ -23,6 +23,12 @@ The current user is carried through a :class:`contextvars.ContextVar`:
   ``extra_data``, and ``PromptExecutor.execute_async`` restores it for the
   duration of that execution so nodes writing outputs (``SaveImage`` etc.)
   land in the right user's directory even though execution runs in its own task.
+* Each user gets their own prompt cache (``CacheSet``). ComfyUI's default cache
+  is shared by the whole server, which leaks directories between accounts: node
+  *instances* are kept per node id (and e.g. ``SaveImage`` captures
+  ``get_output_directory()`` in ``__init__``), while node *outputs* are keyed by
+  inputs only, so an identical prompt from another user would be served the
+  first user's cached filenames instead of running.
 
 Everything is installed only when ``--multi-user`` is enabled, so a normal
 single-user launch is completely unaffected. Every patch is wrapped in
@@ -365,11 +371,57 @@ def _install_executor_hook() -> None:
 
     orig_exec = execution.PromptExecutor.execute_async
 
+    # One cache set per user. Both halves of ComfyUI's prompt cache are unsafe to
+    # share between accounts:
+    #
+    # * ``objects`` keeps one node *instance* per node id for the lifetime of the
+    #   server, and many nodes capture their directory in ``__init__`` (the core
+    #   ``SaveImage`` does ``self.output_dir = folder_paths.get_output_directory()``).
+    #   The instance created by the first user therefore pins that user's folder
+    #   and every later user writes into it.
+    # * ``outputs`` is keyed by the node's inputs only, so a second user running
+    #   an identical prompt is served the *cached* result of the first one: the
+    #   node never runs, and the filenames it reports point at the first user's
+    #   directory.
+    #
+    # Giving each user their own ``CacheSet`` fixes both without slowing down the
+    # common case (the same user queueing many prompts keeps a warm cache).
+    per_user_caches: dict = {}
+
+    def _cache_for(executor, user: str):
+        cache = per_user_caches.get(user)
+        if cache is not None:
+            return cache
+        try:
+            cache = execution.CacheSet(
+                cache_type=getattr(executor, "cache_type", None),
+                cache_args=getattr(executor, "cache_args", None) or {},
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[XXXXXLCat] could not create per-user cache: %s", exc)
+            return None
+        per_user_caches[user] = cache
+        return cache
+
     async def _patched_execute_async(self, prompt, prompt_id, extra_data=None, execute_outputs=None):
         extra_data = extra_data or {}
         user = None
         if isinstance(extra_data, dict):
             user = extra_data.get("_xuser_assets")
+
+        # Remember the unpatched cache set so the no-user path is untouched.
+        base = getattr(self, "_xcat_base_caches", None)
+        if base is None:
+            base = self.caches
+            self._xcat_base_caches = base
+
+        if user:
+            cache = _cache_for(self, user)
+            if cache is not None:
+                self.caches = cache
+        else:
+            self.caches = base
+
         token = _XUSER.set(user)
         try:
             return await orig_exec(self, prompt, prompt_id, extra_data, execute_outputs or [])
@@ -377,6 +429,17 @@ def _install_executor_hook() -> None:
             _XUSER.reset(token)
 
     execution.PromptExecutor.execute_async = _patched_execute_async
+
+    # ``reset()`` (used by ``/free``) is supposed to drop the prompt caches; drop
+    # the per-user ones as well so freeing memory still works.
+    orig_reset = execution.PromptExecutor.reset
+
+    def _patched_reset(self):
+        orig_reset(self)
+        self._xcat_base_caches = self.caches
+        per_user_caches.clear()
+
+    execution.PromptExecutor.reset = _patched_reset
 
 
 # ---------------------------------------------------------------- public API
