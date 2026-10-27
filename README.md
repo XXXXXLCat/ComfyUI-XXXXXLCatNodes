@@ -13,7 +13,132 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - Canvas switches: `Group Control 🐈‍⬛` (open/close whole canvas groups) and `Node Control 🐈‍⬛` (open/close individual nodes) — one row and one switch each, filterable by colour and name keyword
 - `Resolution Selector 🐈‍⬛`: the official resolution node with a **2-decimal megapixel step** and a **Custom aspect-ratio mode** — choose an aspect ratio and a megapixel target to get width/height, or pick `Custom` to enter explicit width/height; the target steps by 0.01 (two decimals) instead of the official node's 0.1; the megapixel input is hidden in Custom mode; same aspect ratios, live resolution preview, and nearest-multiple rounding
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
-- Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
+- Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`; any other `zh-*` locale (e.g. `zh-TW`) reuses the `zh` bundle instead of falling back to English
+- **Per-user asset isolation** (server-side, auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>` / `output/<user>` so each user's uploads and generations are private; the pre-existing global `input/` / `output/` stays readable as a shared pool
+- **Per-user password login** (server-side, auto-enabled under `--multi-user`): a real password gate on top of ComfyUI's header-only multi-user mode, where each account has its own password and the session is kept in an HttpOnly cookie; a frontend login overlay is provided automatically. Combined with asset isolation, A's password cannot open B's assets
+- **Output gallery** (sidebar tab): browse **every** file in `output/`, not just what this run produced — earlier batches, files copied in by hand, videos written by custom nodes. Grid of thumbnails with type filters, filename search and a click-to-preview lightbox
+
+## Multi-user asset isolation
+
+When ComfyUI is launched with `--multi-user`, this package automatically isolates each
+user's **assets** (`input/` and `output/`) in addition to the settings and workflows that
+ComfyUI already separates. No node to add — it is a server-side patch installed at startup.
+
+- Each user's uploads and generated images land in `input/<user_id>/` and `output/<user_id>/`
+  instead of the shared global folders.
+- The previously global `input/` and `output/` are kept as a **shared pool**: files there are
+  still readable (LoadImage falls back to them, and `/view` serves them) and still appear in
+  the LoadImage picker alongside the user's own files.
+- Resolution is driven by the `comfy-user` request header (multi-user) and by the prompt's
+  owner during execution, so `SaveImage` and friends write to the correct user's directory
+  even though execution runs in its own task.
+- Entirely inert in a normal single-user launch (`install()` early-returns when `--multi-user`
+  is off), so it cannot affect non-multi-user setups.
+
+> Implementation note: it patches `folder_paths.get_input_directory` / `get_output_directory`
+> (per-user subdir), `get_annotated_filepath` / `exists_annotated_filepath` (shared-pool
+> fallback), `LoadImage.INPUT_TYPES` (picker union), the `/view` route (fallback), an aiohttp
+> middleware (`comfy-user` → context), `PromptServer.trigger_on_prompt` (user into
+> `extra_data`), and `PromptExecutor.execute_async` (restore user for execution). Every patch
+> is wrapped in `try/except` and degrades to the official behaviour if a future ComfyUI version
+> moves a patched symbol.
+>
+> Each user also gets an independent prompt cache (`CacheSet`). The stock cache is shared by
+> the whole server, which leaks directories across accounts: node **instances** are kept per
+> node id for the server's lifetime (`SaveImage` stores `get_output_directory()` in `__init__`),
+> and node **outputs** are keyed by inputs only — so the second user running an identical
+> workflow would be served the first user's cached result and write into the first user's folder.
+
+## Multi-user password login
+
+ComfyUI's `--multi-user` distinguishes users solely by the `comfy-user` request header, whose
+value is a UUID from `users.json` — **there is no password**, so anyone who obtains an id can
+impersonate that user. This feature adds a real password gate on top. No node to add — it is a
+server-side patch plus a frontend login overlay (`web/multi_user_auth.js`).
+
+- **Per-account passwords**, hashed with PBKDF2-HMAC-SHA256 and a per-user random salt, stored in
+  `user/user_passwords.json` (next to the official `users.json`). Plaintext is never persisted.
+- **Cookie-based sessions**: on login the server issues a signed token (`xcat_token`, HMAC-signed,
+  30-day TTL by default) as an HttpOnly cookie. Because the cookie is same-origin, the browser
+  automatically attaches it to every later `fetch` *and* WebSocket handshake — no API-client
+  patching required.
+- **Login page**: an unauthenticated `/` returns the built-in dark login page straight from the
+  server (it does not depend on the SPA booting), with a "create account" mode that registers with
+  a password. On success it remembers the ComfyUI user and enters the canvas.
+- **Signing out really signs out**: ComfyUI's own sign-out only clears localStorage and reloads —
+  the session cookie would survive. A sign-out marker is written *synchronously* on click, so the
+  server treats the very next request as anonymous and returns the password page instead of the
+  stock "user select" screen.
+- **The passwordless switcher is closed**: `GET /users` returns only the current account (no full
+  list), and `POST /users` (create without a password) is `403` — accounts come from
+  `/xcat/register`, which demands a password. Switching to another account now requires its
+  password.
+- **Gate scope**: everything except the login/status/logout/register endpoints, the frontend
+  static assets (`/`, `/index.html`, `/extensions/`, `*.js|css|...`) and `OPTIONS` preflight
+  requires a valid session — `/prompt`, `/view`, `/history`, `/ws`, `/users` reads, settings and
+  workflows included. Requests without the cookie get `401`.
+- **Tied to asset isolation**: the authenticated identity overrides the `comfy-user` header and
+  drives `input/<user>/` / `output/<user>/`, so A's password neither logs into B nor reads B's
+  assets.
+
+### Migration path
+
+- **New accounts** require a password at registration and on every login.
+- **Legacy passwordless accounts** (created before this feature) may log in **once with an empty
+  password**, then set a password via `POST /xcat/set_password`; afterwards the empty password no
+  longer works. An admin can instead set passwords for all accounts via the endpoint below.
+- **Admin bootstrap** (optional): put `"admin_password": "..."` in `user/auth_config.json`, then
+  call `POST /xcat/admin/set_password` with `{admin_password, user_id, password}` for any account.
+- Session lifetime is adjustable via `"token_ttl_seconds"` in `user/auth_config.json`.
+
+### Endpoints (all under `/xcat/`)
+
+| Method & path | Purpose |
+| --- | --- |
+| `POST /xcat/register` | Create an account with a password `{username, password}` |
+| `POST /xcat/login` | Username + password; sets the session cookie |
+| `GET  /xcat/auth_status` | Whether the current request is authenticated |
+| `POST /xcat/set_password` | Change your own password (login required; old password if set) |
+| `POST /xcat/admin/set_password` | Admin sets any account's password (needs `admin_password`) |
+| `POST /xcat/logout` | Clear the cookie |
+
+> In a single-user launch the feature is entirely off: no `/xcat/*` routes exist, and the overlay
+> hides itself on a 404, so behaviour matches vanilla ComfyUI.
+
+## Output gallery
+
+ComfyUI's sidebar **Assets** panel only lists what it knows about: `Generated` is what this
+frontend session produced (derived from the queue history, wiped on reload), `Imported` is what
+was uploaded into `input/`. **Files that already sit on disk never show up** — outputs from an
+earlier batch, files copied in by hand, videos written by a custom node.
+
+This feature adds a **History Gallery** sidebar tab that enumerates the whole `output/` tree.
+No node to add.
+
+- **Grid browsing**: each card shows a thumbnail, filename, size and timestamp, newest first.
+  Clicking opens a lightbox — images are shown at full size, video/audio play inline, with
+  "open in new tab" and "download" actions.
+- **Every media kind renders**: images fit their long edge (never cropped, letterboxed on the
+  card's placeholder fill), videos use a real first frame behind a play scrim, audio decodes its
+  waveform in the browser and is playable right in the tile, text prints its opening lines and 3D
+  models fall back to the box glyph — the same faces the built-in **Assets** panel draws. Hovering
+  a card scales its thumbnail slightly (1.05×).
+- **Filter and search**: `All / Images / Videos / Audio / Other` chips plus a live filename
+  search over `subfolder/filename`.
+- **Cheap thumbnails**: images are downscaled to 512px WebP server-side (with an in-memory
+  cache), and the grid only renders the visible batch, pulling more as you scroll.
+- **Scoped under multi-user**: with `--multi-user` the gallery lists only your own
+  `output/<user>/` tree (labelled *mine*) plus the legacy global pool (cards tagged **Shared**);
+  other accounts' directories are neither listed nor reachable.
+- **Read-only**: no route here deletes, renames or moves anything.
+
+> Implementation: `nodes/history_gallery.py` registers two read-only routes — `GET /xcat/outputs`
+> (manifest, capped at the newest 5000 entries when needed) and `GET /xcat/outputs/file`
+> (file or thumbnail). Path resolution verifies the request really lands inside the matching root,
+> and the shared scope additionally rejects any path inside another account's directory. The
+> frontend (`web/history_gallery.js`) registers a `type: "custom"` tab through
+> `app.extensionManager.registerSidebarTab`. It works in single-user and multi-user mode; under
+> multi-user it sits behind the same password gate and returns `401` when signed out.
 
 ## Node reference
 

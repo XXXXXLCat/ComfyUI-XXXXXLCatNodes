@@ -23,6 +23,7 @@ import {
   pointIn,
   nodeActive,
 } from "./control_panel.js";
+import { pick } from "./i18n.js";
 
 /* ---------------------------------------------------------------- constants */
 
@@ -70,20 +71,32 @@ function groupTint(n, groups) {
 registerControl({
   nodeId: NODE_ID,
   name: "XXXXXLCat.NodeControl",
-  settingsLabel: `${BRAND} Node Control Settings`,
+  settingsLabel: () => pick({ zh: `${BRAND} 节点控制设置`, en: `${BRAND} Node Control Settings` }),
   build(node) {
     return createControlPanel(node, {
       store: STORE,
       prefix: P,
-      settingsTitle: "Node Control Settings",
-      emptyIdle: "No controllable nodes on the canvas",
-      emptyFiltered: "No matching nodes",
-      emptyNoKeyword: "Type a name keyword to list nodes",
-      unitHint: (shown, total) => `Showing ${shown} / ${total} nodes`,
-      keywordLabel: "Name / type keywords (semicolon-separated, any match)",
-      keywordPlaceholder: "Separate keywords with ; e.g. KSampler; sampling; LORA",
-      colorLabel: "Color filter (multi-select; uncolored nodes inherit their group's color)",
-      paletteEmpty: "No nodes or groups on the canvas have a color set",
+      settingsTitle: { zh: "节点控制设置", en: "Node Control Settings" },
+      emptyIdle: { zh: "画布上还没有可控节点", en: "No controllable nodes on the canvas" },
+      emptyFiltered: { zh: "没有符合筛选条件的节点", en: "No matching nodes" },
+      emptyNoKeyword: { zh: "输入名称关键词以列出节点", en: "Type a name keyword to list nodes" },
+      unitHint: (shown, total) => ({
+        zh: `显示 ${shown} / ${total} 个节点`,
+        en: `Showing ${shown} / ${total} nodes`,
+      }),
+      keywordLabel: {
+        zh: "名称 / 类型关键词（分号分隔，任一命中）",
+        en: "Name / type keywords (semicolon-separated, any match)",
+      },
+      keywordPlaceholder: {
+        zh: "用 ; 分隔多个关键词，例如 KSampler; 采样; LORA",
+        en: "Separate keywords with ; e.g. KSampler; sampling; LORA",
+      },
+      colorLabel: {
+        zh: "颜色筛选（可多选；未上色的节点沿用所在组的颜色）",
+        en: "Color filter (multi-select; uncolored nodes inherit their group's color)",
+      },
+      paletteEmpty: { zh: "画布上没有节点或组设置过颜色", en: "No nodes or groups on the canvas have a color set" },
 
       palette() {
         const groups = readGroups();
@@ -98,7 +111,8 @@ registerControl({
         for (const n of g._nodes) {
           if (n === node) continue; // never switch itself off
           if (SKIP_TYPES.has(n.type)) continue;
-          const title = (n.title || "").trim() || (n.type || "").trim() || "Untitled node";
+          const title =
+            (n.title || "").trim() || (n.type || "").trim() || pick({ zh: "未命名节点", en: "Untitled node" });
           const type = (n.type || "").trim();
           out.push({
             key: String(n.id != null ? n.id : title),
