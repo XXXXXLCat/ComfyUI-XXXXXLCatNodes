@@ -178,15 +178,93 @@ import { pick } from "./i18n.js";
     if (status === "need") buildOverlay();
   }
 
-  function run() {
+  // The frontend's sign-out button only clears localStorage and reloads
+  // (SidebarLogoutIcon.vue -> userStore.logout() -> location.reload()). Our
+  // session cookie would survive that, so the page would come back signed in as
+  // the previous user — and the stock "user select" screen, fed by /users, would
+  // let anyone hop to another account without a password. Treat a missing or
+  // mismatched localStorage identity as a real sign-out.
+  async function guardIdentity() {
+    let j;
+    try {
+      const r = await fetch("/xcat/auth_status", { credentials: "same-origin" });
+      if (!r.ok) return false;                          // 404 => auth disabled
+      j = await r.json();
+    } catch (e) {
+      return false;
+    }
+    if (!j || !j.authenticated) return false;
+
+    let local = null;
+    try { local = localStorage["Comfy.userId"]; } catch (e) {}
+    if (local === j.user_id) return false;
+
+    await signOut();
+    return true;
+  }
+
+  async function signOut() {
+    markSignedOut();
+    try {
+      await fetch("/xcat/logout", { method: "POST", credentials: "same-origin", keepalive: true });
+    } catch (e) {}
+    try {
+      delete localStorage["Comfy.userId"];
+      delete localStorage["Comfy.userName"];
+    } catch (e) {}
+    // A full navigation (not a reload) makes the server serve the password page
+    // again; the app shell must not be reused from cache here.
+    location.replace("/");
+  }
+
+  // Sign-out marker, written *synchronously* from the click handler. The
+  // built-in sign-out clears localStorage and reloads straight away, so an
+  // awaited request would race the unload; a cookie assignment cannot. The
+  // server treats `xcat_logout=1` as "no session", which is what makes the very
+  // next document request come back as the password page instead of the stock
+  // "user select" screen (that screen does not even load custom extensions, so
+  // nothing in here could redirect it).
+  function markSignedOut() {
+    try {
+      document.cookie = "xcat_logout=1; path=/; max-age=120; samesite=lax";
+    } catch (e) {}
+  }
+
+  // Drop the cookie the moment the built-in sign-out is clicked, so the next
+  // document request is already anonymous and the stock user-select screen
+  // never gets a chance to appear. Deliberately narrow: only the sidebar's
+  // `pi-sign-out` icon or an exact sign-out label arms it, because a false
+  // positive would log the user out unexpectedly.
+  function armSignOutHook() {
+    document.addEventListener("click", (ev) => {
+      const t = ev.target;
+      const el = t && t.closest ? t.closest("button, a, [role='button'], .sidebar-item") : null;
+      if (!el) return;
+      const icon = !!el.querySelector("i.pi-sign-out, .pi-sign-out");
+      const label = `${el.title || ""} ${el.getAttribute("aria-label") || ""} ${el.textContent || ""}`
+        .trim()
+        .toLowerCase();
+      const named =
+        /^(退出登录|登出|注销|sign out|log ?out)(\s|\(|$)/.test(label) && !/everywhere/.test(label);
+      if (!icon && !named) return;
+      markSignedOut();
+      try {
+        fetch("/xcat/logout", { method: "POST", credentials: "same-origin", keepalive: true });
+      } catch (e) {}
+    }, true);
+  }
+
+  async function run() {
     if (document.getElementById(OVERLAY_ID)) return;
+    armSignOutHook();
+    if (await guardIdentity()) return;                 // navigated to the login page
     if (document.readyState === "loading")
       document.addEventListener("DOMContentLoaded", maybeShowOverlay);
     else maybeShowOverlay();
   }
 
   // ComfyUI loads this as an extension module; run immediately.
-  run();
+  run().catch(() => {});
 
   // Also register via the official extension API when present (no-op fallback).
   try {

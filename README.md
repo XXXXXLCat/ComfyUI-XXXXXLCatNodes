@@ -62,9 +62,17 @@ server-side patch plus a frontend login overlay (`web/multi_user_auth.js`).
   30-day TTL by default) as an HttpOnly cookie. Because the cookie is same-origin, the browser
   automatically attaches it to every later `fetch` *and* WebSocket handshake — no API-client
   patching required.
-- **Login overlay**: when the frontend loads unauthenticated, a dark neutral login box appears
-  (username + password), with a "create account" mode that registers with a password. On success
-  it remembers the ComfyUI user and reloads.
+- **Login page**: an unauthenticated `/` returns the built-in dark login page straight from the
+  server (it does not depend on the SPA booting), with a "create account" mode that registers with
+  a password. On success it remembers the ComfyUI user and enters the canvas.
+- **Signing out really signs out**: ComfyUI's own sign-out only clears localStorage and reloads —
+  the session cookie would survive. A sign-out marker is written *synchronously* on click, so the
+  server treats the very next request as anonymous and returns the password page instead of the
+  stock "user select" screen.
+- **The passwordless switcher is closed**: `GET /users` returns only the current account (no full
+  list), and `POST /users` (create without a password) is `403` — accounts come from
+  `/xcat/register`, which demands a password. Switching to another account now requires its
+  password.
 - **Gate scope**: everything except the login/status/logout/register endpoints, the frontend
   static assets (`/`, `/index.html`, `/extensions/`, `*.js|css|...`) and `OPTIONS` preflight
   requires a valid session — `/prompt`, `/view`, `/history`, `/ws`, `/users` reads, settings and

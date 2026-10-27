@@ -31,6 +31,17 @@ Design
   Everything else (``/prompt``, ``/view``, ``/userdata``, ``/history``, ``/ws``,
   ``/users``, ...) requires a session, including paths that merely *look*
   static such as ``/api/userdata/user.css``.
+* **``/users`` is locked down** (see ``_users_guard``): the official endpoint
+  returns every account and lets anyone create one without a password, which is
+  what powers the frontend's passwordless "user select" screen. A session now
+  only sees its own account and account creation goes through
+  ``/xcat/register``.
+* **Sign-out marker**: the frontend's sign-out only clears ``localStorage``. A
+  ``xcat_logout=1`` cookie (written synchronously on click, 2 min TTL) makes the
+  next document request count as anonymous, so the browser lands on the password
+  page rather than the stock "user select" screen — that screen does not load
+  custom extensions, so nothing on the client could redirect it. ``/xcat/login``
+  clears the marker.
 
 The validated user id is published through the ``_XAUTH_USER`` contextvar so the
 sibling ``multi_user_assets`` module isolates ``input/`` & ``output/`` for the
@@ -268,6 +279,18 @@ def _token_from_request(request) -> Optional[str]:
 
 
 def _authenticated_user(request) -> Optional[str]:
+    # A sign-out marker wins over a still-valid token. The frontend's sign-out
+    # button only clears localStorage and reloads, and the page it lands on
+    # (the stock "user select" screen) never loads custom extensions — so a
+    # redirect from our own JS cannot be relied on there. The marker cookie is
+    # written *synchronously* by the click handler and therefore survives the
+    # reload, which lets the server serve the password page instead.
+    try:
+        if request.cookies.get("xcat_logout") == "1":
+            return None
+    except Exception:
+        pass
+
     uid = _verify_token(_token_from_request(request))
     if uid is None:
         return None
@@ -504,6 +527,36 @@ def _is_login_entry(request) -> bool:
     )
 
 
+# ---------------------------------------------------------------- /users guard
+
+def _users_guard(request, uid: str):
+    """Neutralise the official ``/users`` endpoints.
+
+    ``GET /users`` returns *every* account id/name, and ``POST /users`` creates
+    an account with no password. That pair is exactly what the frontend's
+    "user select" screen is built on (``api.getUserConfig`` -> list -> pick ->
+    ``localStorage['Comfy.userId']``), so leaving them untouched lets anyone
+    hop between accounts with a single click and no credentials.
+
+    With password auth on, a session may only ever see its own account, and new
+    accounts must come from ``/xcat/register`` (which requires a password).
+    Returns a response to short-circuit, or ``None`` to fall through.
+    """
+    if request.path != "/users":
+        return None
+    if request.method == "GET":
+        users = _users_map()
+        if uid in users:
+            return web.json_response({"storage": "server", "users": {uid: users[uid]}})
+        return web.json_response({"storage": "server", "users": {}})
+    if request.method == "POST":
+        return web.json_response(
+            {"error": "accounts must be created with a password via /xcat/register"},
+            status=403,
+        )
+    return None
+
+
 # ---------------------------------------------------------------- middleware
 
 @web.middleware
@@ -522,6 +575,9 @@ async def _auth_middleware(request, handler):
             return await handler(request)
         if uid is None:
             return web.json_response({"error": "unauthorized"}, status=401)
+        guarded = _users_guard(request, uid)
+        if guarded is not None:
+            return guarded
         return await handler(request)
     finally:
         _XAUTH_USER.reset(token)
@@ -605,6 +661,8 @@ def _login_ok(token: str, user_id: str):
         httponly=True,
         samesite="lax",
     )
+    # A fresh session must not inherit a pending sign-out marker.
+    resp.del_cookie("xcat_logout", path="/")
     return resp
 
 
@@ -665,7 +723,8 @@ async def _h_auth_status(request):
 async def _h_logout(request):
     from aiohttp import web
     resp = web.json_response({"ok": True})
-    resp.del_cookie("xcat_token")
+    resp.del_cookie("xcat_token", path="/")
+    resp.del_cookie("xcat_logout", path="/")
     return resp
 
 
