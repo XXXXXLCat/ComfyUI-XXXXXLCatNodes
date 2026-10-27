@@ -29,6 +29,8 @@ The current user is carried through a :class:`contextvars.ContextVar`:
   ``get_output_directory()`` in ``__init__``), while node *outputs* are keyed by
   inputs only, so an identical prompt from another user would be served the
   first user's cached filenames instead of running.
+* Job listings (``/history``, ``/queue``, ``/jobs``) are filtered to the caller,
+  so nobody sees another account's prompts or output filenames.
 
 Everything is installed only when ``--multi-user`` is enabled, so a normal
 single-user launch is completely unaffected. Every patch is wrapped in
@@ -442,6 +444,86 @@ def _install_executor_hook() -> None:
     execution.PromptExecutor.reset = _patched_reset
 
 
+def _install_job_visibility() -> None:
+    """Show each user only their own jobs (``/history``, ``/queue``, ``/jobs``).
+
+    ComfyUI keeps one history and one queue for the whole server, so without
+    this every account sees the others' prompts — and the output filenames in
+    them no longer resolve, because each user has a private output folder now.
+    Queue items and history entries both carry the prompt's ``extra_data``,
+    which is where the executing user is recorded.
+    """
+    import copy
+
+    import execution
+
+    def _item_user(item):
+        try:
+            ed = item[3]
+        except Exception:
+            return None
+        return ed.get("_xuser_assets") if isinstance(ed, dict) else None
+
+    def _entry_user(entry):
+        try:
+            return _item_user(entry["prompt"])
+        except Exception:
+            return None
+
+    def _mine(item, user, getter):
+        return getter(item) == user
+
+    # --- history ---------------------------------------------------------
+    orig_history = execution.PromptQueue.get_history
+
+    def _patched_get_history(self, prompt_id=None, max_items=None, offset=-1, map_function=None):
+        user = _current_user()
+        if not user:
+            return orig_history(self, prompt_id, max_items, offset, map_function)
+
+        with self.mutex:
+            if prompt_id is not None:
+                item = self.history.get(prompt_id)
+                if item is None or not _mine(item, user, _entry_user):
+                    return {}
+                return {prompt_id: map_function(item) if map_function is not None else copy.deepcopy(item)}
+
+            items = [(k, v) for k, v in self.history.items() if _mine(v, user, _entry_user)]
+            if offset < 0:
+                offset = max(0, len(items) - max_items) if max_items is not None else 0
+            items = items[offset:]
+            if max_items is not None:
+                items = items[:max_items]
+            return {
+                k: map_function(v) if map_function is not None else v
+                for k, v in items
+            }
+
+    execution.PromptQueue.get_history = _patched_get_history
+
+    # --- live queue ------------------------------------------------------
+    for name in ("get_current_queue", "get_current_queue_volatile"):
+        orig_queue = getattr(execution.PromptQueue, name, None)
+        if orig_queue is None or getattr(orig_queue, "_xuser_patched", False):
+            continue
+
+        def _make(orig_queue):
+            def _patched(self, *a, **k):
+                running, pending = orig_queue(self, *a, **k)
+                user = _current_user()
+                if not user:
+                    return running, pending
+                return (
+                    [x for x in running if _mine(x, user, _item_user)],
+                    [x for x in pending if _mine(x, user, _item_user)],
+                )
+            return _patched
+
+        patched = _make(orig_queue)
+        patched._xuser_patched = True
+        setattr(execution.PromptQueue, name, patched)
+
+
 # ---------------------------------------------------------------- public API
 
 def install() -> bool:
@@ -461,6 +543,7 @@ def install() -> bool:
         _install_loadimage_picker()
         _install_server_hooks()
         _install_executor_hook()
+        _install_job_visibility()
         _INSTALLED = True
         logger.info("[XXXXXLCat] multi-user asset isolation enabled "
                     "(input/<user> & output/<user>, global pool kept readable)")
