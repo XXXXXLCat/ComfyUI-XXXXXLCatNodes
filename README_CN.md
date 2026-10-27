@@ -14,6 +14,18 @@
 - `分辨率选择器 🐈‍⬛`：官方分辨率节点的**两位小数百万像素步进**版，并新增**「自定义」宽高比**——选宽高比+目标百万像素得到宽高，或选「自定义」直接填宽高；步进 0.01（两位小数）而非官方 0.1；「自定义」模式下百万像素输入自动隐藏，而内置实时预览依然显示真实输出尺寸。宽高比选项与按最接近倍数取整均一致
 - 零第三方依赖（ctypes + nvidia-smi）
 - 节点名、描述与控件标签跟随 ComfyUI 界面语言自动切换（`locales/zh`、`locales/en`）
+- **多用户资产隔离**（服务端功能，`--multi-user` 下自动启用）：`input/` 与 `output/` 变为 `input/<user>` / `output/<user>`，每个用户的上传与生成物相互独立；原有的全局 `input/` / `output/` 保留为可读的共享池
+
+## 多用户资产隔离
+
+以 `--multi-user` 启动 ComfyUI 时，本包会**额外**把每个用户的**资产**（`input/` 与 `output/`）也隔离开，而不只是 ComfyUI 原本就会分开的设置与工作流。无需添加任何节点——这是启动时自动安装的服务端补丁。
+
+- 每个用户的上传图片与生成结果落在 `input/<user_id>/` 与 `output/<user_id>/`，而非共享的全局目录。
+- 原先的全局 `input/` 与 `output/` 保留为**共享池**：其中的文件仍可被读取（LoadImage 会回退到它们，`/view` 也能显示），并且在 LoadImage 选择器里与用户自己的文件一并出现。
+- 路径解析由多用户的 `comfy-user` 请求头、以及执行期的 prompt 归属共同决定，因此 `SaveImage` 等节点即便在执行线程里，也会把文件写到对应用户的目录。
+- 普通单用户启动下完全无害（`install()` 在 `--multi-user` 关闭时直接返回），不会影响非多用户环境。
+
+> 实现说明：本功能改写 `folder_paths.get_input_directory` / `get_output_directory`（返回每用户子目录）、`get_annotated_filepath` / `exists_annotated_filepath`（共享池回退）、`LoadImage.INPUT_TYPES`（选择器合并）、`/view` 路由（回退）；并加装 aiohttp 中间件（把 `comfy-user` 头写入上下文）、改写 `PromptServer.trigger_on_prompt`（把用户写入 `extra_data`）与 `PromptExecutor.execute_async`（执行期恢复用户上下文）。每个补丁都包了 `try/except`，若未来 ComfyUI 版本挪动了被改写的符号，会自动回退到官方行为。
 
 ## 节点详解
 

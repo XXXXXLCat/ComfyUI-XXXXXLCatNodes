@@ -14,6 +14,32 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - `Resolution Selector 🐈‍⬛`: the official resolution node with a **2-decimal megapixel step** and a **Custom aspect-ratio mode** — choose an aspect ratio and a megapixel target to get width/height, or pick `Custom` to enter explicit width/height; the target steps by 0.01 (two decimals) instead of the official node's 0.1; the megapixel input is hidden in Custom mode; same aspect ratios, live resolution preview, and nearest-multiple rounding
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
+- **Per-user asset isolation** (server-side, auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>` / `output/<user>` so each user's uploads and generations are private; the pre-existing global `input/` / `output/` stays readable as a shared pool
+
+## Multi-user asset isolation
+
+When ComfyUI is launched with `--multi-user`, this package automatically isolates each
+user's **assets** (`input/` and `output/`) in addition to the settings and workflows that
+ComfyUI already separates. No node to add — it is a server-side patch installed at startup.
+
+- Each user's uploads and generated images land in `input/<user_id>/` and `output/<user_id>/`
+  instead of the shared global folders.
+- The previously global `input/` and `output/` are kept as a **shared pool**: files there are
+  still readable (LoadImage falls back to them, and `/view` serves them) and still appear in
+  the LoadImage picker alongside the user's own files.
+- Resolution is driven by the `comfy-user` request header (multi-user) and by the prompt's
+  owner during execution, so `SaveImage` and friends write to the correct user's directory
+  even though execution runs in its own task.
+- Entirely inert in a normal single-user launch (`install()` early-returns when `--multi-user`
+  is off), so it cannot affect non-multi-user setups.
+
+> Implementation note: it patches `folder_paths.get_input_directory` / `get_output_directory`
+> (per-user subdir), `get_annotated_filepath` / `exists_annotated_filepath` (shared-pool
+> fallback), `LoadImage.INPUT_TYPES` (picker union), the `/view` route (fallback), an aiohttp
+> middleware (`comfy-user` → context), `PromptServer.trigger_on_prompt` (user into
+> `extra_data`), and `PromptExecutor.execute_async` (restore user for execution). Every patch
+> is wrapped in `try/except` and degrades to the official behaviour if a future ComfyUI version
+> moves a patched symbol.
 
 ## Node reference
 
