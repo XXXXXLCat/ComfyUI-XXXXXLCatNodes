@@ -2,7 +2,7 @@
 
 <p align="center"><a href="README_CN.md">🇨🇳 中文</a> ·<strong>🇺🇸 English</strong></p>
 
-Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, plus MiniMax H3 image/text-to-video conditioning and multi-LoRA stacking in one node.
+Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, plus MiniMax H3 image/text-to-video conditioning.
 
 ## Features
 
@@ -11,8 +11,6 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - MiniMax H3 sampling helper: `H3 Image to Video 🐈‍⬛`
 - `Any Switch 🐈‍⬛`: a 9-way any-type router that forwards the single populated input and errors if zero or more than one branch runs — switch branches upstream, no rewiring
 - Canvas switches: `Group Control 🐈‍⬛` (open/close whole canvas groups) and `Node Control 🐈‍⬛` (open/close individual nodes) — one row and one switch each, filterable by colour and name keyword
-- `Load LoRA Stack 🐈‍⬛`: stack several LoRAs on one model in a single node — one row per LoRA with its own strength and on/off switch, applied top to bottom; one model clone instead of N, off or empty rows are never read, and every row reports how many of its keys matched the model
-- `Load LoRA Stack (Model and CLIP) 🐈‍⬛`: the same stack, but each row also patches the CLIP — style LoRAs need the text encoder to see them too; each row carries its own model strength and CLIP strength, a side at 0 is not patched at all, and again one clone each
 - `Resolution Selector 🐈‍⬛`: the official resolution node with a **2-decimal megapixel step** and a **Custom aspect-ratio mode** — choose an aspect ratio and a megapixel target to get width/height, or pick `Custom` to enter explicit width/height; the target steps by 0.01 (two decimals) instead of the official node's 0.1; the megapixel input is hidden in Custom mode; same aspect ratios, live resolution preview, and nearest-multiple rounding
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
@@ -43,11 +41,6 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 **Principle:** the same panel pointed one level down, so each row is a single canvas node rather than a group. Keywords match the node title **or its type**, multiple keywords are OR'ed, and a node that was never coloured inherits its group's colour, so a colour filter still gathers everything inside a coloured group. Notes, reroutes, primitives and the control node itself are never listed.
 **Usage:** use it for the handful of nodes that never made it into a group — type `KSampler, 采样` in the settings to keep only those rows, then flip them as one. Same three modes and the same bypass/mute choice as Group Control; the panel width you drag out is remembered in the workflow.
 
-### Load LoRA Stack 🐈‍⬛
-**Principle:** folds a chain of `Lora Loader (Model Only)` nodes into one node — one row per LoRA with its own strength and switch, applied top to bottom. The result is identical to chaining the official node (patches land in the same per-layer key list, in the same order), but the model is cloned **once** instead of once per LoRA; a row that is off, empty or at strength 0 is neither read from disk nor patched; loaded files are cached by path + mtime so a re-run does not re-read them; and every row reports how many of its keys matched the model, so a LoRA that does nothing on this checkpoint becomes visible instead of silent.
-**Usage:** `model` in, `model` out — model only, no CLIP. Four rows are shown by default; **Add LoRA** appends an empty row, and **Remove empty rows** clears every row that holds no LoRA at once — the kept rows close up in the same order, each bringing its own strength and switch along; with nothing selected at all a single row is left. Up to twelve rows. Unused high rows are hidden, but a row that already holds a LoRA is never hidden, so a LoRA you cannot see is never applied. To park a row, just switch it off.
-
-### Load LoRA Stack (Model and CLIP) 🐈‍⬛
 
 ### Resolution Selector 🐈‍⬛
 **This is the official node, with three tweaks.** Same aspect ratios, same live resolution preview, same nearest-multiple rounding, same integer width/height outputs as `comfy_extras/nodes_resolution.py`. Differences: (1) the `megapixels` target steps by **0.01** (two decimal places) instead of the official node's 0.1, so you can dial in a resolution like 1.05 MP rather than being limited to one decimal (0 is also accepted and yields a 0×0 size); (2) the aspect-ratio selector adds a **Custom** option — choosing it reveals explicit **Width** / **Height** fields (rounded to the nearest `multiple`) instead of deriving size from megapixels; (3) the `megapixels` input is **hidden while `Custom` is selected**, because it has no effect on the result in that mode.
@@ -74,24 +67,16 @@ ComfyUI/custom_nodes/
     │   ├── group_control.py
     │   ├── node_control.py
     │   └── resolution_selector.py  # official Resolution Selector: 0.01 MP step + Custom size mode
-    │   ├── lora_rows.py       # row engine shared by both LoRA stacks (schema / rows / file cache)
-    │   ├── lora_stack.py      # model only
-    │   └── lora_stack_clip.py  # model + CLIP
     ├── locales/         # front-end strings, served through the core /i18n route
     │   ├── en/nodeDefs.json
     │   └── zh/nodeDefs.json
     ├── scripts/
-    │   ├── check_locales.py        # validates locales against the live node schemas
-    │   ├── test_lora_stack.py      # both stacks, backend: equivalence (both sides) + rows + cache
-    │   ├── test_lora_stack_ui.mjs  # both stacks, front end: add / collapse / hide / height
+    │   └── check_locales.py        # validates locales against the live node schemas
     ├── pyproject.toml   # node metadata (recognized by ComfyUI-Manager)
     └── web/
         ├── monitor.js        # menu-bar telemetry strip + cleanup buttons (auto-loaded by ComfyUI)
         ├── group_control.js  # panel for Group Control 🐈‍⬛
         ├── node_control.js   # panel for Node Control 🐈‍⬛
-        ├── lora_rows.js      # row engine shared by both LoRA stacks
-        ├── lora_stack.js     # model-only stack: registers with the shared engine
-        ├── lora_stack_clip.js# model + CLIP stack: registers with the shared engine
         ├── any_switch.js     # dynamic ports for Any Switch 🐈‍⬛
         └── resolution_selector.js  # hides megapixels in Custom mode, feeds the built-in preview
 ```

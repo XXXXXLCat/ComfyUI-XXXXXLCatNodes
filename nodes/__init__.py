@@ -7,8 +7,6 @@ from .h3_image_to_video import XXXXXLCatH3ImageToVideo
 from .any_switch import XXXXXLCatAnySwitch
 from .group_control import XXXXXLCatGroupControl
 from .node_control import XXXXXLCatNodeControl
-from .lora_stack import XXXXXLCatStackLoras
-from .lora_stack_clip import XXXXXLCatStackLorasClip
 from .resolution_selector import XXXXXLCatResolutionSelector
 
 __all__ = [
@@ -18,7 +16,5 @@ __all__ = [
     "XXXXXLCatAnySwitch",
     "XXXXXLCatGroupControl",
     "XXXXXLCatNodeControl",
-    "XXXXXLCatStackLoras",
-    "XXXXXLCatStackLorasClip",
     "XXXXXLCatResolutionSelector",
 ]
