@@ -736,11 +736,37 @@ function buildPanel(host) {
 
 // ------------------------------------------------------------------ register
 
+// Sit just above the "Assets" tab. Core exposes the tab list as a reactive
+// array, so splicing it re-renders the icon strip — no core patching involved.
+function sidebarTabArray() {
+    const manager = app?.extensionManager;
+    const ref = manager?.getSidebarTabs?.();
+    const tabs = Array.isArray(ref) ? ref : ref?.value || manager?.sidebarTab?.sidebarTabs;
+    return Array.isArray(tabs) ? tabs : null;
+}
+
+function placeAboveAssets() {
+    const tabs = sidebarTabArray();
+    if (!tabs) return false;
+    const from = tabs.findIndex((tab) => tab?.id === TAB_ID);
+    const anchor = tabs.findIndex((tab) => tab?.id === "assets");
+    if (from < 0) return false;
+    // No Assets tab (very old frontend) — keep the default append position.
+    if (anchor < 0 || from === anchor - 1) return true;
+    const [mine] = tabs.splice(from, 1);
+    // Removing a tab above the anchor shifts the anchor down by one.
+    tabs.splice(from < anchor ? anchor - 1 : anchor, 0, mine);
+    return true;
+}
+
 function registerTab() {
     const manager = app?.extensionManager;
     if (!manager || typeof manager.registerSidebarTab !== "function") return false;
-    const tabs = manager.sidebarTabs;
-    if (Array.isArray(tabs) && tabs.some((tab) => tab?.id === TAB_ID)) return true;
+    const tabs = sidebarTabArray();
+    if (tabs && tabs.some((tab) => tab?.id === TAB_ID)) {
+        placeAboveAssets();
+        return true;
+    }
 
     let cleanup = null;
     manager.registerSidebarTab({
@@ -758,6 +784,10 @@ function registerTab() {
             cleanup = null;
         },
     });
+    placeAboveAssets();
+    // Extensions load in folder-name order, so a tab registered later could
+    // still land above us — re-assert the slot once the dust settles.
+    setTimeout(placeAboveAssets, 1000);
     return true;
 }
 
