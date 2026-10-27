@@ -76,7 +76,13 @@
           const lp = await fetch("/xcat/login", post({ username, password }));
           if (!lp.ok) { errBox.textContent = (await lp.json().catch(() => ({}))).error || "登录失败"; return; }
           const j = await lp.json();
-          try { localStorage.setItem("Comfy-User", j.user_id); } catch (e) {}
+          // Match what the official userStore expects, so the app goes straight
+          // to the canvas instead of bouncing to /user-select.
+          try {
+            localStorage["Comfy.userId"] = j.user_id;
+            localStorage["Comfy.userName"] = j.username || username;
+            localStorage["Comfy-User"] = j.user_id;
+          } catch (e) {}
           location.reload();
         } catch (e) {
           errBox.textContent = "网络错误，请重试";

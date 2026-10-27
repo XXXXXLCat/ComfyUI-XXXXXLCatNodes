@@ -329,6 +329,145 @@ def _is_public(request) -> bool:
     return os.path.splitext(path)[1].lower() in _STATIC_EXT
 
 
+# ---------------------------------------------------------------- login page
+
+_LOGIN_PAGE = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多用户登录</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; background: #121212; color: #fff;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .card {
+    width: 340px; padding: 28px 26px; background: #1e1e1e;
+    border: 1px solid #333; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5);
+  }
+  h1 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  p.sub { margin: 0 0 18px; font-size: 12px; color: #a8a8a8; }
+  form { display: flex; flex-direction: column; gap: 10px; }
+  input {
+    width: 100%; padding: 9px 11px; font-size: 14px; color: #fff; background: #2a2a2a;
+    border: 1px solid #3a3a3a; border-radius: 6px; outline: none;
+  }
+  input:focus { border-color: #5a5a5a; }
+  button {
+    padding: 10px; font-size: 14px; color: #fff; background: #4a4a4a;
+    border: 1px solid #5a5a5a; border-radius: 6px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #565656; }
+  button:disabled { opacity: .6; cursor: default; }
+  .err { min-height: 16px; font-size: 12px; color: #ff8080; }
+  .foot { margin-top: 14px; text-align: center; }
+  .link {
+    padding: 0; background: none; border: none; color: #9a9a9a;
+    font-size: 12px; text-decoration: underline; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🐈‍⬛ 多用户登录</h1>
+    <p class="sub">请输入该账号的用户名和密码</p>
+    <form id="f" autocomplete="on">
+      <input id="u" name="username" placeholder="用户名" autocomplete="username" autofocus>
+      <input id="p" name="password" type="password" placeholder="密码" autocomplete="current-password">
+      <input id="np" name="newpassword" type="password" placeholder="设置密码" autocomplete="new-password" hidden>
+      <div class="err" id="e"></div>
+      <button id="b" type="submit">登录</button>
+    </form>
+    <div class="foot"><button class="link" id="t" type="button">新建账号</button></div>
+  </div>
+<script>
+(function () {
+  var user = document.getElementById("u"),
+      pass = document.getElementById("p"),
+      np = document.getElementById("np"),
+      err = document.getElementById("e"),
+      btn = document.getElementById("b"),
+      toggle = document.getElementById("t"),
+      mode = "login";
+
+  function setMode(m) {
+    mode = m;
+    np.hidden = m !== "register";
+    btn.textContent = m === "register" ? "注册并登录" : "登录";
+    toggle.textContent = m === "register" ? "返回登录" : "新建账号";
+    err.textContent = "";
+  }
+  toggle.addEventListener("click", function () {
+    setMode(mode === "login" ? "register" : "login");
+  });
+
+  function post(url, body) {
+    return fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  document.getElementById("f").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    err.textContent = "";
+    btn.disabled = true;
+    try {
+      var username = user.value.trim(), password = pass.value;
+      if (mode === "register") {
+        var rp = await post("/xcat/register", { username: username, password: np.value });
+        if (!rp.ok) { err.textContent = (await rp.json().catch(function () { return {}; })).error || "注册失败"; return; }
+      }
+      var lp = await post("/xcat/login", { username: username, password: password });
+      var body = await lp.json().catch(function () { return {}; });
+      if (!lp.ok) { err.textContent = body.error || "登录失败"; return; }
+      // The official frontend reads the active user from
+      // localStorage["Comfy.userId"] (see userStore: needsLogin is
+      // !Comfy.userId && isMultiUserServer). Without this it would bounce to
+      // /user-select, where anyone could pick any account without a password.
+      try {
+        localStorage["Comfy.userId"] = body.user_id;
+        localStorage["Comfy.userName"] = body.username || username;
+        localStorage["Comfy-User"] = body.user_id;
+      } catch (e) {}
+      location.replace("/");
+    } catch (e) {
+      err.textContent = "网络错误，请重试";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
+"""
+
+
+def _login_page_response():
+    return web.Response(
+        text=_LOGIN_PAGE,
+        content_type="text/html",
+        charset="utf-8",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+def _is_login_entry(request) -> bool:
+    """True for the app's entry document, i.e. where a browser should log in."""
+    return (
+        request.method == "GET"
+        and request.path in ("/", "/index.html")
+        and "text/html" in request.headers.get("Accept", "")
+    )
+
+
 # ---------------------------------------------------------------- middleware
 
 @web.middleware
@@ -336,6 +475,13 @@ async def _auth_middleware(request, handler):
     uid = _authenticated_user(request)
     token = _XAUTH_USER.set(uid)
     try:
+        if uid is None and _is_login_entry(request):
+            # Serve the login form straight from the server. The official
+            # frontend cannot be relied on here: it boots by calling /api/*
+            # endpoints that are (correctly) 401 before login, and dies before
+            # it ever imports the custom-node extension that used to draw the
+            # overlay — which silently locked the instance out.
+            return _login_page_response()
         if _is_public(request):
             return await handler(request)
         if uid is None:
