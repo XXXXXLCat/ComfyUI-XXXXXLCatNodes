@@ -1,7 +1,7 @@
 // History Gallery 🐈‍⬛ — a sidebar tab that lists every file in ComfyUI's
 // output/ tree, not just the ones the Assets panel saw during this session.
 //
-// Data comes from the read-only endpoint installed by nodes/output_gallery.py
+// Data comes from the read-only endpoint installed by nodes/history_gallery.py
 // (`GET /xcat/outputs` + `GET /xcat/outputs/file`). Under --multi-user the
 // server scopes the listing to the signed-in account and marks the legacy
 // global pool as "shared"; here we only render what it returns.

@@ -15,7 +15,7 @@
    frontends (1.5x) switch `Comfy.Locale` in place instead of reloading, so
    anything captured as a plain string when a node/tab was created keeps the old
    language. Resolve the value on every lookup, or expose labels as accessors
-   (see `bindLiveLabels` in `output_gallery.js`) so a re-render picks them up.
+   (see `bindLiveLabels` in `history_gallery.js`) so a re-render picks them up.
    Only a value that came from a real source is cached, never a guess made before
    `app` was ready.
 */

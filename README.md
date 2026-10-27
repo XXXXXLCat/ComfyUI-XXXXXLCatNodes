@@ -119,11 +119,11 @@ No node to add.
   other accounts' directories are neither listed nor reachable.
 - **Read-only**: no route here deletes, renames or moves anything.
 
-> Implementation: `nodes/output_gallery.py` registers two read-only routes — `GET /xcat/outputs`
+> Implementation: `nodes/history_gallery.py` registers two read-only routes — `GET /xcat/outputs`
 > (manifest, capped at the newest 5000 entries when needed) and `GET /xcat/outputs/file`
 > (file or thumbnail). Path resolution verifies the request really lands inside the matching root,
 > and the shared scope additionally rejects any path inside another account's directory. The
-> frontend (`web/output_gallery.js`) registers a `type: "custom"` tab through
+> frontend (`web/history_gallery.js`) registers a `type: "custom"` tab through
 > `app.extensionManager.registerSidebarTab`. It works in single-user and multi-user mode; under
 > multi-user it sits behind the same password gate and returns `401` when signed out.
 

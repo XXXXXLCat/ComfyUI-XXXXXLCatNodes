@@ -73,7 +73,7 @@ ComfyUI 侧边栏的 **资产** 面板只列它「知道」的东西：`已生�
 - **多用户下自动收窄**：以 `--multi-user` 启动时，画廊只列**自己**的 `output/<user>/`（标记为「我的输出」）加上全局 `output/` 的共享池（卡片上带 **共享** 角标），别人的目录既不列出也取不到。
 - **只读**：本功能只读文件系统，没有任何删除 / 改名 / 移动接口。
 
-> 实现说明：服务端在 `nodes/output_gallery.py` 里注册两个只读路由——`GET /xcat/outputs`（清单，必要时截断到最新 5000 条）与 `GET /xcat/outputs/file`（取文件或缩略图）。路径解析会校验请求确实落在对应根目录内，共享池还会拒绝任何位于他人用户目录下的路径。前端是 `web/output_gallery.js`，通过 `app.extensionManager.registerSidebarTab` 注册一个 `type: "custom"` 标签页。单用户与多用户都可用；多用户下它沿用同一套密码门禁，未登录访问返回 `401`。
+> 实现说明：服务端在 `nodes/history_gallery.py` 里注册两个只读路由——`GET /xcat/outputs`（清单，必要时截断到最新 5000 条）与 `GET /xcat/outputs/file`（取文件或缩略图）。路径解析会校验请求确实落在对应根目录内，共享池还会拒绝任何位于他人用户目录下的路径。前端是 `web/history_gallery.js`，通过 `app.extensionManager.registerSidebarTab` 注册一个 `type: "custom"` 标签页。单用户与多用户都可用；多用户下它沿用同一套密码门禁，未登录访问返回 `401`。
 
 ## 节点详解
 

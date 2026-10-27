@@ -7,7 +7,7 @@ from an earlier run, files copied in by hand, videos written by a custom node â€
 never show up.
 
 This module adds a tiny read-only HTTP API that enumerates the whole output
-tree, plus the sidebar tab in ``web/output_gallery.js`` that renders it:
+tree, plus the sidebar tab in ``web/history_gallery.js`` that renders it:
 
 ``GET /xcat/outputs``
     JSON manifest: ``{"files": [...], "total": n, "truncated": bool, "user": id}``.
@@ -39,7 +39,7 @@ from typing import Dict, List, Optional, Tuple
 
 from aiohttp import web
 
-logger = logging.getLogger("XXXXXLCat.output_gallery")
+logger = logging.getLogger("XXXXXLCat.history_gallery")
 
 # Extensions grouped by how the gallery should present them.
 _IMAGE_EXT = {
