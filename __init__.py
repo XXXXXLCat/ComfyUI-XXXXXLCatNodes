@@ -10,14 +10,13 @@ subprocess. Nothing like psutil is pulled in.
 - Front-end strings (node names, descriptions, widget labels and tooltips) are
   localised through ``locales/<lang>/nodeDefs.json``, picked up by the core
   ``/i18n`` route, so they follow the language selected in ComfyUI.
-- Ten custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
+- Eight custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
   🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
-  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/lora, 🐈‍⬛XXXXXLCat/text,
+  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/text,
   🐈‍⬛XXXXXLCat/utilities): all built on the new V3 node API
   (comfy_api / io.ComfyNode) — Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛,
   H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛, Group Control 🐈‍⬛,
-  Node Control 🐈‍⬛, Load LoRA Stack 🐈‍⬛,
-  Load LoRA Stack (Model and CLIP) 🐈‍⬛, Generate Text 🐈‍⬛ (the
+  Node Control 🐈‍⬛, Generate Text 🐈‍⬛ (the
   official text-generation node, with a multi-image socket), and
   Resolution Selector 🐈‍⬛ (the official resolution node, with a 2-decimal
   megapixel step).
@@ -25,7 +24,7 @@ subprocess. Nothing like psutil is pulled in.
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
 This file is only the entry point: it prints the banner, imports those modules,
-and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 9 V3 nodes).
+and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 8 V3 nodes).
 """
 
 import os
@@ -56,8 +55,6 @@ from .nodes import (  # noqa: E402
     XXXXXLCatAnySwitch,
     XXXXXLCatGroupControl,
     XXXXXLCatNodeControl,
-    XXXXXLCatStackLoras,
-    XXXXXLCatStackLorasClip,
     XXXXXLCatTextGenerate,
     XXXXXLCatResolutionSelector,
 )
@@ -83,8 +80,6 @@ _NODE_CLASSES = [
     XXXXXLCatAnySwitch,
     XXXXXLCatGroupControl,
     XXXXXLCatNodeControl,
-    XXXXXLCatStackLoras,
-    XXXXXLCatStackLorasClip,
     XXXXXLCatTextGenerate,
     XXXXXLCatResolutionSelector,
 ]
