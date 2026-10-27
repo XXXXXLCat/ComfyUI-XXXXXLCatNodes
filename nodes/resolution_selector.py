@@ -5,7 +5,8 @@ megapixel step and a Custom aspect-ratio mode.
 This mirrors ``comfy_extras/nodes_resolution.py`` except for a few things:
 
 1. The ``megapixels`` float input steps by 0.01 instead of 0.1, so the target
-   resolution can be set to two decimal places (e.g. 1.05 MP) rather than one.
+   resolution can be set to two decimal places (e.g. 1.05 MP) rather than one;
+   0 is also accepted and yields a 0×0 size.
 2. The aspect-ratio selector is a ``DynamicCombo`` that adds a ``Custom`` option.
    When ``Custom`` is picked, two integer inputs (width / height) appear below and
    are used directly (rounded to the nearest ``multiple``); all other aspect
@@ -105,10 +106,10 @@ class XXXXXLCatResolutionSelector(io.ComfyNode):
             description=(
                 "Calculate width and height from aspect ratio and megapixel target, with the "
                 "megapixel target adjustable in steps of 0.01 (two decimal places) instead of the "
-                "official node's 0.1. Pick the 'Custom' aspect ratio to enter an explicit width and "
-                "height instead of a megapixel target. Otherwise identical to the official Resolution "
-                "Selector: same aspect ratios, live resolution preview, and nearest-multiple rounding "
-                "of the result."
+                "official node's 0.1; 0 is also accepted and yields a 0×0 size. Pick the 'Custom' "
+                "aspect ratio to enter an explicit width and height instead of a megapixel target. "
+                "Otherwise identical to the official Resolution Selector: same aspect ratios, live "
+                "resolution preview, and nearest-multiple rounding of the result."
             ),
             inputs=[
                 io.DynamicCombo.Input(
@@ -119,10 +120,10 @@ class XXXXXLCatResolutionSelector(io.ComfyNode):
                 io.Float.Input(
                     "megapixels",
                     default=1.0,
-                    min=0.1,
+                    min=0.0,
                     max=16.0,
                     step=0.01,
-                    tooltip="Target total megapixels, adjustable to two decimal places (0.01 steps). 1.0 MP ≈ 1024x1024 for square. Ignored when aspect ratio is 'Custom'.",
+                    tooltip="Target total megapixels, adjustable to two decimal places (0.01 steps). 1.0 MP ≈ 1024x1024 for square. 0 is allowed and yields a 0×0 size. Ignored when aspect ratio is 'Custom'.",
                 ),
                 io.ResolutionPreview.Input(
                     "preview",

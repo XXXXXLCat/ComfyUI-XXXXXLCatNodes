@@ -677,7 +677,7 @@
       },
       "megapixels": {
         "name": "Megapixels",
-        "tooltip": "Target total megapixels, adjustable to two decimal places (0.01 steps). 1.0 MP ≈ 1024x1024 for square. Ignored — and hidden — when the aspect ratio is 'Custom'."
+        "tooltip": "Target total megapixels, adjustable to two decimal places (0.01 steps). 1.0 MP ≈ 1024x1024 for square. 0 is allowed and yields a 0×0 size. Ignored — and hidden — when the aspect ratio is 'Custom'."
       },
       "preview": {
         "name": "Preview",
