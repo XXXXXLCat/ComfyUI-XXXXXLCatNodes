@@ -149,7 +149,6 @@ const CSS = `
     margin: 0;
     padding: 0;
     background: var(--comfy-menu-bg, var(--bg-color, #171718));
-    border-bottom: 1px solid var(--xog-line);
 }
 .xog-head {
     display: flex;
@@ -157,6 +156,7 @@ const CSS = `
     gap: 8px;
     min-height: 64px;
     padding: 0 16px;
+    border-bottom: 1px solid var(--xog-line);
 }
 .xog-title {
     flex: 1;
@@ -200,7 +200,7 @@ const CSS = `
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 16px 1px;
+    padding: 12px 16px 0;
     overflow-x: auto;
     scrollbar-width: none;
 }
