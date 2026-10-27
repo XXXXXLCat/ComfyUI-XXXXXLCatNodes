@@ -14,10 +14,12 @@ tree, plus the sidebar tab in ``web/history_gallery.js`` that renders it:
     Each entry is ``{filename, subfolder, scope, kind, size, mtime}``.
 
 ``GET /xcat/outputs/file?scope=&subfolder=&filename=[&preview=1]``
-    Streams the file. With ``preview=1`` an image is downscaled, and a video gets
-    one frame decoded (PyAV, already a ComfyUI dependency) — both returned as a
-    compact WebP so a grid of a few hundred entries stays cheap. Anything else is
-    served as a normal (range-capable) file response.
+    Streams the file. With ``preview=1`` an image is downscaled, a video gets one
+    frame decoded (PyAV, already a ComfyUI dependency) — both returned as a
+    compact WebP — and a text file yields its opening characters as
+    ``text/plain`` (the grid prints that snippet inside the tile). Anything else
+    is served as a normal (range-capable) file response, which is what the audio
+    player and the lightbox need.
 
 Under ``--multi-user`` the listing follows the same isolation rules as the asset
 patch: the caller's own ``output/<user>/`` tree plus the legacy global pool as a
@@ -41,15 +43,27 @@ from aiohttp import web
 
 logger = logging.getLogger("XXXXXLCat.history_gallery")
 
-# Extensions grouped by how the gallery should present them.
+# Extensions grouped by how the gallery should present them. The first three
+# lists mirror the frontend's own getMediaTypeFromFilename() tables so a file is
+# classified identically in both sidebars; the extras are formats ComfyUI nodes
+# write that the frontend simply does not know about.
 _IMAGE_EXT = {
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff",
-    ".avif", ".jxl",
+    ".avif", ".jxl", ".svg",
 }
 _VIDEO_EXT = {
     ".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".mpg", ".mpeg", ".gifv",
 }
 _AUDIO_EXT = {".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac"}
+_THREE_D_EXT = {
+    ".obj", ".fbx", ".gltf", ".glb", ".stl", ".usdz", ".ply", ".spz",
+    ".splat", ".ksplat",
+}
+_TEXT_EXT = {".txt", ".md", ".markdown", ".json", ".csv", ".yaml", ".yml", ".xml", ".log"}
+
+# How much of a text file a tile needs to show its opening lines.
+TEXT_PREVIEW_CHARS = 1200
+TEXT_PREVIEW_BYTES = 8192
 
 # Bookkeeping files ComfyUI drops into output/ — never interesting to a user.
 _SKIP_FILES = {"_output_images_will_be_put_here", "desktop.ini", ".DS_Store"}
@@ -92,6 +106,10 @@ def _kind(filename: str) -> str:
         return "video"
     if ext in _AUDIO_EXT:
         return "audio"
+    if ext in _THREE_D_EXT:
+        return "3d"
+    if ext in _TEXT_EXT:
+        return "text"
     return "other"
 
 
@@ -323,6 +341,18 @@ def _thumbnail(path: str, kind: str = "image") -> Optional[bytes]:
     return data
 
 
+def _text_head(path: str) -> Optional[str]:
+    """First slice of a text file, for the tile snippet / the lightbox pane."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(TEXT_PREVIEW_BYTES)
+    except OSError:
+        return None
+    text = raw.decode("utf-8", "replace")
+    # A cut multi-byte character shows up as U+FFFD on the boundary; drop it.
+    return text[:TEXT_PREVIEW_CHARS].rstrip("\ufffd")
+
+
 # ---------------------------------------------------------------- handlers
 
 async def _h_list(request: web.Request) -> web.Response:
@@ -372,6 +402,15 @@ async def _h_file(request: web.Request) -> web.Response:
                 return web.Response(
                     body=data,
                     content_type="image/webp",
+                    headers={"Cache-Control": "private, max-age=300"},
+                )
+        elif kind == "text":
+            head = await asyncio.to_thread(_text_head, path)
+            if head is not None:
+                return web.Response(
+                    text=head,
+                    content_type="text/plain",
+                    charset="utf-8",
                     headers={"Cache-Control": "private, max-age=300"},
                 )
         # Non-media (and files we could not decode) fall through to the real

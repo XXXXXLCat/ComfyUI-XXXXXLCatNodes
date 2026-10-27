@@ -110,6 +110,11 @@ No node to add.
 - **Grid browsing**: each card shows a thumbnail, filename, size and timestamp, newest first.
   Clicking opens a lightbox — images are shown at full size, video/audio play inline, with
   "open in new tab" and "download" actions.
+- **Every media kind renders**: images fit their long edge (never cropped, letterboxed on the
+  card's placeholder fill), videos use a real first frame behind a play scrim, audio decodes its
+  waveform in the browser and is playable right in the tile, text prints its opening lines and 3D
+  models fall back to the box glyph — the same faces the built-in **Assets** panel draws. Hovering
+  a card scales its thumbnail slightly (1.05×).
 - **Filter and search**: `All / Images / Videos / Audio / Other` chips plus a live filename
   search over `subfolder/filename`.
 - **Cheap thumbnails**: images are downscaled to 512px WebP server-side (with an in-memory

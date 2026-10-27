@@ -52,6 +52,10 @@ const STRINGS = {
         viewList: "列表视图",
         viewGridSmall: "网格（小）",
         viewGridLarge: "网格（大）",
+        audioFace: "音频",
+        threeDFace: "3D 模型",
+        play: "播放",
+        pause: "暂停",
     },
     en: {
         title: "Gallery",
@@ -81,6 +85,10 @@ const STRINGS = {
         viewList: "List view",
         viewGridSmall: "Grid (small)",
         viewGridLarge: "Grid (large)",
+        audioFace: "Audio",
+        threeDFace: "3D model",
+        play: "Play",
+        pause: "Pause",
     },
 };
 
@@ -104,6 +112,18 @@ const ICON_PATHS = {
         "<rect width='7' height='7' x='3' y='3' rx='1'/><rect width='7' height='7' x='14' y='3' rx='1'/><rect width='7' height='7' x='14' y='14' rx='1'/><rect width='7' height='7' x='3' y='14' rx='1'/>",
     check: "<path d='M20 6L9 17l-5-5'/>",
     refresh: "<path d='M21 12a9 9 0 1 1-2.64-6.36'/><path d='M21 3v6h-6'/>",
+    play: "<path d='M7 4v16l13-8z'/>",
+    pause:
+        "<rect x='14' y='4' width='4' height='16' rx='1'/><rect x='6' y='4' width='4' height='16' rx='1'/>",
+    music:
+        "<path d='M9 18V5l12-2v13'/><circle cx='6' cy='18' r='3'/><circle cx='18' cy='16' r='3'/>",
+    box: "<path d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z'/><path d='m3.3 7 8.7 5 8.7-5'/><path d='M12 22V12'/>",
+    text: "<path d='M17 6.1H3'/><path d='M21 12.1H3'/><path d='M15.1 18H3'/>",
+    file: "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/>",
+    image:
+        "<rect width='18' height='18' x='3' y='3' rx='2' ry='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/>",
+    video:
+        "<path d='m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5'/><rect x='2' y='6' width='14' height='12' rx='2'/>",
 };
 
 function svgIcon(name, cls) {
@@ -124,6 +144,16 @@ function svgIcon(name, cls) {
 // two sidebars can be set independently.
 const VIEW_KEY = "xcat.gallery.view";
 const VIEW_MODES = ["list", "grid-small", "grid"];
+
+// The chips group the six kinds the way a user thinks about them: 3D models and
+// text files are "other" (there is no thumbnail for either).
+const FILTER_GROUPS = {
+    all: null,
+    image: ["image"],
+    video: ["video"],
+    audio: ["audio"],
+    other: ["3d", "text", "other"],
+};
 
 function getViewMode() {
     try {
@@ -182,6 +212,63 @@ function relPath(file) {
     return file.subfolder ? `${file.subfolder}/${file.filename}` : file.filename;
 }
 
+// "app.json" → "JSON"; a dot-less name has no format to show.
+function fileExt(file) {
+    const name = file.filename || "";
+    const dot = name.lastIndexOf(".");
+    if (dot <= 0) return "";
+    return name.slice(dot + 1).toUpperCase();
+}
+
+// Waveform peaks for an audio tile. Decoding a whole file into an AudioBuffer is
+// the only way to get real amplitudes (that is what the native player does too),
+// so the call is gated on visibility and on a size ceiling.
+const WAVE_DECODE_LIMIT = 40 * 1024 * 1024;
+
+async function decodeWaveform(file, barList) {
+    if ((Number(file.size) || 0) > WAVE_DECODE_LIMIT) return;
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return;
+    let ctx;
+    try {
+        const res = await fetch(fileUrl(file, false), {
+            credentials: "same-origin",
+        });
+        if (!res.ok) return;
+        const bytes = await res.arrayBuffer();
+        ctx = new Ctor();
+        const buffer = await ctx.decodeAudioData(bytes);
+        const data = buffer.getChannelData(0);
+        if (!data.length) return;
+
+        const peaks = [];
+        for (let i = 0; i < barList.length; i += 1) {
+            const start = Math.floor((i * data.length) / barList.length);
+            const end = Math.max(
+                start + 1,
+                Math.floor(((i + 1) * data.length) / barList.length)
+            );
+            let sum = 0;
+            for (let j = start; j < end && j < data.length; j += 1) {
+                sum += Math.abs(data[j]);
+            }
+            peaks.push(sum / (end - start));
+        }
+        const max = Math.max(...peaks) || 1;
+        peaks.forEach((peak, i) => {
+            barList[i].style.height = `${Math.max(8, (peak / max) * 100)}%`;
+        });
+    } catch {
+        /* codec unsupported or decode failed — keep the placeholder bars */
+    } finally {
+        try {
+            await ctx?.close();
+        } catch {
+            /* already closed */
+        }
+    }
+}
+
 // ------------------------------------------------------------------ styles
 
 const CSS = `
@@ -193,6 +280,8 @@ const CSS = `
     --xog-surface-hover: var(--secondary-background-hover, rgba(127, 127, 127, 0.22));
     --xog-tab-active: var(--interface-menu-component-surface-hovered, rgba(127, 127, 127, 0.22));
     --xog-accent: var(--border-default, var(--p-primary-color, #4a9eff));
+    /* Native card placeholder fill (bg-modal-card-placeholder-background). */
+    --xog-placeholder: var(--secondary-background, color-mix(in srgb, var(--fg-color, #e8e8e8) 10%, transparent));
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -264,13 +353,11 @@ const CSS = `
 .xog-btn .pi { font-size: 16px; }
 .xog-tabs {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 8px 16px 1px;
-    overflow-x: auto;
-    scrollbar-width: none;
 }
-.xog-tabs::-webkit-scrollbar { display: none; }
 .xog-chip {
     display: inline-flex;
     align-items: center;
@@ -421,40 +508,137 @@ const CSS = `
     position: relative;
     aspect-ratio: 1 / 1;
     width: 100%;
-    background: color-mix(in srgb, var(--xog-fg) 8%, transparent);
+    border-radius: 4px;
+    background: var(--xog-placeholder);
     overflow: hidden;
 }
-.xog-thumb img,
-.xog-thumb video {
+/* Native draws video tiles on black so letterboxed frames read as film. */
+.xog-thumb[data-kind="video"] { background: #000; }
+/* Contain, not cover: the whole picture must be visible along its long edge.
+   A 1.05 scale on hover is the native card's only motion. */
+.xog-thumb > img,
+.xog-thumb > video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
+    transition: transform 0.3s ease;
 }
-.xog-glyph {
+.xog-fill {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--xog-placeholder);
+    color: var(--xog-fg);
+    transition: transform 0.3s ease;
+}
+.xog-fill svg {
+    width: 30px;
+    height: 30px;
+    flex: none;
+}
+.xog-fill span {
+    max-width: 100%;
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: 16px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.xog-card:hover .xog-thumb > img,
+.xog-card:hover .xog-thumb > video,
+.xog-card:hover .xog-fill {
+    transform: scale(1.05);
+}
+/* Text cards print a real snippet of the file instead of a glyph. */
+.xog-text-body {
+    display: none;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 8px;
+    box-sizing: border-box;
+    color: var(--xog-fg);
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 16px;
+    text-align: start;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    /* The snippet stops mid-line otherwise — fade the last row out instead of
+       cutting a glyph in half. */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+}
+.xog-fill[data-snippet="true"] .xog-text-body { display: block; }
+.xog-fill[data-snippet="true"] > svg { display: none; }
+.xog-play {
     position: absolute;
     inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--xog-muted);
+    background: rgba(0, 0, 0, 0.15);
+    color: #fff;
+    pointer-events: none;
 }
-.xog-glyph .pi { font-size: 24px; }
-.xog-play {
+.xog-play svg {
+    width: 24px;
+    height: 24px;
+}
+/* Compact audio transport, docked to the bottom of the tile (native
+   WaveAudioPlayer in its compact variant, minus the time readout which does
+   not fit a 128px cell). */
+.xog-wave {
     position: absolute;
-    inset-block-end: 4px;
-    inset-inline-end: 4px;
+    inset-inline: 0;
+    inset-block-end: 0;
+    z-index: 2;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 6px;
+}
+.xog-wave-btn {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex: none;
     width: 20px;
     height: 20px;
+    padding: 0;
+    border: none;
     border-radius: 50%;
-    background: rgba(0, 0, 0, 0.62);
-    color: #f5f5f5;
-    pointer-events: none;
+    background: color-mix(in srgb, var(--xog-fg) 15%, transparent);
+    color: var(--xog-fg);
+    cursor: pointer;
+    transition: background-color 0.12s ease;
 }
-.xog-play .pi { font-size: 9px; }
+.xog-wave-btn:hover { background: color-mix(in srgb, var(--xog-fg) 25%, transparent); }
+.xog-wave-btn svg { width: 12px; height: 12px; }
+.xog-wave-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+    height: 20px;
+    cursor: pointer;
+}
+.xog-wave-bars span {
+    flex: 1;
+    min-width: 0;
+    min-height: 2px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--xog-fg) 40%, transparent);
+}
+.xog-wave-bars span[data-played="true"] { background: var(--xog-fg); }
 .xog-badge {
     position: absolute;
     inset-block-start: 4px;
@@ -515,13 +699,13 @@ const CSS = `
     font-size: 12px;
     line-height: 12px;
 }
-.xog-grid[data-view="list"] .xog-play {
-    inset-block-end: 1px;
-    inset-inline-end: 1px;
-    width: 12px;
-    height: 12px;
-}
-.xog-grid[data-view="list"] .xog-play .pi { font-size: 6px; }
+/* A 32px row has no room for a snippet or a transport — glyph only. */
+.xog-grid[data-view="list"] .xog-fill svg { width: 14px; height: 14px; }
+.xog-grid[data-view="list"] .xog-fill span,
+.xog-grid[data-view="list"] .xog-text-body,
+.xog-grid[data-view="list"] .xog-wave { display: none; }
+.xog-grid[data-view="list"] .xog-fill[data-snippet="true"] > svg { display: block; }
+.xog-grid[data-view="list"] .xog-play svg { width: 12px; height: 12px; }
 .xog-grid[data-view="list"] .xog-badge {
     inset-block-start: auto;
     inset-block-end: 1px;
@@ -621,6 +805,30 @@ const CSS = `
     object-fit: contain;
 }
 .xog-lb-body audio { width: min(480px, 80vw); margin: 24px; }
+.xog-lb-body pre {
+    width: min(1000px, 90vw);
+    max-height: 76vh;
+    margin: 0;
+    padding: 16px;
+    box-sizing: border-box;
+    overflow: auto;
+    color: var(--xog-fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.xog-lb-face {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 48px;
+    color: var(--xog-fg);
+    font-size: 14px;
+}
+.xog-lb-face svg { width: 48px; height: 48px; }
 .xog-lb-foot {
     padding: 8px 16px;
     border-top: 1px solid var(--xog-line);
@@ -724,10 +932,30 @@ function ensureLightbox() {
                 node.src = url;
                 node.controls = true;
                 node.autoplay = true;
+            } else if (file.kind === "text") {
+                node = document.createElement("pre");
+                node.textContent = t("loading");
+                fetch(url, { credentials: "same-origin" })
+                    .then((res) => (res.ok ? res.text() : ""))
+                    .then((text) => {
+                        node.textContent = text.slice(0, 200000) || file.filename;
+                    })
+                    .catch(() => {
+                        node.textContent = file.filename;
+                    });
             } else {
+                // 3D models and unknown files have no in-browser preview; show
+                // the same glyph the grid tile uses, plus the open/download pair
+                // in the header.
                 node = document.createElement("div");
-                node.className = "xog-status";
-                node.textContent = t("open");
+                node.className = "xog-lb-face";
+                node.appendChild(
+                    svgIcon(file.kind === "3d" ? "box" : "file")
+                );
+                const label = document.createElement("span");
+                label.textContent =
+                    file.kind === "3d" ? t("threeDFace") : fileExt(file);
+                node.appendChild(label);
             }
             body.appendChild(node);
 
@@ -899,63 +1127,210 @@ function buildPanel(host) {
         status.style.display = "";
     }
 
-    function addGlyph(thumb, kind) {
-        const glyph = document.createElement("div");
-        glyph.className = "xog-glyph";
-        const icon = document.createElement("i");
-        icon.className =
-            kind === "video"
-                ? "pi pi-video"
-                : kind === "audio"
-                  ? "pi pi-volume-up"
-                  : "pi pi-file";
-        glyph.appendChild(icon);
-        thumb.appendChild(glyph);
+    // Heavy per-tile work — decoding an audio waveform, reading a text snippet —
+    // waits until the tile is actually on screen. A 500-file grid must not fire
+    // 500 downloads the moment it paints.
+    const lazy = (() => {
+        const jobs = new WeakMap();
+        const io = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    io.unobserve(entry.target);
+                    const job = jobs.get(entry.target);
+                    jobs.delete(entry.target);
+                    job?.();
+                }
+            },
+            { root: null, rootMargin: "200px" }
+        );
+        return {
+            run(el, job) {
+                jobs.set(el, job);
+                io.observe(el);
+            },
+            stop() {
+                io.disconnect();
+                jobs.clear?.();
+            },
+        };
+    })();
+
+    // Every non-previewable kind gets the same face the native panel draws:
+    // a centred glyph plus (for audio / 3D) a one-word label.
+    const FACE_ICON = {
+        image: "image",
+        video: "video",
+        audio: "music",
+        "3d": "box",
+        text: "text",
+        other: "file",
+    };
+    const FACE_LABEL = { audio: "audioFace", "3d": "threeDFace" };
+
+    function makeFace(kind) {
+        const fill = document.createElement("div");
+        fill.className = "xog-fill";
+        fill.dataset.snippet = "false";
+        fill.appendChild(svgIcon(FACE_ICON[kind] || "file"));
+        const key = FACE_LABEL[kind];
+        if (key) {
+            const label = document.createElement("span");
+            label.textContent = t(key);
+            fill.appendChild(label);
+        }
+        return fill;
     }
 
-    // Videos mirror the native Assets panel's grid cell: a real frame from the
-    // clip instead of a generic filmstrip glyph, plus a small play mark so the
-    // cell reads as a video. Clicking still opens the player in the lightbox.
-    function addVideoThumb(thumb, file) {
-        const still = document.createElement("img");
-        still.loading = "lazy";
-        still.decoding = "async";
-        still.alt = file.filename;
-        still.src = fileUrl(file, true);
-        // No decodable frame (rare codec, or PyAV missing) — fall back to the
-        // glyph rather than an empty tile.
-        still.addEventListener("error", () => {
-            still.remove();
-            addGlyph(thumb, "video");
+    function addPreviewImage(thumb, file) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.alt = file.filename;
+        img.src = fileUrl(file, true);
+        // Undecodable file (or a preview the server could not build) — show the
+        // placeholder face instead of an empty tile.
+        img.addEventListener("error", () => {
+            img.remove();
+            thumb.appendChild(makeFace(file.kind === "video" ? "video" : "image"));
         });
-        thumb.appendChild(still);
+        thumb.appendChild(img);
+        return img;
+    }
 
-        const playBadge = document.createElement("span");
-        playBadge.className = "xog-play";
-        playBadge.innerHTML = '<i class="pi pi-play"></i>';
-        thumb.appendChild(playBadge);
+    // A frame from the clip plus the native play scrim. Clicking still opens the
+    // player in the lightbox rather than playing in a 128px cell.
+    function addVideoThumb(thumb, file) {
+        addPreviewImage(thumb, file);
+        const play = document.createElement("span");
+        play.className = "xog-play";
+        play.appendChild(svgIcon("play"));
+        thumb.appendChild(play);
+    }
+
+    function addAudioThumb(thumb, file) {
+        thumb.appendChild(makeFace("audio"));
+
+        const wave = document.createElement("div");
+        wave.className = "xog-wave";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "xog-wave-btn";
+        btn.title = t("play");
+        btn.setAttribute("aria-label", t("play"));
+        btn.appendChild(svgIcon("play"));
+
+        const bars = document.createElement("div");
+        bars.className = "xog-wave-bars";
+        const barList = [];
+        for (let i = 0; i < 40; i += 1) {
+            const bar = document.createElement("span");
+            // Same placeholder heights the native player shows before decoding.
+            bar.style.height = `${Math.round(Math.random() * 60) + 10}%`;
+            bars.appendChild(bar);
+            barList.push(bar);
+        }
+
+        const audio = document.createElement("audio");
+        audio.preload = "none";
+        audio.src = fileUrl(file, false);
+
+        const paint = () => {
+            const dur = audio.duration;
+            const played =
+                dur > 0 ? Math.floor((audio.currentTime / dur) * barList.length) - 1 : -1;
+            barList.forEach((bar, i) => {
+                bar.dataset.played = String(i <= played);
+            });
+        };
+        const setPlaying = (playing) => {
+            btn.replaceChildren(svgIcon(playing ? "pause" : "play"));
+            const label = t(playing ? "pause" : "play");
+            btn.title = label;
+            btn.setAttribute("aria-label", label);
+        };
+
+        btn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            if (audio.paused) void audio.play().catch(() => setPlaying(false));
+            else audio.pause();
+        });
+        bars.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const rect = bars.getBoundingClientRect();
+            if (!audio.duration || !rect.width) return;
+            const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+            audio.currentTime = ratio * audio.duration;
+            paint();
+        });
+        audio.addEventListener("play", () => setPlaying(true));
+        audio.addEventListener("pause", () => setPlaying(false));
+        audio.addEventListener("ended", () => setPlaying(false));
+        audio.addEventListener("timeupdate", paint);
+
+        // The transport lives inside the card, so its presses must not open the
+        // lightbox.
+        wave.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+        wave.addEventListener("click", (ev) => ev.stopPropagation());
+        wave.append(btn, bars);
+        thumb.appendChild(wave);
+        thumb.appendChild(audio);
+
+        lazy.run(thumb, () => void decodeWaveform(file, barList));
+    }
+
+    // Text files print their opening lines, exactly like the native panel's
+    // MediaTextTop (first 1000 characters).
+    function addTextThumb(thumb, file) {
+        const fill = makeFace("text");
+        const body = document.createElement("p");
+        body.className = "xog-text-body";
+        fill.appendChild(body);
+        thumb.appendChild(fill);
+
+        lazy.run(thumb, async () => {
+            try {
+                const res = await fetch(fileUrl(file, true), {
+                    credentials: "same-origin",
+                });
+                if (!res.ok) return;
+                const text = (await res.text()).slice(0, 1000).trim();
+                if (!text) return;
+                body.textContent = text;
+                fill.dataset.snippet = "true";
+            } catch {
+                /* keep the glyph */
+            }
+        });
     }
 
     function makeCard(file) {
-        const card = document.createElement("button");
-        card.type = "button";
+        const card = document.createElement("div");
         card.className = "xog-card";
-        card.title = relPath(file);
+        // Native cards show format + size only; the tile is too narrow for a
+        // timestamp, so it lives in the tooltip with the full path.
+        card.title = `${relPath(file)} · ${fmtTime(file.mtime)}`;
+        card.tabIndex = 0;
+        card.setAttribute("role", "button");
+        card.setAttribute("aria-label", file.filename);
 
         const thumb = document.createElement("div");
         thumb.className = "xog-thumb";
+        thumb.dataset.kind = file.kind || "other";
 
         if (file.kind === "image") {
-            const img = document.createElement("img");
-            img.loading = "lazy";
-            img.decoding = "async";
-            img.alt = file.filename;
-            img.src = fileUrl(file, true);
-            thumb.appendChild(img);
+            addPreviewImage(thumb, file);
         } else if (file.kind === "video") {
             addVideoThumb(thumb, file);
+        } else if (file.kind === "audio") {
+            addAudioThumb(thumb, file);
+        } else if (file.kind === "text") {
+            addTextThumb(thumb, file);
         } else {
-            addGlyph(thumb, file.kind);
+            // 3D models and unknown files are not previewable here — same face
+            // the native panel falls back to.
+            thumb.appendChild(makeFace(file.kind === "3d" ? "3d" : "other"));
         }
 
         if (file.scope === "shared") {
@@ -972,11 +1347,19 @@ function buildPanel(host) {
         name.textContent = file.filename;
         const sub = document.createElement("span");
         sub.className = "xog-sub";
+        // Size + timestamp: the extension is already visible in the filename and
+        // a third field would push the line past the tile width.
         sub.textContent = `${fmtSize(file.size)} · ${fmtTime(file.mtime)}`;
         meta.append(name, sub);
 
+        const open = () => ensureLightbox().open(file);
         card.append(thumb, meta);
-        card.addEventListener("click", () => ensureLightbox().open(file));
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", (ev) => {
+            if (ev.key !== "Enter" && ev.key !== " ") return;
+            ev.preventDefault();
+            open();
+        });
         return card;
     }
 
@@ -1006,8 +1389,9 @@ function buildPanel(host) {
 
     function applyFilter() {
         const q = state.query.trim().toLowerCase();
+        const group = FILTER_GROUPS[state.filter];
         state.matched = state.files.filter((file) => {
-            if (state.filter !== "all" && file.kind !== state.filter) return false;
+            if (group && !group.includes(file.kind)) return false;
             if (!q) return true;
             return `${file.subfolder || ""}/${file.filename}`.toLowerCase().includes(q);
         });
@@ -1115,6 +1499,7 @@ function buildPanel(host) {
 
     return () => {
         observer.disconnect();
+        lazy.stop();
         document.removeEventListener("pointerdown", onDocDown, true);
         document.removeEventListener("keydown", onDocKey);
     };
