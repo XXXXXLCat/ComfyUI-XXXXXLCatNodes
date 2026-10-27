@@ -282,6 +282,10 @@ const CSS = `
     --xog-accent: var(--border-default, var(--p-primary-color, #4a9eff));
     /* Native card placeholder fill (bg-modal-card-placeholder-background). */
     --xog-placeholder: var(--secondary-background, color-mix(in srgb, var(--fg-color, #e8e8e8) 10%, transparent));
+    /* Native card hover tint: bg-modal-card-background-hovered/20 — the token
+       flattened to full opacity would be a solid block, far heavier than the
+       official panel's faint lift. */
+    --xog-card-hover: color-mix(in oklab, var(--modal-card-background-hovered, var(--secondary-background-hover, #313235)) 20%, transparent);
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -502,7 +506,7 @@ const CSS = `
     box-sizing: border-box;
     transition: background-color 0.2s ease;
 }
-.xog-card:hover { background: var(--xog-surface); }
+.xog-card:hover { background: var(--xog-card-hover); }
 .xog-card:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
 .xog-thumb {
     position: relative;
