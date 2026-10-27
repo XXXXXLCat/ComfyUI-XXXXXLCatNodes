@@ -13,7 +13,6 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - Canvas switches: `Group Control 🐈‍⬛` (open/close whole canvas groups) and `Node Control 🐈‍⬛` (open/close individual nodes) — one row and one switch each, filterable by colour and name keyword
 - `Load LoRA Stack 🐈‍⬛`: stack several LoRAs on one model in a single node — one row per LoRA with its own strength and on/off switch, applied top to bottom; one model clone instead of N, off or empty rows are never read, and every row reports how many of its keys matched the model
 - `Load LoRA Stack (Model and CLIP) 🐈‍⬛`: the same stack, but each row also patches the CLIP — style LoRAs need the text encoder to see them too; each row carries its own model strength and CLIP strength, a side at 0 is not patched at all, and again one clone each
-- `Generate Text 🐈‍⬛`: the official text-generation node with a **repeatable `image` socket** — same parameters, defaults, sampling panel and output, but every connected image is read in the same generation; schema parity is enforced by a test
 - `Resolution Selector 🐈‍⬛`: the official resolution node with a **2-decimal megapixel step** and a **Custom aspect-ratio mode** — choose an aspect ratio and a megapixel target to get width/height, or pick `Custom` to enter explicit width/height; the target steps by 0.01 (two decimals) instead of the official node's 0.1; the megapixel input is hidden in Custom mode; same aspect ratios, live resolution preview, and nearest-multiple rounding
 - Zero third-party dependencies (ctypes + `nvidia-smi` subprocess)
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
@@ -50,11 +49,6 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 
 ### Load LoRA Stack (Model and CLIP) 🐈‍⬛
 
-### Generate Text 🐈‍⬛
-**This is the official node.** Same inputs, same defaults, same sampling sub-panel, same output and the same execution chain as `comfy_extras/nodes_textgen.py` — `clip.tokenize` → `clip.generate` → `clip.decode`. The one difference: the `image` socket is **repeatable** (`image_0`, `image_1`, …), because that encoder walks the whole batch anyway, so every connected image is read in the *same* generation with the same settings.
-**Parity is enforced by a test, not by intent:** `scripts/test_text_generate.py` compares the two schemas field by field — every input, default, range, step, optional/advanced flag, the entire sampling panel and the output — and fails if this node grows a knob the official one does not have. `video` and `audio` are untouched, including the fact that a connected video takes precedence over the images.
-**Under the hood:** frames have to agree on a size before the encoder sees them, so they are put on one shared canvas — scaled to fit, padded with mid gray, never stretched, never enlarged, long side capped at 1024 (the encoder shrinks every frame to its own token budget regardless, roughly an 800x800 equivalent). That is internal behaviour; no widgets are attached to it.
-
 ### Resolution Selector 🐈‍⬛
 **This is the official node, with three tweaks.** Same aspect ratios, same live resolution preview, same nearest-multiple rounding, same integer width/height outputs as `comfy_extras/nodes_resolution.py`. Differences: (1) the `megapixels` target steps by **0.01** (two decimal places) instead of the official node's 0.1, so you can dial in a resolution like 1.05 MP rather than being limited to one decimal; (2) the aspect-ratio selector adds a **Custom** option — choosing it reveals explicit **Width** / **Height** fields (rounded to the nearest `multiple`) instead of deriving size from megapixels; (3) the `megapixels` input is **hidden while `Custom` is selected**, because it has no effect on the result in that mode.
 **The preview is the official one, and it works in Custom mode too.** The built-in preview can only turn (ratio, megapixels, multiple) into a size, and "Custom" is not a ratio, so on its own it would show a dash there. `web/resolution_selector.js` keeps two hidden internal inputs filled with the effective ratio and megapixel target of whatever the node is doing; in Custom mode those become `width:height` and `width*height/1048576`, which makes the preview's own scale factor exactly 1 so it reproduces the node's rounding to the nearest multiple.
@@ -79,8 +73,6 @@ ComfyUI/custom_nodes/
     │   ├── any_switch.py
     │   ├── group_control.py
     │   ├── node_control.py
-    │   ├── image_batch.py      # shared batching: canvas, fill, never stretch or enlarge
-    │   ├── text_generate.py    # the official Generate Text, image socket repeatable
     │   └── resolution_selector.py  # official Resolution Selector: 0.01 MP step + Custom size mode
     │   ├── lora_rows.py       # row engine shared by both LoRA stacks (schema / rows / file cache)
     │   ├── lora_stack.py      # model only
@@ -92,7 +84,6 @@ ComfyUI/custom_nodes/
     │   ├── check_locales.py        # validates locales against the live node schemas
     │   ├── test_lora_stack.py      # both stacks, backend: equivalence (both sides) + rows + cache
     │   ├── test_lora_stack_ui.mjs  # both stacks, front end: add / collapse / hide / height
-    │   └── test_text_generate.py  # schema parity with the official node + call plumbing
     ├── pyproject.toml   # node metadata (recognized by ComfyUI-Manager)
     └── web/
         ├── monitor.js        # menu-bar telemetry strip + cleanup buttons (auto-loaded by ComfyUI)
@@ -113,7 +104,7 @@ ComfyUI/custom_nodes/
 
 ## Notes
 
-- All ten nodes are implemented on the new **V3 node API** (`comfy_api` / `io.ComfyNode`) and registered through `comfy_entrypoint()` (the same pattern as the official MiniMax H3 nodes). A recent ComfyUI that ships `comfy_api` is required — older builds without it will fail to load the package.
+- All nine nodes are implemented on the new **V3 node API** (`comfy_api` / `io.ComfyNode`) and registered through `comfy_entrypoint()` (the same pattern as the official MiniMax H3 nodes). A recent ComfyUI that ships `comfy_api` is required — older builds without it will fail to load the package.
 - The cleanup buttons run inside the ComfyUI process via `/prompt`, so the effect is immediate (not a deferred flag)
 - Trimming the system file cache for memory cleanup requires administrator privileges; on failure it is silently skipped without affecting the rest of the cleanup
 
