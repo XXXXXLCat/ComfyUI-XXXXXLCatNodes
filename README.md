@@ -16,6 +16,7 @@ Lightweight ComfyUI custom nodes for system telemetry and resource reclamation, 
 - Node names, descriptions and widget labels follow the ComfyUI interface language via `locales/zh` and `locales/en`
 - **Per-user asset isolation** (server-side, auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>` / `output/<user>` so each user's uploads and generations are private; the pre-existing global `input/` / `output/` stays readable as a shared pool
 - **Per-user password login** (server-side, auto-enabled under `--multi-user`): a real password gate on top of ComfyUI's header-only multi-user mode, where each account has its own password and the session is kept in an HttpOnly cookie; a frontend login overlay is provided automatically. Combined with asset isolation, A's password cannot open B's assets
+- **Output gallery** (sidebar tab): browse **every** file in `output/`, not just what this run produced — earlier batches, files copied in by hand, videos written by custom nodes. Grid of thumbnails with type filters, filename search and a click-to-preview lightbox
 
 ## Multi-user asset isolation
 
@@ -95,6 +96,36 @@ server-side patch plus a frontend login overlay (`web/multi_user_auth.js`).
 
 > In a single-user launch the feature is entirely off: no `/xcat/*` routes exist, and the overlay
 > hides itself on a 404, so behaviour matches vanilla ComfyUI.
+
+## Output gallery
+
+ComfyUI's sidebar **Assets** panel only lists what it knows about: `Generated` is what this
+frontend session produced (derived from the queue history, wiped on reload), `Imported` is what
+was uploaded into `input/`. **Files that already sit on disk never show up** — outputs from an
+earlier batch, files copied in by hand, videos written by a custom node.
+
+This feature adds an **Output Gallery** sidebar tab that enumerates the whole `output/` tree.
+No node to add.
+
+- **Grid browsing**: each card shows a thumbnail, filename, size and timestamp, newest first.
+  Clicking opens a lightbox — images are shown at full size, video/audio play inline, with
+  "open in new tab" and "download" actions.
+- **Filter and search**: `All / Images / Videos / Audio / Other` chips plus a live filename
+  search over `subfolder/filename`.
+- **Cheap thumbnails**: images are downscaled to 512px WebP server-side (with an in-memory
+  cache), and the grid only renders the visible batch, pulling more as you scroll.
+- **Scoped under multi-user**: with `--multi-user` the gallery lists only your own
+  `output/<user>/` tree (labelled *mine*) plus the legacy global pool (cards tagged **Shared**);
+  other accounts' directories are neither listed nor reachable.
+- **Read-only**: no route here deletes, renames or moves anything.
+
+> Implementation: `nodes/output_gallery.py` registers two read-only routes — `GET /xcat/outputs`
+> (manifest, capped at the newest 5000 entries when needed) and `GET /xcat/outputs/file`
+> (file or thumbnail). Path resolution verifies the request really lands inside the matching root,
+> and the shared scope additionally rejects any path inside another account's directory. The
+> frontend (`web/output_gallery.js`) registers a `type: "custom"` tab through
+> `app.extensionManager.registerSidebarTab`. It works in single-user and multi-user mode; under
+> multi-user it sits behind the same password gate and returns `401` when signed out.
 
 ## Node reference
 
