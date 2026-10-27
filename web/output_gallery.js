@@ -35,6 +35,7 @@ const STRINGS = {
         files: "个文件",
         showing: "显示前",
         empty: "这里还没有文件",
+        emptyHint: "生成或上传文件后会显示在这里",
         noMatch: "没有符合条件的文件",
         loading: "读取中…",
         unauthorized: "登录已过期，请重新登录",
@@ -58,6 +59,7 @@ const STRINGS = {
         files: "files",
         showing: "showing first",
         empty: "No files here yet",
+        emptyHint: "Generated or uploaded files will show up here",
         noMatch: "No matching files",
         loading: "Loading…",
         unauthorized: "Session expired — sign in again",
@@ -129,124 +131,165 @@ function relPath(file) {
 
 const CSS = `
 .xog {
-    --xog-fg: var(--fg-color, #e8e8e8);
-    --xog-muted: color-mix(in srgb, var(--xog-fg) 58%, transparent);
-    --xog-line: color-mix(in srgb, var(--xog-fg) 16%, transparent);
-    --xog-surface: var(--comfy-input-bg, rgba(127, 127, 127, 0.14));
-    --xog-hover: color-mix(in srgb, var(--xog-fg) 12%, transparent);
-    --xog-accent: var(--p-primary-color, #4a9eff);
+    --xog-fg: var(--text-primary, var(--fg-color, #e8e8e8));
+    --xog-muted: var(--text-secondary, color-mix(in srgb, var(--fg-color, #e8e8e8) 62%, transparent));
+    --xog-line: var(--interface-stroke, color-mix(in srgb, var(--fg-color, #e8e8e8) 18%, transparent));
+    --xog-surface: var(--secondary-background, var(--comfy-input-bg, rgba(127, 127, 127, 0.14)));
+    --xog-surface-hover: var(--secondary-background-hover, rgba(127, 127, 127, 0.22));
+    --xog-tab-active: var(--interface-menu-component-surface-hovered, rgba(127, 127, 127, 0.22));
+    --xog-accent: var(--border-default, var(--p-primary-color, #4a9eff));
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
     min-height: 100%;
-    padding: 8px;
+    padding: 0;
     box-sizing: border-box;
     color: var(--xog-fg);
     font-family: inherit;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 14px;
+    line-height: 1.5;
 }
 .xog-bar {
     position: sticky;
-    top: -8px;
+    top: 0;
     z-index: 4;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin: -8px -8px 0;
-    padding: 8px 8px 6px;
-    background: var(--comfy-menu-bg, var(--bg-color, #222));
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    background: var(--comfy-menu-bg, var(--bg-color, #171718));
     border-bottom: 1px solid var(--xog-line);
 }
 .xog-head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    min-height: 64px;
+    padding: 0 16px;
 }
 .xog-title {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
-    font-weight: 500;
+    color: var(--xog-fg);
+    font-size: 16px;
+    font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .xog-count {
+    flex: none;
     color: var(--xog-muted);
+    font-size: 12px;
     white-space: nowrap;
 }
 .xog-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
     flex: none;
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     padding: 0;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--xog-muted);
+    border: none;
+    border-radius: 8px;
+    background: var(--xog-surface);
+    color: var(--xog-fg);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
     transition: background-color 0.12s ease, color 0.12s ease;
 }
-.xog-btn:hover {
-    background: var(--xog-hover);
+.xog-btn:hover { background: var(--xog-surface-hover); }
+.xog-btn:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
+.xog-btn .pi { font-size: 16px; }
+.xog-tabs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px 1px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.xog-tabs::-webkit-scrollbar { display: none; }
+.xog-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    height: 32px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--xog-muted);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+.xog-chip:hover { background: var(--button-hover-surface, var(--xog-surface)); }
+.xog-chip[data-active="true"] {
+    background: var(--xog-tab-active);
     color: var(--xog-fg);
 }
-.xog-btn .pi { font-size: 12px; }
+.xog-searchrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+}
+.xog-searchbox {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--xog-surface);
+    box-sizing: border-box;
+}
+.xog-searchbox:focus-within { box-shadow: inset 0 0 0 1px var(--xog-accent); }
+.xog-search-icon {
+    position: absolute;
+    inset-inline-start: 10px;
+    color: var(--xog-muted);
+    font-size: 16px;
+    pointer-events: none;
+}
 .xog-search {
     width: 100%;
-    box-sizing: border-box;
-    padding: 5px 8px;
-    border: 1px solid var(--xog-line);
-    border-radius: 5px;
-    background: var(--xog-surface);
+    height: 100%;
+    min-width: 0;
+    padding: 0;
+    padding-inline-start: 32px;
+    border: none;
+    background: transparent;
     color: var(--xog-fg);
     font-family: inherit;
     font-size: 12px;
     outline: none;
 }
-.xog-search:focus { border-color: var(--xog-accent); }
 .xog-search::placeholder { color: var(--xog-muted); }
-.xog-filters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-.xog-chip {
-    padding: 2px 8px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--xog-muted);
-    font-family: inherit;
-    font-size: 11px;
-    line-height: 1.6;
-    cursor: pointer;
-}
-.xog-chip:hover { background: var(--xog-hover); color: var(--xog-fg); }
-.xog-chip[data-active="true"] {
-    background: color-mix(in srgb, var(--xog-accent) 22%, transparent);
-    border-color: color-mix(in srgb, var(--xog-accent) 45%, transparent);
-    color: var(--xog-fg);
-}
 .xog-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 8px;
+    padding: 16px;
 }
 .xog-card {
     display: flex;
     flex-direction: column;
     gap: 0;
     padding: 0;
-    border: 1px solid var(--xog-line);
-    border-radius: 6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
     background: var(--xog-surface);
     color: inherit;
     font-family: inherit;
@@ -256,6 +299,7 @@ const CSS = `
     transition: border-color 0.12s ease;
 }
 .xog-card:hover { border-color: var(--xog-accent); }
+.xog-card:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
 .xog-thumb {
     position: relative;
     aspect-ratio: 1 / 1;
@@ -278,28 +322,29 @@ const CSS = `
     justify-content: center;
     color: var(--xog-muted);
 }
-.xog-glyph .pi { font-size: 22px; }
+.xog-glyph .pi { font-size: 24px; }
 .xog-badge {
     position: absolute;
-    inset-block-start: 3px;
-    inset-inline-start: 3px;
-    padding: 0 4px;
-    border-radius: 3px;
+    inset-block-start: 4px;
+    inset-inline-start: 4px;
+    padding: 0 5px;
+    border-radius: 4px;
     background: rgba(0, 0, 0, 0.62);
     color: #f2f2f2;
-    font-size: 10px;
-    line-height: 15px;
+    font-size: 11px;
+    line-height: 16px;
 }
 .xog-meta {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding: 4px 5px 5px;
+    padding: 6px 8px 8px;
     min-width: 0;
 }
 .xog-name {
     display: block;
-    font-size: 11px;
+    color: var(--xog-fg);
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -307,15 +352,39 @@ const CSS = `
 .xog-sub {
     display: block;
     color: var(--xog-muted);
-    font-size: 10px;
+    font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .xog-status {
-    padding: 10px 2px;
+    padding: 24px 16px;
     color: var(--xog-muted);
+    font-size: 14px;
     text-align: center;
+}
+.xog-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    color: var(--xog-fg);
+    text-align: center;
+}
+.xog-empty .pi {
+    margin-bottom: 16px;
+    font-size: 48px;
+}
+.xog-empty h3 {
+    margin: 0 0 8px;
+    color: var(--xog-fg);
+    font-size: 18px;
+    font-weight: 700;
+}
+.xog-empty p {
+    margin: 0;
+    color: var(--xog-fg);
+    font-size: 16px;
 }
 .xog-sentinel { height: 1px; }
 
@@ -336,31 +405,33 @@ const CSS = `
     flex-direction: column;
     max-width: min(1100px, 94vw);
     max-height: 92vh;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid var(--xog-line);
     border-radius: 8px;
-    background: var(--comfy-menu-bg, #222);
-    color: var(--fg-color, #eee);
+    background: var(--comfy-menu-bg, var(--dialog-surface, #171718));
+    color: var(--xog-fg);
     overflow: hidden;
     font-family: inherit;
-    font-size: 12px;
+    font-size: 14px;
 }
 .xog-lb-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    min-height: 64px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--xog-line);
 }
 .xog-lb-name {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    color: var(--xog-fg);
+    font-size: 16px;
+    font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.xog-lb-actions { display: flex; gap: 4px; }
-.xog-lb-actions .xog-btn { width: 26px; height: 26px; }
+.xog-lb-actions { display: flex; gap: 8px; }
 .xog-lb-body {
     display: flex;
     align-items: center;
@@ -379,10 +450,10 @@ const CSS = `
 }
 .xog-lb-body audio { width: min(480px, 80vw); margin: 24px; }
 .xog-lb-foot {
-    padding: 6px 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    color: color-mix(in srgb, var(--fg-color, #eee) 60%, transparent);
-    font-size: 11px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--xog-line);
+    color: var(--xog-muted);
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -519,8 +590,13 @@ function buildPanel(host) {
                 <span class="xog-count"></span>
                 <button class="xog-btn xog-refresh" type="button"></button>
             </div>
-            <input class="xog-search" type="search" />
-            <div class="xog-filters"></div>
+            <div class="xog-tabs"></div>
+            <div class="xog-searchrow">
+                <div class="xog-searchbox">
+                    <i class="pi pi-search xog-search-icon"></i>
+                    <input class="xog-search" type="search" />
+                </div>
+            </div>
         </div>
         <div class="xog-grid"></div>
         <div class="xog-status"></div>
@@ -529,12 +605,13 @@ function buildPanel(host) {
     host.querySelector(".xog-title").textContent = t("title");
     const refreshBtn = host.querySelector(".xog-refresh");
     refreshBtn.title = t("refresh");
+    refreshBtn.setAttribute("aria-label", t("refresh"));
     refreshBtn.innerHTML = '<i class="pi pi-refresh"></i>';
 
     const search = host.querySelector(".xog-search");
     search.placeholder = t("search");
 
-    const filters = host.querySelector(".xog-filters");
+    const filters = host.querySelector(".xog-tabs");
     const kinds = ["all", "image", "video", "audio", "other"];
     filters.replaceChildren(
         ...kinds.map((kind) => {
@@ -556,8 +633,25 @@ function buildPanel(host) {
     const state = { files: [], filter: "all", query: "", matched: [], shown: 0 };
 
     function setStatus(text) {
+        status.replaceChildren();
         status.textContent = text || "";
         status.style.display = text ? "" : "none";
+    }
+
+    // Mirrors the native Assets panel's empty state: big info glyph, heading,
+    // one-line hint.
+    function setEmpty() {
+        const box = document.createElement("div");
+        box.className = "xog-empty";
+        const icon = document.createElement("i");
+        icon.className = "pi pi-info-circle";
+        const heading = document.createElement("h3");
+        heading.textContent = t("empty");
+        const hint = document.createElement("p");
+        hint.textContent = t("emptyHint");
+        box.append(icon, heading, hint);
+        status.replaceChildren(box);
+        status.style.display = "";
     }
 
     function makeCard(file) {
@@ -647,7 +741,8 @@ function buildPanel(host) {
         grid.replaceChildren();
 
         if (state.matched.length === 0) {
-            setStatus(state.files.length === 0 ? t("empty") : t("noMatch"));
+            if (state.files.length === 0) setEmpty();
+            else setStatus(t("noMatch"));
         } else {
             setStatus("");
         }
