@@ -45,6 +45,10 @@ const STRINGS = {
         download: "下载",
         close: "关闭",
         loadingMore: "继续滚动加载…",
+        viewMenu: "视图设置",
+        viewList: "列表视图",
+        viewGridSmall: "网格（小）",
+        viewGridLarge: "网格（大）",
     },
     en: {
         title: "Output Gallery",
@@ -69,12 +73,69 @@ const STRINGS = {
         download: "Download",
         close: "Close",
         loadingMore: "Scroll for more…",
+        viewMenu: "View settings",
+        viewList: "List view",
+        viewGridSmall: "Grid (small)",
+        viewGridLarge: "Grid (large)",
     },
 };
 
 // Resolved per call — `langCode()` caches itself once the setting is readable,
 // and returns a guess (uncached) while the app is still booting.
 const t = (key) => (STRINGS[langCode()] || STRINGS.en)[key] ?? key;
+
+// ------------------------------------------------------------------- icons
+
+// The native Assets panel draws lucide glyphs through CSS masks; inlining the
+// same paths keeps the panel identical without depending on the frontend's
+// icon utilities being loaded.
+const ICON_PATHS = {
+    search: "<path d='m21 21l-4.34-4.34'/><circle cx='11' cy='11' r='8'/>",
+    settings:
+        "<path d='M14 17H5M19 7h-9'/><circle cx='17' cy='17' r='3'/><circle cx='7' cy='7' r='3'/>",
+    list: "<path d='M16 5H3m13 7H3m13 7H3M21 5h.01M21 12h.01M21 19h.01'/>",
+    gridSmall:
+        "<rect width='18' height='18' x='3' y='3' rx='2'/><path d='M3 9h18M3 15h18M9 3v18m6-18v18'/>",
+    gridLarge:
+        "<rect width='7' height='7' x='3' y='3' rx='1'/><rect width='7' height='7' x='14' y='3' rx='1'/><rect width='7' height='7' x='14' y='14' rx='1'/><rect width='7' height='7' x='3' y='14' rx='1'/>",
+    check: "<path d='M20 6L9 17l-5-5'/>",
+    refresh: "<path d='M21 12a9 9 0 1 1-2.64-6.36'/><path d='M21 3v6h-6'/>",
+};
+
+function svgIcon(name, cls) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    el.setAttribute("viewBox", "0 0 24 24");
+    el.setAttribute("fill", "none");
+    el.setAttribute("stroke", "currentColor");
+    el.setAttribute("stroke-width", "2");
+    el.setAttribute("stroke-linecap", "round");
+    el.setAttribute("stroke-linejoin", "round");
+    el.setAttribute("aria-hidden", "true");
+    if (cls) el.setAttribute("class", cls);
+    el.innerHTML = ICON_PATHS[name] || "";
+    return el;
+}
+
+// Mirrors the native panel's three view modes. Kept under our own key so the
+// two sidebars can be set independently.
+const VIEW_KEY = "xcat.gallery.view";
+const VIEW_MODES = ["list", "grid-small", "grid"];
+
+function getViewMode() {
+    try {
+        const v = localStorage.getItem(VIEW_KEY);
+        return VIEW_MODES.includes(v) ? v : "grid-small";
+    } catch {
+        return "grid-small";
+    }
+}
+
+// getMediaAssetGridColumns() from the frontend source, verbatim.
+function gridColumns(mode) {
+    const minWidth = mode === "grid-small" ? 128 : 240;
+    return `repeat(auto-fill, minmax(min(${minWidth}px, 30vw), 1fr))`;
+}
+
 
 // ------------------------------------------------------------------ helpers
 
@@ -195,12 +256,13 @@ const CSS = `
 }
 .xog-btn:hover { background: var(--xog-surface-hover); }
 .xog-btn:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
+.xog-btn svg { width: 16px; height: 16px; }
 .xog-btn .pi { font-size: 16px; }
 .xog-tabs {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 16px 0;
+    padding: 8px 16px 1px;
     overflow-x: auto;
     scrollbar-width: none;
 }
@@ -249,10 +311,15 @@ const CSS = `
 .xog-search-icon {
     position: absolute;
     inset-inline-start: 10px;
-    color: var(--xog-muted);
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--xog-fg);
     pointer-events: none;
 }
+.xog-search-icon svg { width: 16px; height: 16px; }
 .xog-search {
     width: 100%;
     height: 100%;
@@ -267,28 +334,84 @@ const CSS = `
     outline: none;
 }
 .xog-search::placeholder { color: var(--xog-muted); }
+.xog-viewwrap {
+    position: relative;
+    flex: none;
+}
+.xog-viewbtn svg { width: 16px; height: 16px; }
+.xog-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    inset-inline-end: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    min-width: 142px;
+    padding: 8px;
+    border: 1px solid var(--border-subtle, var(--border-default, #3c3d42));
+    border-radius: 8px;
+    background: var(--base-background, var(--comfy-menu-bg, #171718));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box;
+}
+.xog-menu[hidden] { display: none; }
+.xog-menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 32px;
+    padding: 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--xog-fg);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background-color 0.12s ease;
+}
+.xog-menu-item:hover { background: var(--secondary-background-hover, var(--xog-surface-hover)); }
+.xog-menu-item:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
+.xog-menu-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.xog-menu-label svg { width: 16px; height: 16px; flex: none; }
+.xog-menu-check {
+    width: 16px;
+    height: 16px;
+    margin-inline-start: auto;
+    flex: none;
+}
+.xog-menu-item[data-active="false"] .xog-menu-check { opacity: 0; }
 .xog-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 8px;
-    padding: 16px;
+    padding: 0 8px 12px;
 }
+.xog-grid[data-view="list"] { grid-template-columns: minmax(0, 1fr); }
 .xog-card {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    padding: 0;
-    border: 1px solid transparent;
+    gap: 8px;
+    padding: 8px;
+    border: none;
     border-radius: 8px;
-    background: var(--xog-surface);
+    background: transparent;
     color: inherit;
     font-family: inherit;
     text-align: start;
     overflow: hidden;
     cursor: pointer;
-    transition: border-color 0.12s ease;
+    box-sizing: border-box;
+    transition: background-color 0.2s ease;
 }
-.xog-card:hover { border-color: var(--xog-accent); }
+.xog-card:hover { background: var(--xog-surface); }
 .xog-card:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
 .xog-thumb {
     position: relative;
@@ -342,25 +465,65 @@ const CSS = `
 .xog-meta {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    padding: 6px 8px 8px;
+    gap: 4px;
+    padding: 0;
     min-width: 0;
 }
 .xog-name {
     display: block;
     color: var(--xog-fg);
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 20px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .xog-sub {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: var(--xog-muted);
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 16px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+.xog-grid[data-view="list"] .xog-card {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    min-height: 48px;
+}
+.xog-grid[data-view="list"] .xog-thumb {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    aspect-ratio: auto;
+    border-radius: 4px;
+}
+.xog-grid[data-view="list"] .xog-meta {
+    flex: 1;
+    gap: 4px;
+}
+.xog-grid[data-view="list"] .xog-name {
+    font-size: 12px;
+    line-height: 12px;
+}
+.xog-grid[data-view="list"] .xog-play {
+    inset-block-end: 1px;
+    inset-inline-end: 1px;
+    width: 12px;
+    height: 12px;
+}
+.xog-grid[data-view="list"] .xog-play .pi { font-size: 6px; }
+.xog-grid[data-view="list"] .xog-badge {
+    inset-block-start: auto;
+    inset-block-end: 1px;
+    inset-inline-start: 1px;
+    padding: 0 2px;
+    font-size: 8px;
 }
 .xog-status {
     padding: 24px 16px;
@@ -598,8 +761,12 @@ function buildPanel(host) {
             <div class="xog-tabs"></div>
             <div class="xog-searchrow">
                 <div class="xog-searchbox">
-                    <i class="pi pi-search xog-search-icon"></i>
+                    <span class="xog-search-icon"></span>
                     <input class="xog-search" type="search" />
+                </div>
+                <div class="xog-viewwrap">
+                    <button class="xog-btn xog-viewbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+                    <div class="xog-menu" role="menu" hidden></div>
                 </div>
             </div>
         </div>
@@ -611,10 +778,11 @@ function buildPanel(host) {
     const refreshBtn = host.querySelector(".xog-refresh");
     refreshBtn.title = t("refresh");
     refreshBtn.setAttribute("aria-label", t("refresh"));
-    refreshBtn.innerHTML = '<i class="pi pi-refresh"></i>';
+    refreshBtn.replaceChildren(svgIcon("refresh"));
 
     const search = host.querySelector(".xog-search");
     search.placeholder = t("search");
+    host.querySelector(".xog-search-icon").appendChild(svgIcon("search"));
 
     const filters = host.querySelector(".xog-tabs");
     const kinds = ["all", "image", "video", "audio", "other"];
@@ -630,12 +798,80 @@ function buildPanel(host) {
         })
     );
 
+    // View switcher — same trigger (lucide settings-2) and menu entries as the
+    // native Assets panel's MediaAssetSettingsMenu.
+    const viewBtn = host.querySelector(".xog-viewbtn");
+    viewBtn.title = t("viewMenu");
+    viewBtn.setAttribute("aria-label", t("viewMenu"));
+    viewBtn.appendChild(svgIcon("settings"));
+
+    const menu = host.querySelector(".xog-menu");
+    menu.replaceChildren(
+        ...[
+            { mode: "list", icon: "list", label: "viewList" },
+            { mode: "grid-small", icon: "gridSmall", label: "viewGridSmall" },
+            { mode: "grid", icon: "gridLarge", label: "viewGridLarge" },
+        ].map((item) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "xog-menu-item";
+            btn.dataset.mode = item.mode;
+            btn.setAttribute("role", "menuitemradio");
+            const label = document.createElement("span");
+            label.className = "xog-menu-label";
+            const text = document.createElement("span");
+            text.textContent = t(item.label);
+            label.append(svgIcon(item.icon), text);
+            btn.append(label, svgIcon("check", "xog-menu-check"));
+            btn.addEventListener("click", () => {
+                applyView(item.mode);
+                closeViewMenu();
+            });
+            return btn;
+        })
+    );
+
+    function openViewMenu() {
+        menu.hidden = false;
+        viewBtn.setAttribute("aria-expanded", "true");
+    }
+
+    function closeViewMenu() {
+        menu.hidden = true;
+        viewBtn.setAttribute("aria-expanded", "false");
+    }
+
+    viewBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (menu.hidden) openViewMenu();
+        else closeViewMenu();
+    });
+
     const grid = host.querySelector(".xog-grid");
     const status = host.querySelector(".xog-status");
     const count = host.querySelector(".xog-count");
     const sentinel = host.querySelector(".xog-sentinel");
 
     const state = { files: [], filter: "all", query: "", matched: [], shown: 0 };
+
+    // Column tracks come from the frontend's own getMediaAssetGridColumns().
+    function applyView(mode) {
+        grid.dataset.view = mode;
+        grid.style.gridTemplateColumns =
+            mode === "list" ? "minmax(0, 1fr)" : gridColumns(mode);
+        for (const btn of menu.children) {
+            btn.dataset.active = String(btn.dataset.mode === mode);
+        }
+        try {
+            localStorage.setItem(VIEW_KEY, mode);
+        } catch {
+            /* storage disabled — view just won't persist */
+        }
+        // A different column count changes how many cards fill the first screen.
+        fillViewport();
+    }
+
+    applyView(getViewMode());
 
     function setStatus(text) {
         status.replaceChildren();
@@ -828,6 +1064,19 @@ function buildPanel(host) {
     );
     observer.observe(sentinel);
 
+    // Dismiss the view menu the way the native popover does: outside press, Esc,
+    // or picking an entry.
+    const onDocDown = (ev) => {
+        if (menu.hidden) return;
+        if (menu.contains(ev.target) || viewBtn.contains(ev.target)) return;
+        closeViewMenu();
+    };
+    const onDocKey = (ev) => {
+        if (ev.key === "Escape" && !menu.hidden) closeViewMenu();
+    };
+    document.addEventListener("pointerdown", onDocDown, true);
+    document.addEventListener("keydown", onDocKey);
+
     refreshBtn.addEventListener("click", () => {
         cache = { at: 0, data: null };
         load();
@@ -860,7 +1109,11 @@ function buildPanel(host) {
         load();
     }
 
-    return () => observer.disconnect();
+    return () => {
+        observer.disconnect();
+        document.removeEventListener("pointerdown", onDocDown, true);
+        document.removeEventListener("keydown", onDocKey);
+    };
 }
 
 // ------------------------------------------------------------------ register
