@@ -105,6 +105,15 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
 
+    # History gallery: a sidebar tab listing every file in the account's own
+    # output/ and input/ trees, with download and on-disk delete.
+    try:
+        from .nodes import history_gallery
+
+        history_gallery.install()
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[XXXXXLCat] history gallery skipped: {exc}")
+
     return XXXXXLCatExtension()
 
 
