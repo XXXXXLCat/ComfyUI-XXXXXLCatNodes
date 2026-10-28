@@ -2,7 +2,7 @@
 
 <p align="center"><strong>🇨🇳 中文</strong> ·<a href="README.md">🇺🇸 English</a></p>
 
-一组 ComfyUI 自定义节点，附带两个界面功能（菜单栏监视器、多用户支持）。
+一组 ComfyUI 自定义节点，附带菜单栏监视器界面功能。
 
 ## 节点
 
@@ -21,7 +21,6 @@
 ## 界面
 
 - **菜单栏监视器**：CPU / RAM / GPU 利用率 / 显存 / 温度五项，每 0.5 秒刷新；左侧两个一键按钮 **VRAM Cleanup**、**RAM Cleanup**；悬停可看已用/总量与显存会话峰值。
-- **多用户资产隔离**（`--multi-user` 启动时自动生效）：`input/` 与 `output/` 变成 `input/<用户>/` 与 `output/<用户>/`，各用户的上传与生成物互不可见；原有的全局目录保留为可读的共享池。登录沿用 ComfyUI 原生「选择用户」方式，无需密码。
 
 ## 安装
 

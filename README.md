@@ -2,7 +2,7 @@
 
 <p align="center"><a href="README_CN.md">🇨🇳 中文</a> ·<strong>🇺🇸 English</strong></p>
 
-A small set of ComfyUI custom nodes, plus two interface features (menu-bar monitor, multi-user support).
+A small set of ComfyUI custom nodes, plus a menu-bar monitor interface feature.
 
 ## Nodes
 
@@ -19,7 +19,6 @@ A small set of ComfyUI custom nodes, plus two interface features (menu-bar monit
 ## Interface
 
 - **Menu-bar monitor**: CPU / RAM / GPU utilization / VRAM / temperature, refreshed every 0.5s, with one-tap **VRAM Cleanup** and **RAM Cleanup** buttons on the left. Hovering shows used/total and the VRAM session peak.
-- **Per-user asset isolation** (auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>/` and `output/<user>/`, so each user's uploads and generations are private; the pre-existing global folders stay readable as a shared pool. Sign-in uses ComfyUI's native "pick a user" flow — no password required.
 
 ## Installation
 

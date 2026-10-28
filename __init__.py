@@ -94,15 +94,6 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
 
-    # Per-user asset isolation (input/<user>/ & output/<user>/) — only when
-    # ComfyUI is launched with --multi-user. No-op (and zero impact) otherwise.
-    try:
-        from .nodes import multi_user_assets
-
-        multi_user_assets.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
-
     return XXXXXLCatExtension()
 
 
