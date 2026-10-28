@@ -13,18 +13,19 @@ subprocess. Nothing like psutil is pulled in.
   and ``en`` bundles exist; ``locale_alias.py`` copies the ``zh`` node entries
   into every other ``zh-*`` locale (``zh-TW`` included) so a Traditional UI shows
   Simplified Chinese instead of falling back to English.
-- Seven custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
+- Eight custom nodes under the 🐈‍⬛XXXXXLCat brand (🐈‍⬛XXXXXLCat/Memory,
   🐈‍⬛XXXXXLCat/Sampling, 🐈‍⬛XXXXXLCat/switch, 🐈‍⬛XXXXXLCat/group,
-  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/utilities): all built on the new V3 node API
-  (comfy_api / io.ComfyNode) — Sweep VRAM 🐈‍⬛, Reclaim RAM 🐈‍⬛,
-  H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛, Group Control 🐈‍⬛,
-  Node Control 🐈‍⬛, and Resolution Selector 🐈‍⬛ (the official
-  resolution node, with a 2-decimal megapixel step).
+  🐈‍⬛XXXXXLCat/node, 🐈‍⬛XXXXXLCat/utilities, 🐈‍⬛XXXXXLCat/image): all built on
+  the new V3 node API (comfy_api / io.ComfyNode) — Sweep VRAM 🐈‍⬛,
+  Reclaim RAM 🐈‍⬛, H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛,
+  Group Control 🐈‍⬛, Node Control 🐈‍⬛, Resolution Selector 🐈‍⬛ (the
+  official resolution node, with a 2-decimal megapixel step), and
+  Fit Image to Size 🐈‍⬛ (crop/pad an image onto an exact target canvas).
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
 This file is only the entry point: it prints the banner, imports those modules,
-and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 7 V3 nodes).
+and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 8 V3 nodes).
 """
 
 import os
@@ -56,6 +57,7 @@ from .nodes import (  # noqa: E402
     XXXXXLCatGroupControl,
     XXXXXLCatNodeControl,
     XXXXXLCatResolutionSelector,
+    XXXXXLCatFitImageToSize,
 )
 
 
@@ -80,6 +82,7 @@ _NODE_CLASSES = [
     XXXXXLCatGroupControl,
     XXXXXLCatNodeControl,
     XXXXXLCatResolutionSelector,
+    XXXXXLCatFitImageToSize,
 ]
 
 

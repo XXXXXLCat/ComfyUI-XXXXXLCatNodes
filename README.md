@@ -4,7 +4,7 @@
 
 ComfyUI extension providing seven custom nodes and three interface features.
 
-- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector.
+- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size.
 - Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation.
 
 No third-party dependencies and no external service. Labels follow ComfyUI's language setting; Chinese and English are provided.
@@ -145,6 +145,37 @@ Identical to the official resolution node except for two differences.
 - A **Custom** aspect ratio is available, taking explicit width and height. In that mode the megapixel field is hidden and does not affect the result.
 
 All other behaviour matches the official node: same aspect ratio options, same live resolution preview, same rounding to the chosen multiple.
+
+## Fit Image to Size 🐈‍⬛
+
+Works out a target size from aspect ratio and megapixels, then scales the image onto it with a single uniform factor so the picture is never stretched. The size arithmetic matches Resolution Selector, so the same ratio and megapixel value give the same result on both nodes.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| Aspect Ratio | Auto | Auto takes the ratio from the input image; the rest are fixed ratios |
+| Megapixels | 1.0 | Target total megapixels, 0.01 step |
+| Multiple | 32 | Snap the computed size to the nearest multiple; 1 disables snapping |
+
+Aspect ratios: Auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
+
+Whether the target crops or pads is decided by the node, with no switch to set:
+
+- When the target ratio already follows the image — always in Auto ratio, and for a chosen ratio within 2% — it scales to cover and centre-crops the few pixels the rounding added. No border, no change to the composition.
+- Further apart it scales to fit and centres the result on a black canvas. Every pixel kept, at the cost of black borders.
+
+Outputs are the image, the width and height actually produced, and resolution — the equivalent square edge `round(√(width×height))`, which is 1024 for a 1 MP square.
+
+Below the inputs the node shows a target-size preview such as `1376 × 768 1.01 MP`, updated live as the aspect ratio or megapixel value changes. In Auto mode the preview uses the connected image's own width and height; with nothing connected it shows a dash.
+
+In Auto mode the size is still snapped to the multiple, so the produced ratio differs from the image ratio by the rounding — usually under 1%. Some ratios have no exact counterpart on the grid: 1365×768 becomes 1376×768 at a multiple of 32, 0.8% wide. The crop then shaves a few pixels off the edge and leaves the composition intact. Setting the multiple to 1 gives an exact match, at the cost of a size that no longer sits on the model's grid.
+
+Why the multiple: some diffusion models (Qwen-Image among them) re-align images to their own grid internally. When the output already sits on that grid, the model skips its own resize and the picture is not softened by a second resample.
+
+Limits:
+
+- Both paths scale by a single uniform factor and never stretch. The further the target ratio sits from the input ratio, the more of the picture is cropped.
+- The padding colour is fixed black; it does not extend the image content.
+- The decision looks at the ratio alone, not at the picture's content: to force a crop pick a ratio that already matches the picture, to force padding pick one that is far off.
 
 ## History gallery
 

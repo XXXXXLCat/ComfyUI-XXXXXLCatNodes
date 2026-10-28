@@ -258,5 +258,57 @@
         "tooltip": "Calculated height in pixels multiplied by the selected multiple."
       }
     }
+  },
+  "🐈‍⬛FitImageToSize": {
+    "display_name": "Fit Image to Size 🐈‍⬛",
+    "description": "Work out a target size from aspect ratio + megapixels (same arithmetic as Resolution Selector) and scale the image onto it with one uniform factor, so nothing is stretched. 'Auto' takes the ratio from the image itself, and the result tracks it as closely as the multiple grid allows — 1365x768 becomes 1376x768 at a multiple of 32, 0.8% wide, exact if the multiple is set to 1. A target that already follows the image is centre-cropped by those few pixels; a target ratio further away is padded with black instead. Outputs the image, the width and height actually produced, and resolution — the equivalent square edge round(sqrt(width×height)), 1024 for a 1 MP square.",
+    "inputs": {
+      "image": {
+        "name": "Image",
+        "tooltip": "Image to fit."
+      },
+      "aspect_ratio": {
+        "name": "Aspect Ratio",
+        "tooltip": "Ratio used to derive the target size. 'Auto' uses the input image's own ratio."
+      },
+      "megapixels": {
+        "name": "Megapixels",
+      "tooltip": "Target total megapixels, 0.01 step. 1.0 MP gives 1024x1024 for a square ratio."
+    },
+    "preview": {
+      "name": "Preview",
+      "tooltip": "Live preview of the target size and megapixel count; shows a dash while nothing is connected."
+    },
+    "multiple": {
+      "name": "Multiple",
+      "tooltip": "Snap the computed size to this grid. Default 32 matches the grid Qwen-Image aligns to internally; 1 disables snapping."
+      },
+      "preview_ratio": {
+        "name": "Preview Ratio",
+        "tooltip": "Internal: the ratio the preview reads. Hidden, kept in step with the aspect ratio and the upstream image."
+      },
+      "preview_megapixels": {
+        "name": "Preview Megapixels",
+        "tooltip": "Internal: the megapixel value the preview reads. Hidden, kept in step by the node itself."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Image",
+        "tooltip": "The image scaled onto the computed canvas."
+      },
+      "1": {
+        "name": "Width",
+        "tooltip": "Width actually produced, after rounding to the multiple."
+      },
+      "2": {
+        "name": "Height",
+        "tooltip": "Height actually produced, after rounding to the multiple."
+      },
+      "3": {
+        "name": "Resolution",
+        "tooltip": "Equivalent square edge of the result, round(sqrt(width*height)). 1024 for a 1 MP square."
+      }
+    }
   }
 }
