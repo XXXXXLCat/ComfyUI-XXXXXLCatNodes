@@ -6,6 +6,7 @@
 //   GET  /xcat/gallery/file    the file itself, or a thumbnail with preview=1
 //   POST /xcat/gallery/zip     multi-file download as a single archive
 //   POST /xcat/gallery/delete  removes the files from disk
+//   POST /xcat/gallery/insert  stages one file in input/ for a Load* node
 // Under --multi-user the server scopes everything to the signed-in account.
 //
 // Layout and interaction are ported from the native Assets panel — read those
@@ -31,6 +32,7 @@ import { langCode } from "./i18n.js";
 const LIST_URL = "/xcat/gallery";
 const ZIP_URL = "/xcat/gallery/zip";
 const DELETE_URL = "/xcat/gallery/delete";
+const INSERT_URL = "/xcat/gallery/insert";
 const TAB_ID = "xcat-history-gallery";
 const BATCH = 60;
 const CACHE_TTL = 5000;
@@ -74,6 +76,7 @@ const STRINGS = {
         // Actions below mirror mediaAsset.actions / mediaAsset.selection in the
         // official locale pack, so both panels use the same wording.
         inspect: "查看资产",
+        insertNode: "作为节点插入",
         download: "下载",
         moreOptions: "更多选项",
         delete: "删除",
@@ -86,6 +89,10 @@ const STRINGS = {
         deletePermanent: "它们将被永久移除。",
         cancel: "取消",
         deleteFailed: "删除失败",
+        insertDone: "已插入 {node} 节点",
+        insertFailed: "插入失败",
+        insertNoNode: "找不到 {node} 节点",
+        insertUnsupported: "该文件类型不能作为节点插入",
     },
     en: {
         title: "Gallery",
@@ -117,6 +124,7 @@ const STRINGS = {
         play: "Play",
         pause: "Pause",
         inspect: "Inspect asset",
+        insertNode: "Insert as node",
         download: "Download",
         moreOptions: "More options",
         delete: "Delete",
@@ -129,6 +137,10 @@ const STRINGS = {
         deletePermanent: "They will be permanently removed.",
         cancel: "Cancel",
         deleteFailed: "Delete failed",
+        insertDone: "Added a {node} node",
+        insertFailed: "Could not add the node",
+        insertNoNode: "Node type {node} is not available",
+        insertUnsupported: "This file type cannot be added as a node",
     },
 };
 
@@ -171,6 +183,7 @@ const ICON_PATHS = {
     x: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M18 6L6 18M6 6l12 12'/>",
     zoomIn:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21l-4.35-4.35M11 8v6m-3-3h6'/></g>",
+    plus: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M5 12h14m-7-7v14'/>",
     ellipsis:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/><circle cx='5' cy='12' r='1'/></g>",
 };
@@ -1552,6 +1565,119 @@ async function deleteFiles(files) {
     return true;
 }
 
+// ------------------------------------------------------------------ insert
+
+// Core loaders only, mirroring _INSERT_NODES in nodes/history_gallery.py: each
+// takes a filename resolved against the input directory.
+const NODE_FOR_KIND = {
+    image: { type: "LoadImage", widget: "image" },
+    video: { type: "LoadVideo", widget: "file" },
+    audio: { type: "LoadAudio", widget: "audio" },
+};
+
+// The native toast service; extensions are expected to use it rather than
+// paint their own banner inside the panel.
+function notify(summary, { detail, severity = "success" } = {}) {
+    const toast = app?.extensionManager?.toast;
+    if (typeof toast?.add === "function") {
+        toast.add({ severity, summary, detail, life: 3000 });
+        return;
+    }
+    console.info("[🐈‍⬛ Gallery]", summary, detail || "");
+}
+
+// Canvas coordinates of the middle of the viewport. LiteGraph maps a graph
+// position to the screen as `(pos + ds.offset) * ds.scale`.
+function viewportCenter() {
+    const canvas = app?.canvas;
+    const ds = canvas?.ds;
+    const el = canvas?.canvas;
+    if (!ds || !el || !el.clientWidth) return [0, 0];
+    return [
+        el.clientWidth / 2 / ds.scale - ds.offset[0],
+        el.clientHeight / 2 / ds.scale - ds.offset[1],
+    ];
+}
+
+let insertNudge = 0;
+
+function spawnLoaderNode(type, widgetName, value) {
+    const lite = window.LiteGraph;
+    if (typeof lite?.createNode !== "function" || !app?.graph) return null;
+
+    let node;
+    try {
+        // Keep this a method call: createNode() reads `this.registered_node_types`,
+        // so pulling the function off the object throws.
+        node = lite.createNode(type);
+    } catch (err) {
+        console.warn("[🐈‍⬛ Gallery] could not create", type, err);
+        return null;
+    }
+    if (!node) return null;
+
+    app.graph.add(node);
+    const [cx, cy] = viewportCenter();
+    // Repeated inserts must not stack on top of each other.
+    insertNudge = (insertNudge + 1) % 6;
+    const shift = insertNudge * 28;
+    const [w, h] = node.size || [210, 100];
+    node.pos = [cx - w / 2 + shift, cy - h / 2 + shift];
+
+    const widget = (node.widgets || []).find((item) => item.name === widgetName);
+    if (widget) {
+        widget.value = value;
+        node.onWidgetChanged?.(widgetName, value, undefined, widget);
+    }
+    const canvas = app.canvas;
+    if (typeof canvas?.selectNodes === "function") canvas.selectNodes([node]);
+    else canvas?.selectNode?.(node);
+    app.graph.setDirtyCanvas?.(true, true);
+    return node;
+}
+
+async function insertAsNode(file) {
+    const target = NODE_FOR_KIND[file?.kind];
+    if (!target) {
+        notify(t("insertFailed"), {
+            detail: t("insertUnsupported"),
+            severity: "warn",
+        });
+        return;
+    }
+
+    let info;
+    try {
+        const res = await api.fetchApi(INSERT_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload([file])),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        info = await res.json();
+    } catch {
+        notify(t("insertFailed"), { detail: file.filename, severity: "error" });
+        return;
+    }
+
+    // The server tells us which widget to fill (it owns the staging rules).
+    const node = spawnLoaderNode(
+        info.node || target.type,
+        info.widget || target.widget,
+        info.filename
+    );
+    if (!node) {
+        notify(t("insertFailed"), {
+            detail: t("insertNoNode").replace("{node}", info.node || target.type),
+            severity: "error",
+        });
+        return;
+    }
+    notify(t("insertDone").replace("{node}", info.node || target.type), {
+        detail: info.filename,
+    });
+}
+
 // ------------------------------------------------------------------ panel
 
 // Last manifest, so switching tabs repaints instantly instead of flashing.
@@ -1925,6 +2051,13 @@ function buildPanel(host) {
                       icon: "zoomIn",
                       label: t("inspect"),
                       onClick: () => ensureLightbox().open(file),
+                  }),
+                  menuItem({
+                      icon: "plus",
+                      label: t("insertNode"),
+                      // 3D / text files have no core loader reading input/.
+                      disabled: !NODE_FOR_KIND[file.kind],
+                      onClick: () => insertAsNode(file),
                   }),
                   menuItem({
                       icon: "download",

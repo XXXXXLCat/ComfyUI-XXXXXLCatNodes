@@ -34,6 +34,13 @@ renders them with the native media-asset layout:
     through the same resolver the read routes use, so a crafted request can
     only ever delete files the caller could already read.
 
+``POST /xcat/gallery/insert``
+    Prepares one file for use inside a workflow: ``LoadImage`` / ``LoadVideo``
+    / ``LoadAudio`` only read from the input directory, so a file that lives in
+    ``output/`` (or in a sub-folder) is hard-linked — or copied, when linking is
+    not possible — into the account's input root. The reply names the file the
+    caller should put into the node's widget.
+
 Identity and isolation
 ----------------------
 Under ``--multi-user`` the listing is scoped to the signed-in account's
@@ -61,6 +68,7 @@ import io
 import logging
 import mimetypes
 import os
+import shutil
 import time
 import zipfile
 from typing import Dict, List, Optional, Tuple
@@ -120,6 +128,15 @@ LIST_ROUTE = "/xcat/gallery"
 FILE_ROUTE = "/xcat/gallery/file"
 ZIP_ROUTE = "/xcat/gallery/zip"
 DELETE_ROUTE = "/xcat/gallery/delete"
+INSERT_ROUTE = "/xcat/gallery/insert"
+
+# kind -> (node type, widget the filename goes into). Only core loaders: they
+# resolve through get_annotated_filepath(), i.e. the input directory.
+_INSERT_NODES = {
+    "image": ("LoadImage", "image"),
+    "video": ("LoadVideo", "file"),
+    "audio": ("LoadAudio", "audio"),
+}
 
 # Per-process secret for the capability tokens carried by media URLs. A restart
 # invalidates every issued URL, which is fine: the panel refetches its manifest.
@@ -655,6 +672,118 @@ async def _h_delete(request: web.Request) -> web.Response:
     )
 
 
+# ---------------------------------------------------------------- insert
+
+def _user_input_dir(user: Optional[str]) -> str:
+    """The input directory a node of this account reads from."""
+    base = _global_roots()["input"]
+    return os.path.join(base, user) if user else base
+
+
+def _same_bytes(a: str, b: str) -> bool:
+    """Identity check that never reads a whole video twice for nothing."""
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                left = fa.read(1 << 20)
+                right = fb.read(1 << 20)
+                if left != right:
+                    return False
+                if not left:
+                    return True
+    except OSError:
+        return False
+
+
+def _place_in_input(target: str, user: Optional[str]) -> Tuple[str, bool]:
+    """Make ``target`` readable by LoadImage / LoadVideo / LoadAudio.
+
+    Those nodes resolve through ``get_annotated_filepath`` — the input
+    directory — and the frontend combo only lists files sitting directly in its
+    root, so an output file (or one buried in a sub-folder) is hard-linked next
+    to it. Hard-linking keeps the input tree free of duplicated bytes; a plain
+    copy is used when the volumes differ.
+
+    Returns ``(filename, reused)`` where ``reused`` means nothing was written.
+    """
+    dest_dir = _user_input_dir(user)
+    source_dir = os.path.dirname(target)
+    name = os.path.basename(target)
+
+    if os.path.normcase(os.path.abspath(source_dir)) == os.path.normcase(
+        os.path.abspath(dest_dir)
+    ):
+        return name, True
+
+    os.makedirs(dest_dir, exist_ok=True)
+    stem, ext = os.path.splitext(name)
+    candidate = name
+    index = 1
+    while True:
+        dest = os.path.join(dest_dir, candidate)
+        if not os.path.exists(dest):
+            break
+        # Inserting the same file twice must not pile up numbered copies.
+        if _same_bytes(target, dest):
+            return candidate, True
+        if index > 999:
+            raise OSError("too many same-named files in input")
+        candidate = f"{stem}_{index}{ext}"
+        index += 1
+
+    try:
+        os.link(target, dest)
+    except OSError:
+        shutil.copy2(target, dest)
+    return candidate, False
+
+
+async def _h_insert(request: web.Request) -> web.Response:
+    user = _request_user(request)
+    if _multi_user_enabled() and not user:
+        return web.json_response({"error": "unknown user"}, status=401)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid body"}, status=400)
+
+    items = _selection(payload)
+    if not items:
+        return web.json_response({"error": "no files"}, status=400)
+
+    item = items[0]
+    target = _resolve(item["source"], item["path"], user, require_user=True)
+    if target is None:
+        return web.json_response({"error": "not found"}, status=404)
+
+    kind = _kind(target)
+    typed = _INSERT_NODES.get(kind)
+    if typed is None:
+        # 3D models / text have no core loader that reads the input directory.
+        return web.json_response({"error": "unsupported", "kind": kind}, status=415)
+
+    try:
+        filename, reused = await asyncio.to_thread(_place_in_input, target, user)
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+    node, widget = typed
+    return web.json_response(
+        {
+            "filename": filename,
+            "kind": kind,
+            "node": node,
+            "widget": widget,
+            "reused": reused,
+            "source_filename": os.path.basename(target),
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 # ---------------------------------------------------------------- install
 
 def _attach(server_instance) -> None:
@@ -675,6 +804,7 @@ def _attach(server_instance) -> None:
             app.router.add_route("GET", prefix + FILE_ROUTE, _h_file)
             app.router.add_route("POST", prefix + ZIP_ROUTE, _h_zip)
             app.router.add_route("POST", prefix + DELETE_ROUTE, _h_delete)
+            app.router.add_route("POST", prefix + INSERT_ROUTE, _h_insert)
         _ROUTES_DONE = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("[XXXXXLCat] could not add history gallery routes: %s", exc)
