@@ -20,6 +20,15 @@ A small set of ComfyUI custom nodes, plus a menu-bar monitor interface feature.
 
 - **Menu-bar monitor**: CPU / RAM / GPU utilization / VRAM / temperature, refreshed every 0.5s, with one-tap **VRAM Cleanup** and **RAM Cleanup** buttons on the left. Hovering shows used/total and the VRAM session peak.
 
+## Multi-user asset isolation
+
+Activated automatically when ComfyUI is launched with `--multi-user` (no effect and no nodes added in single-user mode):
+
+- `input/` and `output/` are split per user into `input/<user>/` and `output/<user>/`; each user's uploads and generated files are mutually invisible.
+- Login uses ComfyUI's native "select user" flow — **no password** required.
+- History (`/history`), queue (`/queue`), jobs (`/jobs`) and the prompt cache are all isolated per user, so nothing leaks between accounts.
+- The legacy global `input/` and `output/` are **not visible** to any user (only internal system operations fall back to the global directories).
+
 ## Installation
 
 Copy the whole `ComfyUI-XXXXXLCatNodes` folder into `ComfyUI/custom_nodes/` and restart ComfyUI. The interface features need no node added to the graph.

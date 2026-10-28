@@ -94,6 +94,17 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
 
+    # Per-user asset isolation (input/<user>/ & output/<user>/; the legacy global
+    # input/ output/ pool is hidden from every account). Only takes effect when
+    # ComfyUI is launched with --multi-user; no-op (and zero impact) otherwise.
+    # Login stays on ComfyUI's native "select user" flow — no password gate.
+    try:
+        from .nodes import multi_user_assets
+
+        multi_user_assets.install()
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
+
     return XXXXXLCatExtension()
 
 
