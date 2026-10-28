@@ -22,6 +22,15 @@
 
 - **菜单栏监视器**：CPU / RAM / GPU 利用率 / 显存 / 温度五项，每 0.5 秒刷新；左侧两个一键按钮 **VRAM Cleanup**、**RAM Cleanup**；悬停可看已用/总量与显存会话峰值。
 
+## 多用户资产隔离
+
+以 `--multi-user` 启动 ComfyUI 时自动生效（单用户完全无影响，不引入任何节点）：
+
+- `input/` 与 `output/` 自动按用户拆分为 `input/<用户>/` 与 `output/<用户>/`，各用户的上传与生成物互不可见。
+- 登录沿用 ComfyUI 原生「选择用户」方式，**无需密码**。
+- 历史（`/history`）、队列（`/queue`）、任务（`/jobs`）与提示词缓存均按用户隔离，不会串号。
+- 原有的全局 `input/`、`output/` 对每位用户**不可见**（仅系统内部操作会落到全局目录）。
+
 ## 安装
 
 把整个 `ComfyUI-XXXXXLCatNodes` 文件夹放进 `ComfyUI/custom_nodes/`，重启 ComfyUI。界面功能无需添加任何节点。
