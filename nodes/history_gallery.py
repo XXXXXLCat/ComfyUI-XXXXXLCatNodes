@@ -30,9 +30,10 @@ renders them with the native media-asset layout:
     already compressed) and returns it in one response.
 
 ``POST /xcat/gallery/delete``
-    Removes the requested files **from disk**. Every path is re-resolved
-    through the same resolver the read routes use, so a crafted request can
-    only ever delete files the caller could already read.
+    Moves the requested files to the Recycle Bin (``SHFileOperationW`` with
+    ``FOF_ALLOWUNDO``), so a mistaken delete can be undone from Explorer. Every
+    path is re-resolved through the same resolver the read routes use, so a
+    crafted request can only touch files the caller could already read.
 
 ``POST /xcat/gallery/insert``
     Prepares one file for use inside a workflow: ``LoadImage`` / ``LoadVideo``
@@ -62,6 +63,7 @@ and no account is attached.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import hmac
 import io
@@ -633,6 +635,77 @@ async def _h_zip(request: web.Request) -> web.Response:
     )
 
 
+# ------------------------------------------------------------ recycle bin
+
+_FO_DELETE = 0x0003
+_FOF_SILENT = 0x0004
+_FOF_NOCONFIRMATION = 0x0010
+_FOF_ALLOWUNDO = 0x0040
+_FOF_NOERRORUI = 0x0400
+
+
+class _SHFILEOPSTRUCTW(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("wFunc", ctypes.c_uint),
+        ("pFrom", ctypes.c_wchar_p),
+        ("pTo", ctypes.c_wchar_p),
+        ("fFlags", ctypes.c_ushort),
+        ("fAnyOperationsAborted", ctypes.c_int),
+        ("hNameMappings", ctypes.c_void_p),
+        ("lpszProgressTitle", ctypes.c_wchar_p),
+    ]
+
+
+def _recycle(paths: List[str]) -> Optional[str]:
+    """Move ``paths`` to the Recycle Bin. Returns an error message, else ``None``.
+
+    ``SHFileOperationW`` with ``FOF_ALLOWUNDO`` is the shell's own delete path,
+    so the entry keeps its original name, size and deletion time and can be
+    restored from the Recycle Bin. Called through ``asyncio.to_thread``: the
+    COM apartment this opens belongs to the worker thread, never to the event
+    loop.
+    """
+    if not paths:
+        return None
+    if os.name != "nt":
+        return "the Recycle Bin is only available on Windows"
+
+    # SHFileOperation takes a double-NUL terminated list of absolute paths.
+    from_list = "\0".join(os.path.abspath(p) for p in paths) + "\0\0"
+    op = _SHFILEOPSTRUCTW(
+        hwnd=None,
+        wFunc=_FO_DELETE,
+        pFrom=from_list,
+        pTo=None,
+        fFlags=_FOF_ALLOWUNDO | _FOF_NOCONFIRMATION | _FOF_SILENT | _FOF_NOERRORUI,
+        fAnyOperationsAborted=0,
+        hNameMappings=None,
+        lpszProgressTitle=None,
+    )
+
+    shell32 = ctypes.windll.shell32
+    shell32.SHFileOperationW.argtypes = [ctypes.POINTER(_SHFILEOPSTRUCTW)]
+    shell32.SHFileOperationW.restype = ctypes.c_int
+
+    ole32 = ctypes.windll.ole32
+    ole32.CoInitializeEx.restype = ctypes.c_long
+    # S_OK / S_FALSE mean this call opened the apartment and must close it;
+    # RPC_E_CHANGED_MODE means one was already open, which we must leave alone.
+    opened = ole32.CoInitializeEx(None, 0) in (0, 1)
+    try:
+        code = shell32.SHFileOperationW(ctypes.byref(op))
+    finally:
+        if opened:
+            ole32.CoUninitialize()
+
+    if code:
+        return f"shell error 0x{code:04X}"
+    if op.fAnyOperationsAborted:
+        return "recycle aborted"
+    return None
+
+
 async def _h_delete(request: web.Request) -> web.Response:
     user = _request_user(request)
     if _multi_user_enabled() and not user:
@@ -647,25 +720,32 @@ async def _h_delete(request: web.Request) -> web.Response:
     if not items:
         return web.json_response({"error": "no files"}, status=400)
 
-    deleted: List[str] = []
+    pending: List[Tuple[dict, str]] = []
     failed: List[dict] = []
     for item in items:
         target = _resolve(item["source"], item["path"], user, require_user=True)
         if target is None:
             failed.append({**item, "error": "not found"})
             continue
-        try:
-            os.remove(target)
-        except OSError as exc:
-            failed.append({**item, "error": str(exc)})
-            continue
-        deleted.append(f"{item['source']}:{item['path']}")
-        # Drop the cached thumbnail so a re-created file is not served stale.
-        for key in list(_THUMBS):
-            if key[0] == target:
-                _THUMBS.pop(key, None)
-                if key in _THUMB_ORDER:
-                    _THUMB_ORDER.remove(key)
+        pending.append((item, target))
+
+    deleted: List[str] = []
+    if pending:
+        # One shell call for the whole batch: the Recycle Bin entry is written
+        # once, and either the batch is recycled or it is not.
+        error = await asyncio.to_thread(_recycle, [p for _, p in pending])
+        if error:
+            for item, _target in pending:
+                failed.append({**item, "error": error})
+        else:
+            for item, target in pending:
+                deleted.append(f"{item['source']}:{item['path']}")
+                # Drop the cached thumbnail so a re-created file is not served stale.
+                for key in list(_THUMBS):
+                    if key[0] == target:
+                        _THUMBS.pop(key, None)
+                        if key in _THUMB_ORDER:
+                            _THUMB_ORDER.remove(key)
 
     return web.json_response(
         {"deleted": deleted, "failed": failed}, headers={"Cache-Control": "no-store"}
