@@ -19,7 +19,7 @@ A small set of ComfyUI custom nodes, plus a menu-bar monitor interface feature.
 ## Interface
 
 - **Menu-bar monitor**: CPU / RAM / GPU utilization / VRAM / temperature, refreshed every 0.5s, with one-tap **VRAM Cleanup** and **RAM Cleanup** buttons on the left. Hovering shows used/total and the VRAM session peak.
-- **History Gallery** (sidebar tab, sits above *Assets*): every file that already lives in the account's `output/` and `input/` trees — not just what this browser session produced. Split into **已生成 / 已导入** tabs, filterable by **All / Images / Videos / Audio / Other**, in **list / grid (small) / grid (large)** view. Cards, hover controls, marquee selection and the floating selection bar follow the native media-asset panel; each file offers **inspect / download / delete**, where delete removes it from disk after a confirmation dialog.
+- **History Gallery** (sidebar tab, sits above *Assets*): every file that already lives in the account's `output/` and `input/` trees — not just what this browser session produced. Split into **已生成 / 已导入** tabs, filterable by **All / Images / Videos / Audio / Other**, in **list / grid (small) / grid (large)** view. Cards, hover controls, marquee selection and the floating selection bar follow the native media-asset panel; each file offers **inspect / insert as node / download / delete**, where delete removes it from disk after a confirmation dialog. *Insert as node* stages the file where the core loaders can read it (hard-linked into `input/`, no duplicated bytes), then drops a `LoadImage` / `LoadVideo` / `LoadAudio` node at the viewport centre with the filename already filled in.
 
 ## Multi-user asset isolation
 
