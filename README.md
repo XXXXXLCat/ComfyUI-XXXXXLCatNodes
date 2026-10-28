@@ -19,8 +19,7 @@ A small set of ComfyUI custom nodes, plus two interface features (menu-bar monit
 ## Interface
 
 - **Menu-bar monitor**: CPU / RAM / GPU utilization / VRAM / temperature, refreshed every 0.5s, with one-tap **VRAM Cleanup** and **RAM Cleanup** buttons on the left. Hovering shows used/total and the VRAM session peak.
-- **Per-user asset isolation** (auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>/` and `output/<user>/`, so each user's uploads and generations are private; the pre-existing global folders stay readable as a shared pool.
-- **Per-user password login** (auto-enabled under `--multi-user`): every account needs a password, stored hashed with the session kept in an HttpOnly cookie. Opening any page while signed out returns the login page, and accounts can be created there. Signing out really signs out, and ComfyUI's "pick a username to switch" route is closed — entering another account requires its password.
+- **Per-user asset isolation** (auto-enabled under `--multi-user`): `input/` and `output/` become `input/<user>/` and `output/<user>/`, so each user's uploads and generations are private; the pre-existing global folders stay readable as a shared pool. Sign-in uses ComfyUI's native "pick a user" flow — no password required.
 
 ## Installation
 

@@ -54,8 +54,8 @@ function fromStorage() {
     }
 }
 
-/* Last locale we rendered in, kept for the server-rendered login page: that page
-   is served before sign-in, so `/api/settings` is out of reach there. */
+/* Last locale we rendered in, cached so a page reload can pick the language up
+   before `/api/settings` resolves. */
 function remember(lang) {
     try {
         localStorage.setItem("xcat.locale", lang);

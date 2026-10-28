@@ -86,23 +86,13 @@ _NODE_CLASSES = [
 async def comfy_entrypoint() -> XXXXXLCatExtension:
     # The packs only ship zh + en, and core looks a bundle up by its exact folder
     # name — so a zh-TW UI would show our nodes in English. Alias every zh-*
-    # locale to the zh bundle (matches what web/i18n.js and the login page do).
+    # locale to the zh bundle (matches what web/i18n.js does).
     try:
         from . import locale_alias
 
         locale_alias.install()
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
-
-    # Per-user password auth gate — must be installed BEFORE the asset-isolation
-    # patches so the validated user id feeds input/<user>/ & output/<user>/.
-    # Only active when ComfyUI is launched with --multi-user.
-    try:
-        from .nodes import multi_user_auth
-
-        multi_user_auth.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] multi-user password auth skipped: {exc}")
 
     # Per-user asset isolation (input/<user>/ & output/<user>/) — only when
     # ComfyUI is launched with --multi-user. No-op (and zero impact) otherwise.

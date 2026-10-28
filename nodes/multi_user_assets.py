@@ -251,20 +251,11 @@ def _user_from_request(request) -> Optional[str]:
         return None
 
 
-def _auth_user() -> Optional[str]:
-    """Return the password-authenticated user id, if the auth module is active."""
-    try:
-        from .multi_user_auth import _XAUTH_USER
-    except Exception:
-        return None
-    return _XAUTH_USER.get()
-
-
 @web.middleware
 async def _user_middleware(request, handler):
-    # Prefer the password-authenticated identity published by multi_user_auth;
-    # only fall back to the (spoofable) comfy-user header when auth is absent.
-    user = _auth_user() or _user_from_request(request)
+    # Identity comes from the native ComfyUI multi-user selection (the
+    # comfy-user request header), so no password gate is involved.
+    user = _user_from_request(request)
     token = _XUSER.set(user)
     try:
         return await handler(request)
@@ -536,7 +527,7 @@ def _install_assets_list_filter() -> None:
     being under the caller's own ``input/<user>/`` or ``output/<user>/`` (this
     module's isolation layout). The clause joins the same filter set that backs
     both the page query and the count query, so pagination and ``total`` stay
-    correct. Only applies to an authenticated user; single-user or system calls
+    correct. Only applies to an identified user; single-user or system calls
     fall through to the unfiltered official behaviour.
     """
     try:
