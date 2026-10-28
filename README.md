@@ -162,7 +162,7 @@ Aspect ratios: Auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
 
 Modes:
 
-- **auto** — crops when the target ratio matches the image and pads when it does not. Two ratios count as matching when they differ by no more than 2%, i.e. by no more than the rounding to the multiple. Auto ratio therefore always crops, and any other ratio keeps the whole picture.
+- **auto** — always crops in Auto ratio, since the size was already derived from the image's own proportions and only the rounding is left; for a chosen ratio it crops when that ratio differs from the image by no more than 2%, and pads otherwise.
 - **crop** — scales to cover the target box and centre-crops the overflow. No borders, at the cost of losing whatever falls outside the target ratio.
 - **pad** — scales to fit inside the target box, centres the result, and fills the rest with the chosen grey level. Every pixel kept, at the cost of borders.
 
@@ -170,7 +170,7 @@ Outputs are the image, the width and height actually produced, and resolution �
 
 Below the inputs the node shows a target-size preview such as `1376 × 768 1.01 MP`, updated live as the aspect ratio or megapixel value changes. In Auto mode the preview uses the connected image's own width and height; with nothing connected it shows a dash.
 
-In Auto mode the size is still snapped to the multiple, so the produced ratio differs from the image ratio by the rounding; at that point crop and pad leave no visible loss either way.
+In Auto mode the size is still snapped to the multiple, so the produced ratio differs from the image ratio by the rounding — usually under 1%. Some ratios have no exact counterpart on the grid: 1365×768 becomes 1376×768 at a multiple of 32, 0.8% wide. The crop then shaves a few pixels off the edge and leaves the composition intact. Setting the multiple to 1 gives an exact match, at the cost of a size that no longer sits on the model's grid.
 
 Why the multiple: some diffusion models (Qwen-Image among them) re-align images to their own grid internally. When the output already sits on that grid, the model skips its own resize and the picture is not softened by a second resample.
 

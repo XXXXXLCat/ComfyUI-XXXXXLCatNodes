@@ -2,21 +2,28 @@
 """Fit Image to Size 🐈‍⬛ — size an image from aspect ratio + megapixels, then
 crop or pad onto exactly that size.
 
-The target size is computed the same way Resolution Selector does it — an
-aspect ratio and a megapixel target, rounded to the nearest ``multiple`` — so
-the two nodes agree pixel for pixel. The one addition is an **Auto** ratio that
-takes its ratio from the image itself, which makes the node useful on its own:
-the picture is rescaled to the requested pixel count at its own proportions, so
-nothing is cropped or padded beyond the rounding.
+The target size is computed the way Resolution Selector does it — an aspect
+ratio and a megapixel target, rounded to the nearest ``multiple`` — so the two
+nodes agree pixel for pixel, and so does the front-end resolution preview,
+which runs the same formula. The one addition is an **Auto** ratio that takes
+its ratio from the image itself, which makes the node useful on its own: the
+picture is rescaled to the requested pixel count at its own proportions.
+
+Some ratios have no exact counterpart on the grid — 1365:768 lands on
+1376x768 on a 32px grid, 0.8% wide — and that is the whole cost of keeping the
+output aligned. Nothing can crop or pad it away without touching the picture,
+so the produced ratio simply tracks the requested one as closely as the grid
+allows. Setting ``multiple`` to 1 makes it exact.
 
 The fit mode decides what happens when the target ratio and the image ratio
 differ:
 
-* ``auto`` — crop when the two ratios already agree to within the rounding to
-  ``multiple`` (a crop then removes at most a couple of pixels of edge and no
-  border is added), pad otherwise. This is the default, and it means the usual
-  graph needs no decision at all: Auto ratio → crop, a different ratio → keep
-  every pixel.
+* ``auto`` — with the Auto ratio the size already follows the image, so it
+  crops: a centre crop eats the few pixels the rounding added and no border
+  appears. With a chosen ratio it crops only when that ratio already agrees
+  with the image to within 2%, and pads otherwise. This is the default, so the
+  usual graph needs no decision at all: Auto ratio → crop, a different ratio →
+  keep every pixel.
 * ``crop`` — scale to **cover** the target box (aspect preserved, uniform scale
   ``max(tw/w, th/h)``) and centre-crop the overflow. No borders, loses edge
   content.
@@ -58,11 +65,10 @@ PAD = "pad"
 MODE_AUTO = "auto"
 AUTO = "Auto (from image)"
 
-# Auto mode crops only when the target ratio agrees with the source ratio to
-# within this relative tolerance — i.e. when the only difference is the rounding
-# to `multiple`. Anything further apart keeps every pixel and pads instead.
-# 2% covers the worst case of snapping both sides (half a tile each way on a
-# ~500px side), so a size that came out of this same arithmetic always crops.
+# Auto crops a *chosen* ratio only when it already agrees with the image to
+# within this relative tolerance; further apart it pads, so no picture content
+# is thrown away. The Auto ratio never gets here — its size is derived from the
+# image itself, so all that is left is the snap to the grid.
 AUTO_CROP_TOLERANCE = 0.02
 
 # Same table as Resolution Selector 🐈‍⬛, so the two nodes stay interchangeable.
@@ -78,26 +84,29 @@ ASPECT_RATIOS: dict[str, tuple[int, int]] = {
 }
 
 
-def _ratios_agree(src_w: int, src_h: int, width: int, height: int) -> bool:
-    """True when the target is the source ratio up to rounding, so cropping is free.
-
-    ``keep`` is the fraction of the picture that survives a centre crop; when it
-    is within the tolerance of 1 the crop removes at most a couple of pixels of
-    edge — which is exactly the case Auto should not pad for.
-    """
+def _ratio_drift(src_w: int, src_h: int, width: int, height: int) -> float:
+    """Relative distance between two ratios; 0 means identical aspect."""
     if src_w <= 0 or src_h <= 0 or width <= 0 or height <= 0:
-        return True
-    src_ratio = src_w / src_h
-    dst_ratio = width / height
-    keep = min(src_ratio, dst_ratio) / max(src_ratio, dst_ratio)
-    return keep >= 1.0 - AUTO_CROP_TOLERANCE
+        return 0.0
+    return abs((width / height) / (src_w / src_h) - 1.0)
+
+
+def _ratios_agree(src_w: int, src_h: int, width: int, height: int) -> bool:
+    """True when the target is the source ratio up to rounding, so cropping is free."""
+    return _ratio_drift(src_w, src_h, width, height) <= AUTO_CROP_TOLERANCE
 
 
 def _target_size(ratio_w: int, ratio_h: int, megapixels: float, multiple: int) -> tuple[int, int]:
     """Aspect ratio + megapixel target -> (width, height), snapped to ``multiple``.
 
     Mirrors Resolution Selector's arithmetic exactly, so the same ratio and
-    megapixel value give the same size on both nodes.
+    megapixel value give the same size on both nodes — and the front-end
+    resolution preview, which runs this same formula, always agrees.
+
+    Rounding the two sides independently costs a little of the ratio when it has
+    no exact counterpart on the grid (1365:768 on a 32px grid lands on
+    1376x768, 0.8% wide); that residual is inherent to the grid, and setting
+    ``multiple`` to 1 makes it vanish.
     """
     total_pixels = megapixels * 1024 * 1024
     scale = math.sqrt(total_pixels / (ratio_w * ratio_h))
@@ -105,6 +114,7 @@ def _target_size(ratio_w: int, ratio_h: int, megapixels: float, multiple: int) -
     height = round(ratio_h * scale / multiple) * multiple
     # A zero megapixel target would collapse the canvas; keep one tile instead.
     return max(multiple, width), max(multiple, height)
+
 
 
 def _image_size(image: torch.Tensor) -> tuple[int, int]:
@@ -167,16 +177,17 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                 "cover", "contain", "canvas", "megapixel", "resolution", "align",
             ],
             description=(
-                "Work out a target size from aspect ratio + megapixels exactly as Resolution Selector "
+                "Work out a target size from aspect ratio + megapixels the way Resolution Selector "
                 "does (same ratios, same 0.01 megapixel step, same rounding to the multiple), then "
                 "scale the image onto it without stretching. 'Auto' takes the ratio from the image "
-                "itself, so the picture is rescaled to the requested pixel count at its own "
-                "proportions. Fit mode 'auto' then crops when the target ratio already agrees with the "
-                "image — differences no larger than the rounding to the multiple — and pads when it "
-                "does not, so the usual case needs no decision; 'crop' covers the box and centre-crops "
-                "the overflow, 'pad' fits inside it and centres the result on a pad_color border. "
-                "Committing to a size already on the multiple grid avoids a second, softer resize "
-                "inside the diffusion pipeline. "
+                "itself, so the picture is rescaled at its own proportions; the produced ratio then "
+                "tracks the image as closely as the multiple grid allows — 1365x768 becomes 1376x768 "
+                "at a multiple of 32, 0.8% wide, and set the multiple to 1 for an exact match. Fit mode "
+                "'auto' crops when the size already follows the image — always in Auto ratio, and for "
+                "a chosen ratio once it agrees within 2% — and pads otherwise; 'crop' covers the box "
+                "and centre-crops the overflow, 'pad' fits inside it and centres the result on a "
+                "pad_color border. Committing to a size already on the multiple grid avoids a second, "
+                "softer resize inside the diffusion pipeline. "
                 "Outputs the image, the size actually produced, and resolution — the equivalent "
                 "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024. A live "
                 "preview inside the node shows the resulting size as the inputs change."
@@ -224,7 +235,7 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     "fit_mode",
                     options=[MODE_AUTO, CROP, PAD],
                     default=MODE_AUTO,
-                    tooltip="'auto' crops when the target ratio already matches the image and pads otherwise; 'crop' always covers the box and cuts the overflow; 'pad' always fits inside it and fills the rest with pad_color.",
+                    tooltip="'auto' crops when the size already follows the image — always in Auto ratio, and for a chosen ratio once it agrees within 2% — and pads otherwise; 'crop' always covers the box and cuts the overflow; 'pad' always fits inside it and fills the rest with pad_color.",
                 ),
                 io.Float.Input(
                     "pad_color",
@@ -302,7 +313,15 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
 
         mode = fit_mode
         if mode == MODE_AUTO:
-            mode = CROP if _ratios_agree(src_w, src_h, width, height) else PAD
+            # In Auto ratio the size came from the image's own ratio, so all
+            # that is left is the snap to the multiple — a centre crop eats a
+            # few pixels of edge and leaves no border, which is what keeping
+            # the original ratio means here. A chosen ratio has to earn its
+            # crop: only when it already agrees with the image.
+            if aspect_ratio == AUTO or _ratios_agree(src_w, src_h, width, height):
+                mode = CROP
+            else:
+                mode = PAD
 
         fitted = _fit(image, width, height, mode, float(pad_color or 0.0))
         resolution = int(round(math.sqrt(width * height)))
