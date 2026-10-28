@@ -76,7 +76,7 @@ const STRINGS = {
         // Actions below mirror mediaAsset.actions / mediaAsset.selection in the
         // official locale pack, so both panels use the same wording.
         inspect: "查看资产",
-        insertNode: "作为节点插入",
+        insertNode: "作为节点插入到工作流",
         download: "下载",
         moreOptions: "更多选项",
         delete: "删除",
@@ -124,7 +124,7 @@ const STRINGS = {
         play: "Play",
         pause: "Pause",
         inspect: "Inspect asset",
-        insertNode: "Insert as node",
+        insertNode: "Insert as node in workflow",
         download: "Download",
         moreOptions: "More options",
         delete: "Delete",
@@ -183,17 +183,26 @@ const ICON_PATHS = {
     x: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M18 6L6 18M6 6l12 12'/>",
     zoomIn:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21l-4.35-4.35M11 8v6m-3-3h6'/></g>",
-    plus: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M5 12h14m-7-7v14'/>",
+    /* The only non-lucide glyph here: the native insert action is
+       icon-[comfy--node] (16px grid, 1.3 stroke), copied verbatim from the
+       shipped .icon-\[comfy--node\] rule — a plus sign was our own invention. */
+    node: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-width='1.3' d='m11.267 10.45-.084.316c-.143.536-.63.909-1.184.909H4.694a1.225 1.225 0 01-1.183-1.54l1.307-4.9c.143-.537.628-.91 1.183-.91h5.464c.724 0 1.252.687 1.065 1.387l-.03.112M15.35 8h-4.9M3.713 8H.65'/>",
     ellipsis:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/><circle cx='5' cy='12' r='1'/></g>",
 };
 
+// lucide draws on a 24px grid; the comfy set uses 16.
+const ICON_META = {
+    node: { viewBox: "0 0 16 16", strokeWidth: "1.3" },
+};
+
 function svgIcon(name, cls) {
+    const meta = ICON_META[name] || {};
     const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    el.setAttribute("viewBox", "0 0 24 24");
+    el.setAttribute("viewBox", meta.viewBox || "0 0 24 24");
     el.setAttribute("fill", "none");
     el.setAttribute("stroke", "currentColor");
-    el.setAttribute("stroke-width", "2");
+    el.setAttribute("stroke-width", meta.strokeWidth || "2");
     el.setAttribute("stroke-linecap", "round");
     el.setAttribute("stroke-linejoin", "round");
     el.setAttribute("aria-hidden", "true");
@@ -376,7 +385,17 @@ async function decodeWaveform(file, barList) {
 // ------------------------------------------------------------------ styles
 
 const CSS = `
-.xog {
+/* The menu, the delete dialog, the lightbox and the selection bar are all
+   appended to <body>, i.e. outside the panel, so the tokens are declared on
+   every layer instead of only on .xog. Declaring them on the panel alone left
+   the popovers without --xog-line, which is why the menu separator rendered as
+   an invisible strip (background: var(--xog-line) with nothing to resolve to). */
+.xog,
+.xog-ctx,
+.xog-dlg,
+.xog-selbar,
+.xog-lb,
+.xog-marquee {
     --xog-fg: var(--text-primary, var(--fg-color, #e8e8e8));
     --xog-muted: var(--text-secondary, color-mix(in srgb, var(--fg-color, #e8e8e8) 62%, transparent));
     --xog-line: var(--interface-stroke, color-mix(in srgb, var(--fg-color, #e8e8e8) 18%, transparent));
@@ -399,7 +418,9 @@ const CSS = `
        flattened to full opacity would be a solid block, far heavier than the
        official panel faint lift. */
     --xog-card-hover: color-mix(in oklab, var(--modal-card-background-hovered, var(--secondary-background-hover, #313235)) 20%, transparent);
-    --xog-danger: var(--destructive-foreground, var(--p-button-danger-background, #dc2626));
+    --xog-danger: var(--destructive-background, var(--p-button-danger-background, #f75951));
+}
+.xog {
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -1065,20 +1086,25 @@ const CSS = `
     background: color-mix(in srgb, currentColor 20%, transparent);
 }
 
-/* Context menu — the native panel opens it at the pointer via show(event). */
+/* Context menu — the native panel opens it at the pointer via show(event).
+   Geometry is the shipped menuStyles.ts contract:
+   content = min-w-48 rounded-lg border border-border-default bg-base-background p-1 shadow-lg
+   item    = min-h-8 gap-2 rounded-md px-3 py-1.5 text-sm, highlighted bg-secondary-background-hover
+   sep     = my-1 h-px bg-border-subtle */
 .xog-ctx {
     position: fixed;
     z-index: 10050;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    min-width: 180px;
-    max-width: 280px;
-    padding: 8px;
-    border: 1px solid var(--border-subtle, var(--border-default, #3c3d42));
+    gap: 0;
+    min-width: 192px;
+    max-width: 320px;
+    padding: 4px;
+    border: 1px solid var(--border-default, var(--xog-line));
     border-radius: 8px;
     background: var(--base-background, var(--comfy-menu-bg, #171718));
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    color: var(--base-foreground, var(--xog-fg));
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
     box-sizing: border-box;
 }
 .xog-ctx[hidden] { display: none; }
@@ -1087,18 +1113,19 @@ const CSS = `
     align-items: center;
     gap: 8px;
     width: 100%;
-    height: 32px;
-    padding: 8px;
+    min-height: 32px;
+    padding: 6px 12px;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     background: transparent;
-    color: var(--xog-fg);
+    color: inherit;
     font-family: inherit;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 400;
     white-space: nowrap;
     text-align: start;
-    cursor: pointer;
+    cursor: default;
     box-sizing: border-box;
     transition: background-color 0.12s ease;
 }
@@ -1109,7 +1136,7 @@ const CSS = `
 .xog-ctx-sep {
     height: 1px;
     margin: 4px 0;
-    background: var(--xog-line);
+    background: var(--border-subtle, var(--xog-line));
 }
 
 /* Delete confirmation — the native one is a Vue dialogService call we cannot
@@ -2053,7 +2080,7 @@ function buildPanel(host) {
                       onClick: () => ensureLightbox().open(file),
                   }),
                   menuItem({
-                      icon: "plus",
+                      icon: "node",
                       label: t("insertNode"),
                       // 3D / text files have no core loader reading input/.
                       disabled: !NODE_FOR_KIND[file.kind],
