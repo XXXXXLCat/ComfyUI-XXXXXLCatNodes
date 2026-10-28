@@ -86,7 +86,7 @@ const STRINGS = {
         deselectAll: "取消全选",
         selectedCount: "已选择资产：{count}",
         deleteItems: "删除这些项目",
-        deletePermanent: "它们将被永久移除。",
+        deleteToTrash: "它们将被移动到回收站。",
         cancel: "取消",
         deleteFailed: "删除失败",
         insertDone: "已插入 {node} 节点",
@@ -134,7 +134,7 @@ const STRINGS = {
         deselectAll: "Deselect all",
         selectedCount: "Selected assets: {count}",
         deleteItems: "Delete these items",
-        deletePermanent: "They will be permanently removed.",
+        deleteToTrash: "They will be moved to the Recycle Bin.",
         cancel: "Cancel",
         deleteFailed: "Delete failed",
         insertDone: "Added a {node} node",
@@ -1549,7 +1549,7 @@ function ensureConfirmDialog() {
         /** Resolves true when the user confirms; mirrors dialogService.confirm. */
         ask(files) {
             title.textContent = t("deleteItems");
-            msg.textContent = t("deletePermanent");
+            msg.textContent = t("deleteToTrash");
             list.replaceChildren(
                 ...files.slice(0, 50).map((file) => {
                     const li = document.createElement("li");
@@ -1585,11 +1585,30 @@ async function deleteFiles(files) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload(files)),
         });
-        if (!res.ok) return false;
+        if (!res.ok) {
+            notify(t("deleteFailed"), { severity: "error" });
+            return false;
+        }
+        // The batch reaches the Recycle Bin in one shell call, so the reply is
+        // all-or-nothing; failures still carry a reason worth showing.
+        const data = await res.json().catch(() => null);
+        const failed = Array.isArray(data?.failed) ? data.failed : [];
+        if (failed.length) {
+            // A failed item is echoed back as {source, path, error}, not as the
+            // manifest entry, so relPath() would print "undefined".
+            const names = failed
+                .map((f) => f.path || f.filename || "")
+                .filter(Boolean);
+            notify(t("deleteFailed"), {
+                detail: names.join(" · "),
+                severity: "error",
+            });
+        }
+        return true;
     } catch {
+        notify(t("deleteFailed"), { severity: "error" });
         return false;
     }
-    return true;
 }
 
 // ------------------------------------------------------------------ insert
