@@ -558,6 +558,13 @@ def _is_under(child: str, parent: str) -> bool:
     return os.path.abspath(child).startswith(os.path.abspath(parent) + os.sep)
 
 
+_VIDEO_EXT = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".mpg", ".mpeg", ".gifv"}
+
+
+def _is_video(filename: str) -> bool:
+    return os.path.splitext(filename or "")[1].lower() in _VIDEO_EXT
+
+
 def _install_assets_view_url() -> None:
     """Keep the per-user segment inside assets preview URLs.
 
@@ -627,6 +634,19 @@ def _serve_image_file(request, file, filename):
 
     from PIL import Image
 
+    # A video is never re-encoded here: PIL cannot open one, and ``preview`` /
+    # ``channel`` are requests the native handler only makes for still images.
+    # Serving the container as-is keeps byte-range seeking (scrubbing) working.
+    if _is_video(filename):
+        ctype, _ = _mimetypes.guess_type(filename)
+        return web.FileResponse(
+            file,
+            headers={
+                "Content-Type": ctype or "video/mp4",
+                "Content-Disposition": f'filename="{filename}"',
+            },
+        )
+
     if "preview" in request.rel_url.query:
         with Image.open(file) as img:
             preview_info = request.rel_url.query["preview"].split(";")
@@ -687,10 +707,18 @@ def _resolve_view_candidates(
     When ``user`` is known every candidate must stay inside that user's own
     directory, so one account can never preview another's assets.  With no
     identity the subfolder — if present — is the only self-describing locator,
-    and a bare URL falls back to scanning user directories by basename.
+    and a URL whose subfolder was minted against a per-user root (see below)
+    falls back to scanning the user directories.
     """
     base = _global_input_dir() if ftype == "input" else _global_output_dir()
-    parts = [p for p in (subfolder or "").replace("\\", "/").split("/") if p and p != "."]
+    # ``..`` segments are dropped rather than normalised: this resolver builds
+    # paths straight from the query string, so a traversal segment must never
+    # leave the root it was anchored to.
+    parts = [
+        p
+        for p in (subfolder or "").replace("\\", "/").split("/")
+        if p and p not in (".", "..")
+    ]
     cands: list = []
 
     def _add(path: str) -> None:
@@ -711,14 +739,23 @@ def _resolve_view_candidates(
         _scoped(os.path.join(base, *parts, filename))
         rest = parts[1:] if parts and parts[0] == user else parts
         _scoped(os.path.join(udir, *rest, filename))
-    elif parts:
+    else:
+        # No identity (a native <video>/<img> tag cannot send comfy-user).  The
+        # URL may carry the user segment inside its subfolder, or — because the
+        # native asset list scans get_output_directory(), which under isolation
+        # already *is* <root>/<user> — carry a subfolder relative to that root
+        # and no user segment at all.  The second shape has to be re-anchored
+        # against every user directory, otherwise a file in a sub-folder (e.g.
+        # output/<user>/MiniMax/clip.mp4) 404s while one in the root still
+        # works.  Only an exact <subfolder>/<filename> hit counts, and only
+        # after the plain global path was tried.
         _add(os.path.join(base, *parts, filename))
-    elif os.path.isdir(base):
-        # Bare URL, no identity: last resort, look inside each user directory.
-        for name in sorted(os.listdir(base)):
-            cand = os.path.join(base, name, filename)
-            if os.path.isfile(cand):
-                _add(cand)
+        if os.path.isdir(base):
+            for name in sorted(os.listdir(base)):
+                udir = os.path.join(base, name)
+                if not os.path.isdir(udir):
+                    continue
+                _add(os.path.join(udir, *parts, filename))
 
     return [c for c in cands if os.path.isfile(c)]
 
