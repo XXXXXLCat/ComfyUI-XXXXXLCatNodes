@@ -754,10 +754,20 @@ async def _h_delete(request: web.Request) -> web.Response:
 
 # ---------------------------------------------------------------- insert
 
-def _user_input_dir(user: Optional[str]) -> str:
-    """The input directory a node of this account reads from."""
-    base = _global_roots()["input"]
-    return os.path.join(base, user) if user else base
+def _node_input_dir() -> str:
+    """The input directory a Load* node of this caller will actually read.
+
+    Asked of ComfyUI itself rather than rebuilt from the account id: under
+    ``--multi-user`` the isolation layer scopes this getter, and a file staged
+    anywhere else leaves the node with a value its resolver cannot open
+    ("Invalid image file", shown in the UI as a missing input).
+    """
+    try:
+        import folder_paths
+
+        return os.path.abspath(folder_paths.get_input_directory())
+    except Exception:
+        return _global_roots()["input"]
 
 
 def _same_bytes(a: str, b: str) -> bool:
@@ -777,7 +787,7 @@ def _same_bytes(a: str, b: str) -> bool:
         return False
 
 
-def _place_in_input(target: str, user: Optional[str]) -> Tuple[str, bool]:
+def _place_in_input(target: str, dest_dir: str) -> Tuple[str, bool]:
     """Make ``target`` readable by LoadImage / LoadVideo / LoadAudio.
 
     Those nodes resolve through ``get_annotated_filepath`` — the input
@@ -786,9 +796,12 @@ def _place_in_input(target: str, user: Optional[str]) -> Tuple[str, bool]:
     to it. Hard-linking keeps the input tree free of duplicated bytes; a plain
     copy is used when the volumes differ.
 
+    ``dest_dir`` must be the directory the loader itself would resolve (see
+    :func:`_node_input_dir`); staging anywhere else yields a node whose value
+    cannot be opened.
+
     Returns ``(filename, reused)`` where ``reused`` means nothing was written.
     """
-    dest_dir = _user_input_dir(user)
     source_dir = os.path.dirname(target)
     name = os.path.basename(target)
 
@@ -820,6 +833,20 @@ def _place_in_input(target: str, user: Optional[str]) -> Tuple[str, bool]:
     return candidate, False
 
 
+def _node_can_open(filename: str, dest_dir: str) -> bool:
+    """Whether the loader's own resolver would open ``filename`` right now."""
+    try:
+        import folder_paths
+
+        return bool(folder_paths.exists_annotated_filepath(filename))
+    except ValueError:
+        # `[name]rest` would be read as an annotated path; such a value can
+        # never resolve inside the input directory.
+        return False
+    except Exception:
+        return os.path.isfile(os.path.join(dest_dir, filename))
+
+
 async def _h_insert(request: web.Request) -> web.Response:
     user = _request_user(request)
     if _multi_user_enabled() and not user:
@@ -845,10 +872,22 @@ async def _h_insert(request: web.Request) -> web.Response:
         # 3D models / text have no core loader that reads the input directory.
         return web.json_response({"error": "unsupported", "kind": kind}, status=415)
 
+    # Resolved here, on the request's own coroutine: the isolation layer keeps
+    # the account in a context variable, and this is the directory the node
+    # itself will look in when the prompt runs.
+    dest_dir = _node_input_dir()
     try:
-        filename, reused = await asyncio.to_thread(_place_in_input, target, user)
+        filename, reused = await asyncio.to_thread(_place_in_input, target, dest_dir)
     except OSError as exc:
         return web.json_response({"error": str(exc)}, status=500)
+
+    # A node holding a filename its resolver rejects shows up as a missing
+    # input, so refuse to hand out a value that cannot be opened.
+    if not _node_can_open(filename, dest_dir):
+        return web.json_response(
+            {"error": "staged file is not visible to the loader", "dir": dest_dir},
+            status=500,
+        )
 
     node, widget = typed
     return web.json_response(

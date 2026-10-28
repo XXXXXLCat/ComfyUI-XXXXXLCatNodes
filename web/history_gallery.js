@@ -1672,8 +1672,19 @@ function spawnLoaderNode(type, widgetName, value) {
 
     const widget = (node.widgets || []).find((item) => item.name === widgetName);
     if (widget) {
+        // The combo only offers what /object_info knew when the page loaded, so
+        // a file staged a moment ago is not among its options. Registering the
+        // name first is what ComfyUI's own upload does; without it the widget
+        // holds a value its list does not contain.
+        const options = widget.options || (widget.options = {});
+        if (Array.isArray(options.values) && !options.values.includes(value)) {
+            options.values.push(value);
+        }
+        const previous = widget.value;
         widget.value = value;
-        node.onWidgetChanged?.(widgetName, value, undefined, widget);
+        node.onWidgetChanged?.(widgetName, value, previous, widget);
+        // A widget that cannot match the value may normalise it away.
+        if (widget.value !== value) widget.value = value;
     }
     const canvas = app.canvas;
     if (typeof canvas?.selectNodes === "function") canvas.selectNodes([node]);
