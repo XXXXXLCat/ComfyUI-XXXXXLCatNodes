@@ -37,6 +37,9 @@ const COMBO = "aspect_ratio";
 const AUTO = "Auto (from image)";
 const MEGAPIXELS = "megapixels";
 const MULTIPLE = "multiple";
+const FIT_MODE = "fit_mode";
+const PAD_COLOR = "pad_color";
+const CROP = "crop";
 const FEED_RATIO = "preview_ratio";
 const FEED_MEGAPIXELS = "preview_megapixels";
 
@@ -64,6 +67,19 @@ function setHidden(widget, hidden) {
     if (widget.options) widget.options.hidden = hidden;
   } catch (_) {}
   if (widget.__fsSize) widget.computeSize = hidden ? () => [0, -4] : widget.__fsSize;
+}
+
+/* LiteGraph measures a node the moment it builds it, so a node that just lost
+   or gained a widget keeps the old height until something re-measures it. Only
+   called when the visibility actually changed — never from a render path. */
+function fitHeight(node) {
+  if (!node || !node.size || typeof node.computeSize !== "function") return;
+  try {
+    const height = Math.round(node.computeSize()[1]);
+    if (height > 0 && height !== Math.round(node.size[1])) {
+      node.setSize([node.size[0], height]);
+    }
+  } catch (_) {}
 }
 
 /* Run our turn after whatever the widget was already doing. The Vue widgets
@@ -212,6 +228,7 @@ function sync(node) {
 
   chainCallback(combo, () => sync(node));
   chainCallback(widgetOf(node, MEGAPIXELS), () => sync(node));
+  chainCallback(widgetOf(node, FIT_MODE), () => sync(node));
 
   const feedRatio = widgetOf(node, FEED_RATIO);
   const feedMegapixels = widgetOf(node, FEED_MEGAPIXELS);
@@ -230,6 +247,14 @@ function sync(node) {
 
   setHidden(feedRatio, true);
   setHidden(feedMegapixels, true);
+
+  /* The pad colour only matters when something is actually padded: 'auto' can
+     still pad, but an explicit 'crop' never does. */
+  const padColor = widgetOf(node, PAD_COLOR);
+  const hidePad = widgetOf(node, FIT_MODE)?.value === CROP;
+  const wasPadHidden = !!padColor?.hidden;
+  setHidden(padColor, hidePad);
+  if (wasPadHidden !== hidePad) fitHeight(node);
 }
 
 function syncAll() {

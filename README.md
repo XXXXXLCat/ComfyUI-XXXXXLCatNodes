@@ -155,12 +155,14 @@ Works out a target size from aspect ratio and megapixels, then scales the image 
 | Aspect Ratio | Auto | Auto takes the ratio from the input image; the rest are fixed ratios |
 | Megapixels | 1.0 | Target total megapixels, 0.01 step |
 | Multiple | 32 | Snap the computed size to the nearest multiple; 1 disables snapping |
-| Mode | crop | crop, pad |
+| Mode | auto | auto, crop, pad |
+| Pad Color | 0 | Grey level of the border when padding (0 = black, 1 = white); hidden in crop mode |
 
 Aspect ratios: Auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
 
 Modes:
 
+- **auto** — crops when the target ratio matches the image and pads when it does not. Two ratios count as matching when they differ by no more than 2%, i.e. by no more than the rounding to the multiple. Auto ratio therefore always crops, and any other ratio keeps the whole picture.
 - **crop** — scales to cover the target box and centre-crops the overflow. No borders, at the cost of losing whatever falls outside the target ratio.
 - **pad** — scales to fit inside the target box, centres the result, and fills the rest with the chosen grey level. Every pixel kept, at the cost of borders.
 
@@ -174,9 +176,9 @@ Why the multiple: some diffusion models (Qwen-Image among them) re-align images 
 
 Limits:
 
-- Both modes scale by a single uniform factor and never stretch. The further the target ratio sits from the input ratio, the more of the picture is cropped.
+- Every mode scales by a single uniform factor and never stretches. The further the target ratio sits from the input ratio, the more of the picture is cropped.
 - Padding is a flat colour; it does not extend the image content.
-- Pad colour only appears in pad mode.
+- Auto decides from the ratio alone, not from the picture's content; pick crop or pad to force one.
 
 ## History gallery
 

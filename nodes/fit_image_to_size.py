@@ -9,8 +9,14 @@ takes its ratio from the image itself, which makes the node useful on its own:
 the picture is rescaled to the requested pixel count at its own proportions, so
 nothing is cropped or padded beyond the rounding.
 
-Two modes decide what happens when the target ratio and the image ratio differ:
+The fit mode decides what happens when the target ratio and the image ratio
+differ:
 
+* ``auto`` — crop when the two ratios already agree to within the rounding to
+  ``multiple`` (a crop then removes at most a couple of pixels of edge and no
+  border is added), pad otherwise. This is the default, and it means the usual
+  graph needs no decision at all: Auto ratio → crop, a different ratio → keep
+  every pixel.
 * ``crop`` — scale to **cover** the target box (aspect preserved, uniform scale
   ``max(tw/w, th/h)``) and centre-crop the overflow. No borders, loses edge
   content.
@@ -18,7 +24,7 @@ Two modes decide what happens when the target ratio and the image ratio differ:
   ``min(tw/w, th/h)``) and centre the result on a ``pad_color`` canvas. Keeps
   every pixel, adds borders.
 
-Both modes scale by a single uniform factor, so the input is never stretched —
+Every mode scales by a single uniform factor, so the input is never stretched —
 feeding a model a pre-stretched image bakes the distortion in, while crop/pad
 leaves the subject at its true proportions.
 
@@ -49,7 +55,15 @@ import comfy.utils
 
 CROP = "crop"
 PAD = "pad"
+MODE_AUTO = "auto"
 AUTO = "Auto (from image)"
+
+# Auto mode crops only when the target ratio agrees with the source ratio to
+# within this relative tolerance — i.e. when the only difference is the rounding
+# to `multiple`. Anything further apart keeps every pixel and pads instead.
+# 2% covers the worst case of snapping both sides (half a tile each way on a
+# ~500px side), so a size that came out of this same arithmetic always crops.
+AUTO_CROP_TOLERANCE = 0.02
 
 # Same table as Resolution Selector 🐈‍⬛, so the two nodes stay interchangeable.
 ASPECT_RATIOS: dict[str, tuple[int, int]] = {
@@ -64,30 +78,19 @@ ASPECT_RATIOS: dict[str, tuple[int, int]] = {
 }
 
 
-def _mode_options() -> list[io.DynamicCombo.Option]:
-    """Crop as the only variant that needs no extra inputs, then pad + its colour.
+def _ratios_agree(src_w: int, src_h: int, width: int, height: int) -> bool:
+    """True when the target is the source ratio up to rounding, so cropping is free.
 
-    As with Resolution Selector, the colour is declared inside the ``pad``
-    option so it is only shown — and only sent — when it can actually do
-    something.
+    ``keep`` is the fraction of the picture that survives a centre crop; when it
+    is within the tolerance of 1 the crop removes at most a couple of pixels of
+    edge — which is exactly the case Auto should not pad for.
     """
-    return [
-        io.DynamicCombo.Option(CROP, []),
-        io.DynamicCombo.Option(
-            PAD,
-            [
-                io.Float.Input(
-                    "pad_color",
-                    default=0.0,
-                    min=0.0,
-                    max=1.0,
-                    step=0.01,
-                    display_name="填充颜色",
-                    tooltip="Grey level of the border added in pad mode (0 = black, 1 = white).",
-                )
-            ],
-        ),
-    ]
+    if src_w <= 0 or src_h <= 0 or width <= 0 or height <= 0:
+        return True
+    src_ratio = src_w / src_h
+    dst_ratio = width / height
+    keep = min(src_ratio, dst_ratio) / max(src_ratio, dst_ratio)
+    return keep >= 1.0 - AUTO_CROP_TOLERANCE
 
 
 def _target_size(ratio_w: int, ratio_h: int, megapixels: float, multiple: int) -> tuple[int, int]:
@@ -168,9 +171,12 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                 "does (same ratios, same 0.01 megapixel step, same rounding to the multiple), then "
                 "scale the image onto it without stretching. 'Auto' takes the ratio from the image "
                 "itself, so the picture is rescaled to the requested pixel count at its own "
-                "proportions. 'crop' covers the target box and centre-crops the overflow; 'pad' fits "
-                "inside it and centres the result on a pad_color border. Committing to a size already "
-                "on the multiple grid avoids a second, softer resize inside the diffusion pipeline. "
+                "proportions. Fit mode 'auto' then crops when the target ratio already agrees with the "
+                "image — differences no larger than the rounding to the multiple — and pads when it "
+                "does not, so the usual case needs no decision; 'crop' covers the box and centre-crops "
+                "the overflow, 'pad' fits inside it and centres the result on a pad_color border. "
+                "Committing to a size already on the multiple grid avoids a second, softer resize "
+                "inside the diffusion pipeline. "
                 "Outputs the image, the size actually produced, and resolution — the equivalent "
                 "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024. A live "
                 "preview inside the node shows the resulting size as the inputs change."
@@ -214,10 +220,19 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     advanced=True,
                     tooltip="Snap the computed size to the nearest multiple of this value. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to keep the raw megapixel result.",
                 ),
-                io.DynamicCombo.Input(
+                io.Combo.Input(
                     "fit_mode",
-                    options=_mode_options(),
-                    tooltip="'crop' covers the target box and cuts the overflow; 'pad' fits inside it and fills the rest with pad_color.",
+                    options=[MODE_AUTO, CROP, PAD],
+                    default=MODE_AUTO,
+                    tooltip="'auto' crops when the target ratio already matches the image and pads otherwise; 'crop' always covers the box and cuts the overflow; 'pad' always fits inside it and fills the rest with pad_color.",
+                ),
+                io.Float.Input(
+                    "pad_color",
+                    default=0.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Grey level of the border added when padding (0 = black, 1 = white). Hidden by the front end in crop mode, where nothing is padded.",
                 ),
                 # Internal feeds for the preview widget above; always hidden by
                 # the front end and never meant to be edited by hand. Optional
@@ -270,22 +285,25 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
         megapixels,
         multiple,
         fit_mode,
+        pad_color=0.0,
         preview=None,
         preview_ratio=None,
         preview_megapixels=None,
     ) -> io.NodeOutput:
-        selected = fit_mode["fit_mode"]
-        pad_color = float(fit_mode.get("pad_color", 0.0))
-
+        src_w, src_h = _image_size(image)
         if aspect_ratio == AUTO:
             # The image's own ratio: scaling to the megapixel target then costs
             # no crop and no padding beyond the rounding to `multiple`.
-            src_w, src_h = _image_size(image)
             ratio_w, ratio_h = src_w, src_h
         else:
             ratio_w, ratio_h = ASPECT_RATIOS[aspect_ratio]
 
         width, height = _target_size(ratio_w, ratio_h, megapixels, multiple)
-        fitted = _fit(image, width, height, selected, pad_color)
+
+        mode = fit_mode
+        if mode == MODE_AUTO:
+            mode = CROP if _ratios_agree(src_w, src_h, width, height) else PAD
+
+        fitted = _fit(image, width, height, mode, float(pad_color or 0.0))
         resolution = int(round(math.sqrt(width * height)))
         return io.NodeOutput(fitted, width, height, resolution)

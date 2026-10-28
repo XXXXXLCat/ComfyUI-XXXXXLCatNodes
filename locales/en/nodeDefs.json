@@ -261,7 +261,7 @@
   },
   "🐈‍⬛FitImageToSize": {
     "display_name": "Fit Image to Size 🐈‍⬛",
-    "description": "Derive a target size from aspect ratio and megapixels exactly as Resolution Selector does (same ratio table, same 0.01 megapixel step, same rounding to the multiple), then scale the image onto it with a single uniform factor so the picture is never stretched. 'Auto' uses the input image's own ratio, so the picture is rescaled to the requested pixel count at its own proportions — nothing cropped or padded beyond the rounding. 'crop' covers the target box and centre-crops the overflow; 'pad' fits inside it and centres the result on a border of pad color. The multiple sets the grid the size is snapped to: some diffusion pipelines, Qwen-Image among them, re-align images to their own grid internally, so outputting a size already on that grid avoids a second, softer resample. Outputs the image, the size actually produced, and resolution — the equivalent square edge round(sqrt(width*height)), which is 1024 for a 1 MP square. A live preview inside the node shows the resulting size as the inputs change; in Auto mode it uses the connected image's own size, and shows a dash while nothing is connected.",
+    "description": "Derive a target size from aspect ratio and megapixels exactly as Resolution Selector does (same ratio table, same 0.01 megapixel step, same rounding to the multiple), then scale the image onto it with a single uniform factor so the picture is never stretched. 'Auto' uses the input image's own ratio, so the picture is rescaled to the requested pixel count at its own proportions — nothing cropped or padded beyond the rounding. Fit mode 'auto' crops when the target ratio already matches the image — differences no larger than the rounding to the multiple — and pads otherwise, so the usual case needs no decision; 'crop' covers the target box and centre-crops the overflow, 'pad' fits inside it and centres the result on a border of pad colour. The multiple sets the grid the size is snapped to: some diffusion pipelines, Qwen-Image among them, re-align images to their own grid internally, so outputting a size already on that grid avoids a second, softer resample. Outputs the image, the size actually produced, and resolution — the equivalent square edge round(sqrt(width*height)), which is 1024 for a 1 MP square. A live preview inside the node shows the resulting size as the inputs change; in Auto mode it uses the connected image's own size, and shows a dash while nothing is connected.",
     "inputs": {
       "image": {
         "name": "Image",
@@ -285,11 +285,11 @@
       },
       "fit_mode": {
         "name": "Mode",
-        "tooltip": "'crop' covers the target box and cuts the overflow; 'pad' fits inside it and fills the rest with pad color."
+        "tooltip": "'auto' crops when the target ratio already matches the image (differences within the rounding to the multiple) and pads otherwise; 'crop' covers the box and cuts the overflow; 'pad' fits inside it and fills the rest with pad colour."
       },
       "pad_color": {
         "name": "Pad Color",
-        "tooltip": "Grey level of the border added in pad mode (0 = black, 1 = white)."
+        "tooltip": "Grey level of the border added when padding (0 = black, 1 = white). Hidden in crop mode."
       },
       "preview_ratio": {
         "name": "Preview Ratio",
