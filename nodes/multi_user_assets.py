@@ -258,19 +258,19 @@ async def _user_middleware(request, handler):
         _XUSER.reset(token)
 
     fallback_used = False
-    # The frontend builds node-preview URLs as a *bare* /view?filename=... and
-    # the browser loads them via a native <img> tag, which cannot carry the
-    # comfy-user header. Under strict isolation the file lives in
-    # input/<user>/ (or output/<user>/), so a header-less /view resolves against
-    # the global dir and misses it (404/500). For those header-less requests
-    # only (user is None) we fall back to scanning user sub-directories.
-    # Requests that DID carry a valid user keep strict isolation — no cross-user
-    # fallback — so one account can never preview another's assets.
-    if (user is None and resp is not None
+    # The same file is reachable through four URL shapes (user segment inside
+    # subfolder or not; comfy-user header present or not) and the native handler
+    # only resolves one of them.  The browser loads thumbnails through a native
+    # <img> tag, which cannot carry the comfy-user header at all, and the assets
+    # API emits URLs that already contain the user segment.  Re-resolve those
+    # misses instead of leaving them as 404s.  Isolation is enforced inside the
+    # resolver (candidates must stay in the caller's own pool), not by skipping
+    # the fallback, so a known identity never widens access.
+    if (resp is not None
             and getattr(resp, "status", None) != 200
-            and request.rel_url.path == "/view"):
+            and request.rel_url.path in ("/view", "/api/view")):
         try:
-            fb = await _view_fallback(request, resp)
+            fb = await _view_fallback(request, resp, user)
         except Exception:
             fb = None
         if fb is not None and getattr(fb, "status", None) == 200:
@@ -578,6 +578,66 @@ def _install_userdata_unknown_user_guard() -> None:
     UserManager.get_request_user_filepath = _patched
 
 
+# ---------------------------------------------------------------- assets view URL
+
+def _is_under(child: str, parent: str) -> bool:
+    """True when ``child`` is strictly inside ``parent`` (both absolute-able)."""
+    return os.path.abspath(child).startswith(os.path.abspath(parent) + os.sep)
+
+
+def _install_assets_view_url() -> None:
+    """Keep the per-user segment inside assets preview URLs.
+
+    ``app.assets.services.preview_rules.view_url`` turns an absolute path into
+    ``/api/view?type=...&filename=...&subfolder=...`` by relativising it against
+    ``folder_paths.get_input_directory()``.  Under isolation that call returns
+    ``input/<user>``, so the user segment gets absorbed into the base and the
+    resulting URL loses its ``subfolder`` — yet ``view_url`` documents the
+    endpoint as served with *no user header*, i.e. the URL must describe the
+    file on its own.  A browser ``<img>`` cannot send ``comfy-user``, so such a
+    request resolves against the global directory and 404s: the assets panel
+    then shows placeholder icons instead of thumbnails and drags onto the canvas
+    fail.  Recompute against the global roots so the URL keeps the subfolder it
+    would carry without isolation.
+    """
+    try:
+        from app.assets.services import preview_rules as _pr
+        import urllib.parse as _up
+    except Exception as exc:  # pragma: no cover - assets module absent
+        logger.warning("[XXXXXLCat] assets view_url patch skipped: %s", exc)
+        return
+
+    orig = getattr(_pr, "view_url", None)
+    if orig is None or getattr(orig, "_xxl_patched", False):
+        return
+
+    def _patched_view_url(file_path):
+        if file_path:
+            fp_abs = os.path.abspath(file_path)
+            for namespace, base in (
+                ("input", _global_input_dir()),
+                ("output", _global_output_dir()),
+            ):
+                if not base or not _is_under(fp_abs, base):
+                    continue
+                rel = os.path.relpath(fp_abs, os.path.abspath(base)).replace(os.sep, "/")
+                subfolder, _, filename = rel.rpartition("/")
+                if not filename:
+                    break
+                url = "/api/view?type=%s&filename=%s" % (
+                    namespace,
+                    _up.quote(filename, safe=""),
+                )
+                if subfolder:
+                    url += "&subfolder=%s" % _up.quote(subfolder, safe="")
+                return url
+        return orig(file_path)
+
+    _patched_view_url._xxl_patched = True
+    _pr.view_url = _patched_view_url
+    logger.info("[XXXXXLCat] assets preview URLs keep their per-user subfolder")
+
+
 # ---------------------------------------------------------------- /view fallback
 
 def _serve_image_file(request, file, filename):
@@ -585,7 +645,9 @@ def _serve_image_file(request, file, filename):
 
     Minimal re-implementation of the file-serving tail of the official
     ``/view`` handler (preview re-encoding + rgb channel + raw passthrough) so the
-    fallback path behaves identically to the native one.
+    fallback path behaves identically to the native one.  The raw passthrough
+    goes through ``web.FileResponse`` so byte-range seeking keeps working for
+    video scrubbing, exactly like the official handler.
     """
     import mimetypes as _mimetypes
     from io import BytesIO
@@ -625,27 +687,78 @@ def _serve_image_file(request, file, filename):
             headers={"Content-Disposition": f'filename="{filename}"'},
         )
 
-    with open(file, "rb") as f:
-        data = f.read()
     ctype, _ = _mimetypes.guess_type(filename)
     if not ctype:
         ctype = "application/octet-stream"
-    return web.Response(
-        body=data,
-        content_type=ctype,
-        headers={"Content-Disposition": f'filename="{filename}"'},
+    return web.FileResponse(
+        file,
+        headers={
+            "Content-Type": ctype,
+            "Content-Disposition": f'filename="{filename}"',
+        },
     )
 
 
-async def _view_fallback(request, original_resp):
-    """When the native /view couldn't find the file, look inside user sub-dirs.
+def _resolve_view_candidates(
+    ftype: str, subfolder: str, filename: str, user: Optional[str]
+) -> list:
+    """Isolation-aware candidate paths for one /view request, best first.
 
-    The frontend builds node-preview URLs as a *bare* ``/view?filename=...``
-    (see ``getResourceURL`` in the frontend core) and the browser loads them via
-    a native ``<img>`` tag, which cannot carry the ``comfy-user`` header. Under
-    strict isolation the file lives in ``input/<user>/`` (or ``output/<user>/``),
-    so a header-less /view resolves against the global dir and misses it. We scan
-    every user sub-directory for a matching basename and serve the first hit.
+    Under per-user isolation a file lives in ``<root>/<user>/...``, but the very
+    same file is reachable through four URL shapes: the user segment may sit
+    inside ``subfolder`` (what the assets API emits) or be absent entirely (bare
+    node-preview URLs), and the request may or may not carry a ``comfy-user``
+    header (a browser ``<img>`` cannot send one).  Only one of those shapes is
+    what the native handler resolves, so the rest have to be tried here.
+
+    When ``user`` is known every candidate must stay inside that user's own
+    directory, so one account can never preview another's assets.  With no
+    identity the subfolder — if present — is the only self-describing locator,
+    and a bare URL falls back to scanning user directories by basename.
+    """
+    base = _global_input_dir() if ftype == "input" else _global_output_dir()
+    parts = [p for p in (subfolder or "").replace("\\", "/").split("/") if p and p != "."]
+    cands: list = []
+
+    def _add(path: str) -> None:
+        path = os.path.abspath(path)
+        if path not in cands:
+            cands.append(path)
+
+    if user:
+        udir = os.path.abspath(_user_dir(base, user))
+
+        def _scoped(path: str) -> None:
+            # Reject anything escaping the caller's own pool (cross-user leaks).
+            if os.path.abspath(path).startswith(udir + os.sep):
+                _add(path)
+
+        # subfolder may already carry the user segment; re-prefixing it would
+        # double-nest into <root>/<user>/<user>/.
+        _scoped(os.path.join(base, *parts, filename))
+        rest = parts[1:] if parts and parts[0] == user else parts
+        _scoped(os.path.join(udir, *rest, filename))
+    elif parts:
+        _add(os.path.join(base, *parts, filename))
+    elif os.path.isdir(base):
+        # Bare URL, no identity: last resort, look inside each user directory.
+        for name in sorted(os.listdir(base)):
+            cand = os.path.join(base, name, filename)
+            if os.path.isfile(cand):
+                _add(cand)
+
+    return [c for c in cands if os.path.isfile(c)]
+
+
+async def _view_fallback(request, original_resp, user):
+    """Re-resolve a /view request the native handler could not serve.
+
+    The native handler resolves against ``folder_paths.get_directory_by_type``,
+    which under isolation *is* the user directory, so it only finds the file for
+    the one shape that carries a ``comfy-user`` header and omits the user
+    segment.  The assets API emits URLs that already contain the segment (double
+    nesting), and browser ``<img>`` requests cannot send the header at all.  Try
+    every isolation-safe location before giving up.
     """
     filename = request.rel_url.query.get("filename")
     if not filename or filename.startswith("blake3:"):
@@ -654,14 +767,16 @@ async def _view_fallback(request, original_resp):
     if ftype not in ("input", "output"):
         return original_resp
 
-    base = _global_input_dir() if ftype == "input" else _global_output_dir()
     fname = os.path.basename(filename)
-    if not fname or not os.path.isdir(base):
+    if not fname:
         return original_resp
-    for name in os.listdir(base):
-        cand = os.path.join(base, name, fname)
-        if os.path.isfile(cand):
+    subfolder = request.rel_url.query.get("subfolder", "")
+
+    for cand in _resolve_view_candidates(ftype, subfolder, fname, user):
+        try:
             return _serve_image_file(request, cand, fname)
+        except Exception:
+            continue
     return original_resp
 
 
@@ -686,6 +801,7 @@ def install() -> bool:
         _install_executor_hook()
         _install_job_visibility()
         _install_assets_list_filter()
+        _install_assets_view_url()
         _install_userdata_unknown_user_guard()
         _INSTALLED = True
         logger.info("[XXXXXLCat] multi-user asset isolation enabled "
