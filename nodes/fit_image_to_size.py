@@ -176,20 +176,14 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                 "cover", "contain", "canvas", "megapixel", "resolution", "align",
             ],
             description=(
-                "Work out a target size from aspect ratio + megapixels the way Resolution Selector "
-                "does (same ratios, same 0.01 megapixel step, same rounding to the multiple), then "
-                "scale the image onto it without stretching. 'Auto' takes the ratio from the image "
-                "itself, so the picture is rescaled at its own proportions; the produced ratio then "
-                "tracks the image as closely as the multiple grid allows — 1365x768 becomes 1376x768 "
-                "at a multiple of 32, 0.8% wide, and set the multiple to 1 for an exact match. Fitting "
-                "is decided for you: the target crops when it already follows the image — always in "
-                "Auto ratio, and for a chosen ratio once it agrees within 2% — and otherwise fits "
-                "inside it and centres the result on a black border, so no picture content is thrown "
-                "away unless the target ratio really differs. Committing to a size already on the "
-                "multiple grid avoids a second, softer resize inside the diffusion pipeline. "
-                "Outputs the image, the size actually produced, and resolution — the equivalent "
-                "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024. A live "
-                "preview inside the node shows the resulting size as the inputs change."
+                "Work out a target size from aspect ratio + megapixels (same arithmetic as "
+                "Resolution Selector) and scale the image onto it with one uniform factor, so "
+                "nothing is stretched. 'Auto' takes the ratio from the image itself, and the result "
+                "tracks it as closely as the multiple grid allows — 1365x768 becomes 1376x768 at a "
+                "multiple of 32, 0.8% wide, exact if the multiple is set to 1. A target that already "
+                "follows the image is centre-cropped by those few pixels; a target ratio further "
+                "away is padded with black instead. Outputs the image, the width and height actually "
+                "produced, and resolution — round(sqrt(width*height)), 1024 for a 1 MP square."
             ),
             inputs=[
                 io.Image.Input("image", tooltip="Image to fit."),
@@ -205,7 +199,7 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     min=0.01,
                     max=16.0,
                     step=0.01,
-                    tooltip="Target total megapixels, adjustable to two decimal places. 1.0 MP gives 1024x1024 for a square ratio. Same input as Resolution Selector.",
+                    tooltip="Target total megapixels, 0.01 step. 1.0 MP gives 1024x1024 for a square ratio.",
                 ),
                 io.ResolutionPreview.Input(
                     "preview",
@@ -228,7 +222,7 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     max=256,
                     step=1,
                     advanced=True,
-                    tooltip="Snap the computed size to the nearest multiple of this value. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to keep the raw megapixel result.",
+                    tooltip="Snap the size to this grid. Default 32 matches the grid Qwen-Image aligns to internally; 1 disables snapping.",
                 ),
                 # Internal feeds for the preview widget above; always hidden by
                 # the front end and never meant to be edited by hand. Optional
