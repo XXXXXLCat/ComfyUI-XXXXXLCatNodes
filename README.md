@@ -155,16 +155,13 @@ Works out a target size from aspect ratio and megapixels, then scales the image 
 | Aspect Ratio | Auto | Auto takes the ratio from the input image; the rest are fixed ratios |
 | Megapixels | 1.0 | Target total megapixels, 0.01 step |
 | Multiple | 32 | Snap the computed size to the nearest multiple; 1 disables snapping |
-| Mode | auto | auto, crop, pad |
-| Pad Color | 0 | Grey level of the border when padding (0 = black, 1 = white); hidden in crop mode |
 
 Aspect ratios: Auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
 
-Modes:
+Whether the target crops or pads is decided by the node, with no switch to set:
 
-- **auto** — always crops in Auto ratio, since the size was already derived from the image's own proportions and only the rounding is left; for a chosen ratio it crops when that ratio differs from the image by no more than 2%, and pads otherwise.
-- **crop** — scales to cover the target box and centre-crops the overflow. No borders, at the cost of losing whatever falls outside the target ratio.
-- **pad** — scales to fit inside the target box, centres the result, and fills the rest with the chosen grey level. Every pixel kept, at the cost of borders.
+- When the target ratio already follows the image — always in Auto ratio, and for a chosen ratio within 2% — it scales to cover and centre-crops the few pixels the rounding added. No border, no change to the composition.
+- Further apart it scales to fit and centres the result on a black canvas. Every pixel kept, at the cost of black borders.
 
 Outputs are the image, the width and height actually produced, and resolution — the equivalent square edge `round(√(width×height))`, which is 1024 for a 1 MP square.
 
@@ -176,9 +173,9 @@ Why the multiple: some diffusion models (Qwen-Image among them) re-align images 
 
 Limits:
 
-- Every mode scales by a single uniform factor and never stretches. The further the target ratio sits from the input ratio, the more of the picture is cropped.
-- Padding is a flat colour; it does not extend the image content.
-- Auto decides from the ratio alone, not from the picture's content; pick crop or pad to force one.
+- Both paths scale by a single uniform factor and never stretch. The further the target ratio sits from the input ratio, the more of the picture is cropped.
+- The padding colour is fixed black; it does not extend the image content.
+- The decision looks at the ratio alone, not at the picture's content: to force a crop pick a ratio that already matches the picture, to force padding pick one that is far off.
 
 ## History gallery
 
