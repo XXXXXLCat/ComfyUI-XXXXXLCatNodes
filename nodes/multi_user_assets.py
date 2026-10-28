@@ -524,6 +524,58 @@ def _install_job_visibility() -> None:
         setattr(execution.PromptQueue, name, patched)
 
 
+def _install_assets_list_filter() -> None:
+    """Scope ComfyUI's Assets library listing to the current user.
+
+    ComfyUI's asset database (``app/assets`` + ``user/comfyui.db``) has no
+    per-user ownership column, and ``GET /api/assets`` lists every account's
+    records. ComfyUI's own ``--multi-user`` never isolated assets, so the media
+    panel shows all accounts' media. We cannot edit ComfyUI source, so this
+    wraps the list query's filter builder (``build_record_tag_filter_clauses``,
+    used only by ``list_records_page``) to add a WHERE on ``AssetContent.path``
+    being under the caller's own ``input/<user>/`` or ``output/<user>/`` (this
+    module's isolation layout). The clause joins the same filter set that backs
+    both the page query and the count query, so pagination and ``total`` stay
+    correct. Only applies to an authenticated user; single-user or system calls
+    fall through to the unfiltered official behaviour.
+    """
+    try:
+        import sqlalchemy as sa
+
+        from app.assets.database.models import AssetContent
+        from app.assets.database.queries import records as _rec
+        from app.assets.helpers import sql_path_under_prefix
+    except Exception:
+        # Assets system not present (older ComfyUI / --disable-assets) — nothing
+        # to scope, so leave the official behaviour untouched.
+        return
+
+    orig = getattr(_rec, "build_record_tag_filter_clauses", None)
+    if orig is None or getattr(orig, "_xuser_patched", False):
+        return
+
+    def _patched(all_tags, any_tags, none_tags):
+        clauses = list(orig(all_tags, any_tags, none_tags))
+        user = _current_user()
+        if user:
+            try:
+                own = [
+                    sql_path_under_prefix(
+                        AssetContent.path, _user_dir(_global_input_dir(), user)
+                    ),
+                    sql_path_under_prefix(
+                        AssetContent.path, _user_dir(_global_output_dir(), user)
+                    ),
+                ]
+                clauses.append(sa.or_(*own))
+            except Exception:
+                pass
+        return tuple(clauses)
+
+    _patched._xuser_patched = True
+    _rec.build_record_tag_filter_clauses = _patched
+
+
 # ---------------------------------------------------------------- public API
 
 def install() -> bool:
@@ -544,6 +596,7 @@ def install() -> bool:
         _install_server_hooks()
         _install_executor_hook()
         _install_job_visibility()
+        _install_assets_list_filter()
         _INSTALLED = True
         logger.info("[XXXXXLCat] multi-user asset isolation enabled "
                     "(input/<user> & output/<user>, global pool kept readable)")
