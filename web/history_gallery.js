@@ -263,6 +263,38 @@ function fileUrl(file, preview) {
     return file?.url || "";
 }
 
+// Native drag contract (assetDragUtil.startAssetDrag): Ctrl/Meta cancels the
+// gesture because those modifiers belong to selection, otherwise the card
+// publishes the ORIGINAL file URL — never the webp preview the tile renders.
+//
+// Two payloads, because the drop side reads different ones:
+//   text/uri-list            → the bytes (same-origin only)
+//   application/x-comfy-asset-info → the name. Deliberately carries
+//     display_name but NOT filename: the canvas names the upload from
+//     display_name, while a `filename` would send the node drop-zone down its
+//     result-item path (asset record lookup) that our files have no record for.
+//     The URL also carries ?filename= for that same node path.
+function startDrag(ev, file) {
+    if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        return;
+    }
+    const dt = ev.dataTransfer;
+    const raw = fileUrl(file, false);
+    if (!dt || !raw || !file) return;
+    const url = new URL(raw, location.href);
+    url.searchParams.set("filename", file.filename || "");
+    dt.setData("text/uri-list", url.toString());
+    dt.setData(
+        "application/x-comfy-asset-info",
+        JSON.stringify({
+            display_name: file.filename,
+            media_kind: file.kind === "3d" ? "3D" : file.kind,
+        })
+    );
+    dt.effectAllowed = "copy";
+}
+
 function relPath(file) {
     return file.subfolder ? `${file.subfolder}/${file.filename}` : file.filename;
 }
@@ -2218,6 +2250,10 @@ function buildPanel(host) {
         img.loading = "lazy";
         img.decoding = "async";
         img.alt = file.filename;
+        // Native MediaImageTop ships :draggable="false" — an image that is its
+        // own drag source overwrites text/uri-list with the thumbnail URL, which
+        // is how a webp preview used to land in input/.
+        img.draggable = false;
         img.src = fileUrl(file, true);
         // Undecodable file (or a preview the server could not build) — show the
         // placeholder face instead of an empty tile.
@@ -2347,6 +2383,11 @@ function buildPanel(host) {
         card.tabIndex = 0;
         card.setAttribute("role", "button");
         card.setAttribute("aria-label", file.filename);
+        // Native card is the drag source (MediaAssetCard :draggable="true"), so
+        // the payload comes from the card and not from the <img> the browser
+        // would otherwise drag.
+        card.draggable = true;
+        card.addEventListener("dragstart", (ev) => startDrag(ev, file));
 
         const thumb = document.createElement("div");
         thumb.className = "xog-thumb";
