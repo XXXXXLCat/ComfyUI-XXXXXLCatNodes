@@ -224,28 +224,6 @@ def _user_from_request(request) -> Optional[str]:
         return None
 
 
-_VIEW_TRACE_PATH = r"E:\Workspace\Workspace-XXXXXLCatNodes\.workbuddy\tmp\mu_view_trace.log"
-
-
-def _trace_view(request, user, status, note=""):
-    """TEMP diagnostic: append one line per /view or /upload/image request."""
-    try:
-        import time
-        line = "%s\tstatus=%s\tuser=%s\thdr=%s\tpath=%s\tquery=%s\t%s\n" % (
-            time.strftime("%m-%d %H:%M:%S"),
-            status,
-            user,
-            request.headers.get("comfy-user"),
-            request.rel_url.path,
-            request.rel_url.query_string,
-            note,
-        )
-        with open(_VIEW_TRACE_PATH, "a", encoding="utf-8") as f:
-            f.write(line)
-    except Exception:
-        pass
-
-
 @web.middleware
 async def _user_middleware(request, handler):
     # Identity comes from the native ComfyUI multi-user selection (the
@@ -257,7 +235,6 @@ async def _user_middleware(request, handler):
     finally:
         _XUSER.reset(token)
 
-    fallback_used = False
     # The same file is reachable through four URL shapes (user segment inside
     # subfolder or not; comfy-user header present or not) and the native handler
     # only resolves one of them.  The browser loads thumbnails through a native
@@ -274,12 +251,8 @@ async def _user_middleware(request, handler):
         except Exception:
             fb = None
         if fb is not None and getattr(fb, "status", None) == 200:
-            fallback_used = True
             resp = fb
 
-    if request.rel_url.path in ("/view", "/upload/image"):
-        _trace_view(request, user, getattr(resp, "status", None),
-                    "fallback=1" if fallback_used else "fallback=0")
     return resp
 
 
