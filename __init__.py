@@ -20,9 +20,6 @@ subprocess. Nothing like psutil is pulled in.
   H3 Image to Video 🐈‍⬛, Any Switch 🐈‍⬛, Group Control 🐈‍⬛,
   Node Control 🐈‍⬛, and Resolution Selector 🐈‍⬛ (the official
   resolution node, with a 2-decimal megapixel step).
-- A read-only **History Gallery** sidebar tab (nodes/history_gallery.py +
-  web/history_gallery.js) that lists every file in output/, which ComfyUI's own
-  Assets panel only does for the current session.
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
 (sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
@@ -89,7 +86,7 @@ _NODE_CLASSES = [
 async def comfy_entrypoint() -> XXXXXLCatExtension:
     # The packs only ship zh + en, and core looks a bundle up by its exact folder
     # name — so a zh-TW UI would show our nodes in English. Alias every zh-*
-    # locale to the zh bundle (matches what web/i18n.js and the login page do).
+    # locale to the zh bundle (matches what web/i18n.js does).
     try:
         from . import locale_alias
 
@@ -97,34 +94,6 @@ async def comfy_entrypoint() -> XXXXXLCatExtension:
     except Exception as exc:  # pragma: no cover - defensive
         print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
 
-    # Per-user password auth gate — must be installed BEFORE the asset-isolation
-    # patches so the validated user id feeds input/<user>/ & output/<user>/.
-    # Only active when ComfyUI is launched with --multi-user.
-    try:
-        from .nodes import multi_user_auth
-
-        multi_user_auth.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] multi-user password auth skipped: {exc}")
-
-    # Per-user asset isolation (input/<user>/ & output/<user>/) — only when
-    # ComfyUI is launched with --multi-user. No-op (and zero impact) otherwise.
-    try:
-        from .nodes import multi_user_assets
-
-        multi_user_assets.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
-
-    # Read-only output browser used by the "History Gallery" sidebar tab. Works in
-    # both modes: it lists the whole output/ tree, or (multi-user) the caller's
-    # own directory plus the shared legacy pool.
-    try:
-        from .nodes import history_gallery
-
-        history_gallery.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] output gallery skipped: {exc}")
     return XXXXXLCatExtension()
 
 

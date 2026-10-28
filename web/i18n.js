@@ -15,7 +15,7 @@
    frontends (1.5x) switch `Comfy.Locale` in place instead of reloading, so
    anything captured as a plain string when a node/tab was created keeps the old
    language. Resolve the value on every lookup, or expose labels as accessors
-   (see `bindLiveLabels` in `history_gallery.js`) so a re-render picks them up.
+   so a re-render picks them up.
    Only a value that came from a real source is cached, never a guess made before
    `app` was ready.
 */
@@ -54,8 +54,8 @@ function fromStorage() {
     }
 }
 
-/* Last locale we rendered in, kept for the server-rendered login page: that page
-   is served before sign-in, so `/api/settings` is out of reach there. */
+/* Last locale we rendered in, cached so a page reload can pick the language up
+   before `/api/settings` resolves. */
 function remember(lang) {
     try {
         localStorage.setItem("xcat.locale", lang);

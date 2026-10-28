@@ -6,7 +6,7 @@ but a custom node pack normally only carries one of them. Core resolves the
 bundle by the exact folder name (``app/custom_node_manager.py``), so a ``zh-TW``
 UI silently drops every translated node back to English.
 
-The front end (``web/i18n.js``), the login page and this module all agree on one
+The front end (``web/i18n.js``) and this module agree on one
 rule: **any locale that starts with ``zh`` is Chinese**. So instead of shipping a
 duplicated Traditional bundle, we copy the entries we own from ``zh`` into the
 ``zh-TW`` bundle when that bundle has no entry for a given node.
