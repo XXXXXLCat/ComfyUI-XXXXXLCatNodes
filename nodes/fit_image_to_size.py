@@ -172,7 +172,8 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                 "inside it and centres the result on a pad_color border. Committing to a size already "
                 "on the multiple grid avoids a second, softer resize inside the diffusion pipeline. "
                 "Outputs the image, the size actually produced, and resolution — the equivalent "
-                "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024."
+                "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024. A live "
+                "preview inside the node shows the resulting size as the inputs change."
             ),
             inputs=[
                 io.Image.Input("image", tooltip="Image to fit."),
@@ -190,6 +191,20 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     step=0.01,
                     tooltip="Target total megapixels, adjustable to two decimal places. 1.0 MP gives 1024x1024 for a square ratio. Same input as Resolution Selector.",
                 ),
+                io.ResolutionPreview.Input(
+                    "preview",
+                    # The built-in preview can only derive a size from
+                    # (ratio, megapixels, multiple). Our ratio selector is a
+                    # plain combo whose "Auto" option is not a ratio at all, so
+                    # the preview is pointed at two internal widgets that
+                    # `web/fit_image_to_size.js` keeps filled: in Auto mode with
+                    # the source image's pixel size (which is the ratio the node
+                    # itself computes with), otherwise with the chosen ratio.
+                    ratio_widget="preview_ratio",
+                    megapixels_widget="preview_megapixels",
+                    multiple_widget="multiple",
+                    tooltip="Live preview of the target size this node will produce.",
+                ),
                 io.Int.Input(
                     "multiple",
                     default=32,
@@ -203,6 +218,28 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     "fit_mode",
                     options=_mode_options(),
                     tooltip="'crop' covers the target box and cuts the overflow; 'pad' fits inside it and fills the rest with pad_color.",
+                ),
+                # Internal feeds for the preview widget above; always hidden by
+                # the front end and never meant to be edited by hand. Optional
+                # so that hand-written API prompts are not forced to supply
+                # them — the graph always sends them, and `execute` ignores them
+                # either way.
+                io.String.Input(
+                    "preview_ratio",
+                    default="1:1",
+                    optional=True,
+                    socketless=True,
+                    tooltip="Internal: the ratio the resolution preview reads.",
+                ),
+                io.Float.Input(
+                    "preview_megapixels",
+                    default=1.0,
+                    min=0.0,
+                    max=1024.0,
+                    step=0.000001,
+                    optional=True,
+                    socketless=True,
+                    tooltip="Internal: the megapixel value the resolution preview reads.",
                 ),
             ],
             outputs=[
@@ -226,7 +263,17 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, aspect_ratio, megapixels, multiple, fit_mode) -> io.NodeOutput:
+    def execute(
+        cls,
+        image,
+        aspect_ratio,
+        megapixels,
+        multiple,
+        fit_mode,
+        preview=None,
+        preview_ratio=None,
+        preview_megapixels=None,
+    ) -> io.NodeOutput:
         selected = fit_mode["fit_mode"]
         pad_color = float(fit_mode.get("pad_color", 0.0))
 

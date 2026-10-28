@@ -166,6 +166,8 @@ Modes:
 
 Outputs are the image, the width and height actually produced, and resolution — the equivalent square edge `round(√(width×height))`, which is 1024 for a 1 MP square.
 
+Below the inputs the node shows a target-size preview such as `1376 × 768 1.01 MP`, updated live as the aspect ratio or megapixel value changes. In Auto mode the preview uses the connected image's own width and height; with nothing connected it shows a dash.
+
 In Auto mode the size is still snapped to the multiple, so the produced ratio differs from the image ratio by the rounding; at that point crop and pad leave no visible loss either way.
 
 Why the multiple: some diffusion models (Qwen-Image among them) re-align images to their own grid internally. When the output already sits on that grid, the model skips its own resize and the picture is not softened by a second resample.
