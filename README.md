@@ -148,21 +148,25 @@ All other behaviour matches the official node: same aspect ratio options, same l
 
 ## Fit Image to Size 🐈‍⬛
 
-Fits an image of any size onto an exact width and height using a single uniform scale factor, so the picture is never stretched. The target size comes from the inputs, so it can be wired straight from Resolution Selector.
+Works out a target size from aspect ratio and megapixels, then scales the image onto it with a single uniform factor so the picture is never stretched. The size arithmetic matches Resolution Selector, so the same ratio and megapixel value give the same result on both nodes.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| Width | 1024 | Target canvas width |
-| Height | 1024 | Target canvas height |
-| Multiple | 32 | Snap both dimensions to the nearest multiple of this value before scaling; 1 disables snapping |
+| Aspect Ratio | Auto | Auto takes the ratio from the input image; the rest are fixed ratios |
+| Megapixels | 1.0 | Target total megapixels, 0.01 step |
+| Multiple | 32 | Snap the computed size to the nearest multiple; 1 disables snapping |
 | Mode | crop | crop, pad |
+
+Aspect ratios: Auto, 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9, 21:9.
 
 Modes:
 
 - **crop** — scales to cover the target box and centre-crops the overflow. No borders, at the cost of losing whatever falls outside the target ratio.
 - **pad** — scales to fit inside the target box, centres the result, and fills the rest with the chosen grey level. Every pixel kept, at the cost of borders.
 
-Outputs are the image plus the width and height actually produced.
+Outputs are the image, the width and height actually produced, and resolution — the equivalent square edge `round(√(width×height))`, which is 1024 for a 1 MP square.
+
+In Auto mode the size is still snapped to the multiple, so the produced ratio differs from the image ratio by the rounding; at that point crop and pad leave no visible loss either way.
 
 Why the multiple: some diffusion models (Qwen-Image among them) re-align images to their own grid internally. When the output already sits on that grid, the model skips its own resize and the picture is not softened by a second resample.
 

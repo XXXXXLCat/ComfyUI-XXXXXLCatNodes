@@ -1,35 +1,44 @@
 # -*- coding: utf-8 -*-
-"""Fit Image to Size 🐈‍⬛ — force any image onto an exact target canvas.
+"""Fit Image to Size 🐈‍⬛ — size an image from aspect ratio + megapixels, then
+crop or pad onto exactly that size.
 
-Takes the target ``width`` / ``height`` from its inputs (typically wired from
-Resolution Selector 🐈‍⬛) and returns an image that is *exactly* that size, so a
-downstream model never has to resize it again. Two modes:
+The target size is computed the same way Resolution Selector does it — an
+aspect ratio and a megapixel target, rounded to the nearest ``multiple`` — so
+the two nodes agree pixel for pixel. The one addition is an **Auto** ratio that
+takes its ratio from the image itself, which makes the node useful on its own:
+the picture is rescaled to the requested pixel count at its own proportions, so
+nothing is cropped or padded beyond the rounding.
+
+Two modes decide what happens when the target ratio and the image ratio differ:
 
 * ``crop`` — scale to **cover** the target box (aspect preserved, uniform scale
   ``max(tw/w, th/h)``) and centre-crop the overflow. No borders, loses edge
-  content when the input ratio differs from the target ratio.
+  content.
 * ``pad``  — scale to **contain** the target box (uniform scale
   ``min(tw/w, th/h)``) and centre the result on a ``pad_color`` canvas. Keeps
   every pixel, adds borders.
 
 Both modes scale by a single uniform factor, so the input is never stretched —
-that is the whole point: feeding a model a pre-stretched image bakes the
-distortion in, while crop/pad leaves the subject at its true proportions.
+feeding a model a pre-stretched image bakes the distortion in, while crop/pad
+leaves the subject at its true proportions.
 
-``multiple`` snaps the requested size to that grid (nearest, clamped) before
-anything is scaled. Diffusers-style models — Qwen-Image included — re-align the
-image inside their own pipeline anyway, so a target that is not already on their
-grid gets silently re-scaled and softened. Leaving it at the default 32 makes
-the size we output the size the model actually sees. Set it to 1 to honour the
-requested width/height verbatim.
+``multiple`` snaps the computed size to that grid (nearest, clamped). Diffusers
+style models — Qwen-Image included — re-align the image inside their own
+pipeline anyway, so a target that is not already on their grid gets silently
+re-scaled and softened. The default of 32 makes the size we output the size the
+model actually sees; set it to 1 to keep the raw megapixel result.
 
-The outputs echo the size that was actually produced (after ``multiple``), so
-they can be wired into latent nodes without recomputing the snap by hand.
+The outputs echo the size that was actually produced (after ``multiple``), plus
+``resolution`` — the equivalent square edge, ``round(sqrt(width*height))``,
+which is 1024 for a 1 MP 1024x1024 result. That is the scalar form models and
+samplers usually want when they ask for a resolution.
 
 Resizing itself is delegated to ``comfy.utils.common_upscale`` (the same lanczos
 path the official scale nodes use) rather than a hand-rolled interpolate, so
 quality matches the rest of the graph.
 """
+
+import math
 
 import torch
 
@@ -38,10 +47,21 @@ from comfy_api.latest import io
 import comfy.utils
 
 
-MAX_RESOLUTION = 16384
-
 CROP = "crop"
 PAD = "pad"
+AUTO = "Auto (from image)"
+
+# Same table as Resolution Selector 🐈‍⬛, so the two nodes stay interchangeable.
+ASPECT_RATIOS: dict[str, tuple[int, int]] = {
+    "1:1 (Square)": (1, 1),
+    "2:3 (Portrait Photo)": (2, 3),
+    "3:2 (Photo)": (3, 2),
+    "3:4 (Portrait Standard)": (3, 4),
+    "4:3 (Standard)": (4, 3),
+    "9:16 (Portrait Widescreen)": (9, 16),
+    "16:9 (Widescreen)": (16, 9),
+    "21:9 (Ultrawide)": (21, 9),
+}
 
 
 def _mode_options() -> list[io.DynamicCombo.Option]:
@@ -70,11 +90,25 @@ def _mode_options() -> list[io.DynamicCombo.Option]:
     ]
 
 
-def _snap(value: int, multiple: int) -> int:
-    """Round to the nearest multiple, never below one multiple."""
-    if multiple <= 1:
-        return max(1, value)
-    return max(multiple, int(round(value / multiple)) * multiple)
+def _target_size(ratio_w: int, ratio_h: int, megapixels: float, multiple: int) -> tuple[int, int]:
+    """Aspect ratio + megapixel target -> (width, height), snapped to ``multiple``.
+
+    Mirrors Resolution Selector's arithmetic exactly, so the same ratio and
+    megapixel value give the same size on both nodes.
+    """
+    total_pixels = megapixels * 1024 * 1024
+    scale = math.sqrt(total_pixels / (ratio_w * ratio_h))
+    width = round(ratio_w * scale / multiple) * multiple
+    height = round(ratio_h * scale / multiple) * multiple
+    # A zero megapixel target would collapse the canvas; keep one tile instead.
+    return max(multiple, width), max(multiple, height)
+
+
+def _image_size(image: torch.Tensor) -> tuple[int, int]:
+    """(width, height) of an IMAGE tensor, which ComfyUI hands over as [B,H,W,C]."""
+    if image.dim() == 4:
+        return int(image.shape[2]), int(image.shape[1])
+    return int(image.shape[1]), int(image.shape[0])
 
 
 def _to_samples(image: torch.Tensor) -> torch.Tensor:
@@ -117,7 +151,7 @@ def _fit(image: torch.Tensor, width: int, height: int, mode: str, pad_color: flo
 
 
 class XXXXXLCatFitImageToSize(io.ComfyNode):
-    """Scale an image onto an exact target size by cropping or padding, never stretching it."""
+    """Size an image from aspect ratio + megapixels, then crop or pad onto it without stretching."""
 
     @classmethod
     def define_schema(cls):
@@ -126,36 +160,35 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
             display_name="Fit Image to Size 🐈‍⬛",
             category="🐈‍⬛XXXXXLCat/image",
             search_aliases=[
-                "fit", "resize", "crop", "pad", "letterbox", "aspect",
-                "cover", "contain", "canvas", "target size", "align",
+                "fit", "resize", "crop", "pad", "letterbox", "aspect ratio",
+                "cover", "contain", "canvas", "megapixel", "resolution", "align",
             ],
             description=(
-                "Force an image onto an exact width x height canvas without stretching it. "
-                "Target size is taken from the width/height inputs, so it can be wired from "
-                "Resolution Selector. 'crop' scales to cover the box and centre-crops the "
-                "overflow; 'pad' scales to fit inside it and centres the result on a "
-                "pad_color border. 'multiple' snaps the requested size to that grid first "
-                "(default 32), because diffusion pipelines re-align the image internally "
-                "anyway — outputting a size already on their grid avoids a second, softer "
-                "resize. The width/height outputs report the size actually produced."
+                "Work out a target size from aspect ratio + megapixels exactly as Resolution Selector "
+                "does (same ratios, same 0.01 megapixel step, same rounding to the multiple), then "
+                "scale the image onto it without stretching. 'Auto' takes the ratio from the image "
+                "itself, so the picture is rescaled to the requested pixel count at its own "
+                "proportions. 'crop' covers the target box and centre-crops the overflow; 'pad' fits "
+                "inside it and centres the result on a pad_color border. Committing to a size already "
+                "on the multiple grid avoids a second, softer resize inside the diffusion pipeline. "
+                "Outputs the image, the size actually produced, and resolution — the equivalent "
+                "square edge, round(sqrt(width*height)), i.e. 1024 for a 1 MP 1024x1024."
             ),
             inputs=[
                 io.Image.Input("image", tooltip="Image to fit."),
-                io.Int.Input(
-                    "width",
-                    default=1024,
-                    min=16,
-                    max=MAX_RESOLUTION,
-                    step=8,
-                    tooltip="Target canvas width. Wire this from Resolution Selector to keep both ends in sync.",
+                io.Combo.Input(
+                    "aspect_ratio",
+                    options=[AUTO, *ASPECT_RATIOS],
+                    default=AUTO,
+                    tooltip="Ratio used to derive the target size. 'Auto' uses the input image's own ratio.",
                 ),
-                io.Int.Input(
-                    "height",
-                    default=1024,
-                    min=16,
-                    max=MAX_RESOLUTION,
-                    step=8,
-                    tooltip="Target canvas height.",
+                io.Float.Input(
+                    "megapixels",
+                    default=1.0,
+                    min=0.01,
+                    max=16.0,
+                    step=0.01,
+                    tooltip="Target total megapixels, adjustable to two decimal places. 1.0 MP gives 1024x1024 for a square ratio. Same input as Resolution Selector.",
                 ),
                 io.Int.Input(
                     "multiple",
@@ -164,7 +197,7 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                     max=256,
                     step=1,
                     advanced=True,
-                    tooltip="Snap the target size to the nearest multiple of this value before scaling. Default 32 matches what Qwen-Image and other diffusion pipelines align to internally; set 1 to use the requested width/height verbatim.",
+                    tooltip="Snap the computed size to the nearest multiple of this value. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to keep the raw megapixel result.",
                 ),
                 io.DynamicCombo.Input(
                     "fit_mode",
@@ -173,27 +206,39 @@ class XXXXXLCatFitImageToSize(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Image.Output("image", tooltip="Image scaled onto the target canvas."),
+                io.Image.Output("image", tooltip="Image scaled onto the computed canvas."),
                 io.Int.Output(
                     "out_width",
                     display_name="width",
-                    tooltip="Width actually produced, after snapping width to the multiple.",
+                    tooltip="Width actually produced, after rounding to the multiple.",
                 ),
                 io.Int.Output(
                     "out_height",
                     display_name="height",
-                    tooltip="Height actually produced, after snapping height to the multiple.",
+                    tooltip="Height actually produced, after rounding to the multiple.",
+                ),
+                io.Int.Output(
+                    "out_resolution",
+                    display_name="resolution",
+                    tooltip="Equivalent square edge of the result, round(sqrt(width*height)). 1024 for a 1 MP square.",
                 ),
             ],
         )
 
     @classmethod
-    def execute(cls, image, width, height, multiple, fit_mode) -> io.NodeOutput:
+    def execute(cls, image, aspect_ratio, megapixels, multiple, fit_mode) -> io.NodeOutput:
         selected = fit_mode["fit_mode"]
         pad_color = float(fit_mode.get("pad_color", 0.0))
 
-        target_w = _snap(int(width), int(multiple))
-        target_h = _snap(int(height), int(multiple))
+        if aspect_ratio == AUTO:
+            # The image's own ratio: scaling to the megapixel target then costs
+            # no crop and no padding beyond the rounding to `multiple`.
+            src_w, src_h = _image_size(image)
+            ratio_w, ratio_h = src_w, src_h
+        else:
+            ratio_w, ratio_h = ASPECT_RATIOS[aspect_ratio]
 
-        fitted = _fit(image, target_w, target_h, selected, pad_color)
-        return io.NodeOutput(fitted, target_w, target_h)
+        width, height = _target_size(ratio_w, ratio_h, megapixels, multiple)
+        fitted = _fit(image, width, height, selected, pad_color)
+        resolution = int(round(math.sqrt(width * height)))
+        return io.NodeOutput(fitted, width, height, resolution)

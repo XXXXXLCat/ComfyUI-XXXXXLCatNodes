@@ -261,23 +261,23 @@
   },
   "🐈‍⬛FitImageToSize": {
     "display_name": "Fit Image to Size 🐈‍⬛",
-    "description": "Fit any image onto a target width x height canvas using a single uniform scale factor, so the picture is never stretched. 'crop' scales to cover the target box and centre-crops the overflow — no borders, but edge content is lost. 'pad' scales to fit inside the box and centres the result on a border of pad_color — every pixel kept, at the cost of borders. The requested width and height are snapped to the nearest 'multiple' (default 32) before scaling, because some diffusion pipelines — Qwen-Image among them — re-align images to their own grid internally and would otherwise resize a second time and soften the result; set multiple to 1 to use the requested size verbatim. The two size outputs report what was actually produced and can be wired straight into a latent node.",
+    "description": "Derive a target size from aspect ratio and megapixels exactly as Resolution Selector does (same ratio table, same 0.01 megapixel step, same rounding to the multiple), then scale the image onto it with a single uniform factor so the picture is never stretched. 'Auto' uses the input image's own ratio, so the picture is rescaled to the requested pixel count at its own proportions — nothing cropped or padded beyond the rounding. 'crop' covers the target box and centre-crops the overflow; 'pad' fits inside it and centres the result on a border of pad color. The multiple sets the grid the size is snapped to: some diffusion pipelines, Qwen-Image among them, re-align images to their own grid internally, so outputting a size already on that grid avoids a second, softer resample. Outputs the image, the size actually produced, and resolution — the equivalent square edge round(sqrt(width*height)), which is 1024 for a 1 MP square.",
     "inputs": {
       "image": {
         "name": "Image",
         "tooltip": "Image to fit."
       },
-      "width": {
-        "name": "Width",
-        "tooltip": "Target canvas width. Wire it from Resolution Selector to keep both ends in sync."
+      "aspect_ratio": {
+        "name": "Aspect Ratio",
+        "tooltip": "Ratio used to derive the target size. 'Auto' uses the input image's own ratio."
       },
-      "height": {
-        "name": "Height",
-        "tooltip": "Target canvas height."
+      "megapixels": {
+        "name": "Megapixels",
+        "tooltip": "Target total megapixels, adjustable to two decimal places. 1.0 MP gives 1024x1024 for a square ratio. Same input as Resolution Selector."
       },
       "multiple": {
         "name": "Multiple",
-        "tooltip": "Snap the target size to the nearest multiple of this value before scaling. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to use the requested width and height verbatim."
+        "tooltip": "Snap the computed size to the nearest multiple of this value. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to keep the raw megapixel result."
       },
       "fit_mode": {
         "name": "Mode",
@@ -291,15 +291,19 @@
     "outputs": {
       "0": {
         "name": "Image",
-        "tooltip": "The image scaled onto the target canvas."
+        "tooltip": "The image scaled onto the computed canvas."
       },
       "1": {
         "name": "Width",
-        "tooltip": "Width actually produced, after snapping to the multiple."
+        "tooltip": "Width actually produced, after rounding to the multiple."
       },
       "2": {
         "name": "Height",
-        "tooltip": "Height actually produced, after snapping to the multiple."
+        "tooltip": "Height actually produced, after rounding to the multiple."
+      },
+      "3": {
+        "name": "Resolution",
+        "tooltip": "Equivalent square edge of the result, round(sqrt(width*height)). 1024 for a 1 MP square."
       }
     }
   }
