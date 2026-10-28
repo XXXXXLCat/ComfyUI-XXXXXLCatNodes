@@ -4,7 +4,7 @@
 
 ComfyUI extension providing seven custom nodes and three interface features.
 
-- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector.
+- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size.
 - Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation.
 
 No third-party dependencies and no external service. Labels follow ComfyUI's language setting; Chinese and English are provided.
@@ -145,6 +145,32 @@ Identical to the official resolution node except for two differences.
 - A **Custom** aspect ratio is available, taking explicit width and height. In that mode the megapixel field is hidden and does not affect the result.
 
 All other behaviour matches the official node: same aspect ratio options, same live resolution preview, same rounding to the chosen multiple.
+
+## Fit Image to Size 🐈‍⬛
+
+Fits an image of any size onto an exact width and height using a single uniform scale factor, so the picture is never stretched. The target size comes from the inputs, so it can be wired straight from Resolution Selector.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| Width | 1024 | Target canvas width |
+| Height | 1024 | Target canvas height |
+| Multiple | 32 | Snap both dimensions to the nearest multiple of this value before scaling; 1 disables snapping |
+| Mode | crop | crop, pad |
+
+Modes:
+
+- **crop** — scales to cover the target box and centre-crops the overflow. No borders, at the cost of losing whatever falls outside the target ratio.
+- **pad** — scales to fit inside the target box, centres the result, and fills the rest with the chosen grey level. Every pixel kept, at the cost of borders.
+
+Outputs are the image plus the width and height actually produced.
+
+Why the multiple: some diffusion models (Qwen-Image among them) re-align images to their own grid internally. When the output already sits on that grid, the model skips its own resize and the picture is not softened by a second resample.
+
+Limits:
+
+- Both modes scale by a single uniform factor and never stretch. The further the target ratio sits from the input ratio, the more of the picture is cropped.
+- Padding is a flat colour; it does not extend the image content.
+- Pad colour only appears in pad mode.
 
 ## History gallery
 

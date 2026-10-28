@@ -8,6 +8,7 @@ from .any_switch import XXXXXLCatAnySwitch
 from .group_control import XXXXXLCatGroupControl
 from .node_control import XXXXXLCatNodeControl
 from .resolution_selector import XXXXXLCatResolutionSelector
+from .fit_image_to_size import XXXXXLCatFitImageToSize
 
 __all__ = [
     "XXXXXLCatVRAMSweep",
@@ -17,4 +18,5 @@ __all__ = [
     "XXXXXLCatGroupControl",
     "XXXXXLCatNodeControl",
     "XXXXXLCatResolutionSelector",
+    "XXXXXLCatFitImageToSize",
 ]

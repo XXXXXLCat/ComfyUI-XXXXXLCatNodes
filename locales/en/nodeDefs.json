@@ -258,5 +258,49 @@
         "tooltip": "Calculated height in pixels multiplied by the selected multiple."
       }
     }
+  },
+  "🐈‍⬛FitImageToSize": {
+    "display_name": "Fit Image to Size 🐈‍⬛",
+    "description": "Fit any image onto a target width x height canvas using a single uniform scale factor, so the picture is never stretched. 'crop' scales to cover the target box and centre-crops the overflow — no borders, but edge content is lost. 'pad' scales to fit inside the box and centres the result on a border of pad_color — every pixel kept, at the cost of borders. The requested width and height are snapped to the nearest 'multiple' (default 32) before scaling, because some diffusion pipelines — Qwen-Image among them — re-align images to their own grid internally and would otherwise resize a second time and soften the result; set multiple to 1 to use the requested size verbatim. The two size outputs report what was actually produced and can be wired straight into a latent node.",
+    "inputs": {
+      "image": {
+        "name": "Image",
+        "tooltip": "Image to fit."
+      },
+      "width": {
+        "name": "Width",
+        "tooltip": "Target canvas width. Wire it from Resolution Selector to keep both ends in sync."
+      },
+      "height": {
+        "name": "Height",
+        "tooltip": "Target canvas height."
+      },
+      "multiple": {
+        "name": "Multiple",
+        "tooltip": "Snap the target size to the nearest multiple of this value before scaling. Default 32 matches the grid Qwen-Image and other diffusion pipelines align to internally; set 1 to use the requested width and height verbatim."
+      },
+      "fit_mode": {
+        "name": "Mode",
+        "tooltip": "'crop' covers the target box and cuts the overflow; 'pad' fits inside it and fills the rest with pad color."
+      },
+      "pad_color": {
+        "name": "Pad Color",
+        "tooltip": "Grey level of the border added in pad mode (0 = black, 1 = white)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Image",
+        "tooltip": "The image scaled onto the target canvas."
+      },
+      "1": {
+        "name": "Width",
+        "tooltip": "Width actually produced, after snapping to the multiple."
+      },
+      "2": {
+        "name": "Height",
+        "tooltip": "Height actually produced, after snapping to the multiple."
+      }
+    }
   }
 }
