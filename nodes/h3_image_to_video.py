@@ -37,6 +37,9 @@ import torch
 
 from comfy_api.latest import io
 
+# 内部 API 边界：以下 comfy.* 子模块与 node_helpers 均为 ComfyUI 内部符号，
+# 不在公共 API 内。核心大版本升级时这些符号可能变动（命名/路径/签名），
+# 升级后需回测本节点的显存/设备路径与 NestedTensor/conditioning 处理。
 import comfy.model_management
 import comfy.nested_tensor
 import comfy.utils

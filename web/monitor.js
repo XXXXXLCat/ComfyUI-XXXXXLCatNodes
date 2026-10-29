@@ -224,6 +224,9 @@ function build() {
 
 function attach() {
   // 1) 新版前端：插入菜单栏设置组之前
+  // 内部 API：app.menu.settingsGroup.element 是 ComfyUI 菜单栏内部结构
+  // （非公共契约），前端大版本升级时可能变动；此处已做空值守卫，若失效
+  // 则回退到下方独立悬浮条，不会中断其他功能。升级后需回测本注入点。
   const settingsGroup = app.menu && app.menu.settingsGroup && app.menu.settingsGroup.element;
   if (settingsGroup) {
     settingsGroup.before(root);

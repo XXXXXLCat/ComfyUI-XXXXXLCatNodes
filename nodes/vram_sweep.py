@@ -67,6 +67,14 @@ class XXXXXLCatVRAMSweep(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # 释放显存是带副作用的操作：每次运行都必须真正执行，不能被缓存跳过。
+        # not_idempotent=True 只阻止不同实例间共享缓存，无法保证同实例每次重跑；
+        # 因此返回一个每次都不同的时间戳，使缓存键永远失效，强制重新执行。
+        import time
+        return time.monotonic()
+
+    @classmethod
     def execute(cls, offload_model, offload_cache, force_gc=False, anything=None, **kwargs):
         parts = []
         try:
