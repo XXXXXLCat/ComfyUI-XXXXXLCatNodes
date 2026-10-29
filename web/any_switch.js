@@ -4,6 +4,11 @@
 // slot.name is always kept equal to the backend schema id (input_1..input_9);
 // only the visible label is rewritten. Ports grow with connections (two by
 // default, up to nine); the first connection locks the type for all ports.
+//
+// COMPAT NOTE (audit F2): the port grow/shrink here mutates node.inputs via
+// litegraph addInput/removeInput. This works under the litegraph renderer but
+// must be reworked for the VueNodes/App renderer (same risk as Autogrow's
+// native growth). Revisit when that renderer flips on.
 
 import { app } from "../../scripts/app.js";
 

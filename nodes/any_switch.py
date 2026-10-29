@@ -8,6 +8,15 @@ the node type, and the front end locks every other port to that same type.
 Ports grow automatically as you connect (two by default, up to nine).
 """
 
+# ── 实现取舍与兼容性（审计 F2 结论）──────────────────────────────────────
+# 后端用 9 个固定的可选 io.AnyType 端口，前端再用 litegraph 的
+# addInput/removeInput 增删"视觉槽位"（后端 schema 始终是 9 个可选端口，
+# 未连接的端口传入 None）。评估过官方 io.Autogrow（动态增长端口）：其模板
+# 槽被强制为"仅连接"且 min 以下的槽为必填，与"空槽可选、只转发唯一有值
+# 的端口"的语义并不契合；且前端对 Autogrow 的原生增长同样基于 litegraph
+# 渲染器，VueNodes 下是否可用尚未验证。迁移并不能消除审计指出的 VueNodes
+# 兼容性风险，故保持现状。待 ComfyUI 前端 VueNodes/App 模式翻转时，再统一
+# 评估改为官方 widget 或 Autogrow 方案。
 from comfy_api.latest import io
 
 try:

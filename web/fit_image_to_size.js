@@ -152,6 +152,8 @@ function urlFromLoaderWidget(node) {
 /* Anything that ran and reported an image (a decode node, a save node…) leaves
    its output list behind; those entries carry enough to build a view URL. */
 function urlFromOutputs(node) {
+  // 内部 API：app.nodeOutputs 是 ComfyUI 前端内部属性（非公共契约），
+  // 前端大版本升级时可能变动；升级后需回测本预览取值逻辑。
   const images = app.nodeOutputs?.[node?.id]?.images;
   if (!Array.isArray(images) || !images.length) return null;
   const item = images[images.length - 1];
