@@ -24,7 +24,7 @@
    the megapixel input stays visible.
 */
 
-import { app } from "../../../scripts/app.js";
+import { app } from "../../scripts/app.js";
 
 const NODE_ID = "🐈‍⬛ResolutionSelector";
 const NAME = "XXXXXLCat.ResolutionSelector";
@@ -66,17 +66,25 @@ function snapToMultiple(value, multiple) {
   return roundHalfToEven(value / step) * step;
 }
 
-/* Hide a widget the way the rest of the package does: both flags, because the
-   two are consulted in different places, plus a collapsed computeSize so a
-   layout that measures widgets still gives back zero height. */
+/* Hide a widget the official, cross-renderer way. We still flip `hidden` and
+   collapse computeSize — litegraph's canvas layout measures widgets by `hidden`
+   and the two flags are consulted in different places by core — but we also
+   declare the widget absent from every *surface* (canvas / vueNode / panel) so
+   it disappears under the VueNodes renderer too, not just litegraph. The
+   original surfaces are stashed on first hide and restored when shown again. */
 function setHidden(widget, hidden) {
   if (!widget) return;
   if (widget.__rsSize === undefined) {
     widget.__rsSize = typeof widget.computeSize === "function" ? widget.computeSize : null;
+    widget.__rsSurfaces = widget.surfaces;
   }
   try {
     widget.hidden = hidden;
     if (widget.options) widget.options.hidden = hidden;
+    widget.surfaces =
+      hidden
+        ? { canvas: "never", vueNode: "never", panel: "never" }
+        : widget.__rsSurfaces;
   } catch (_) {}
   if (widget.__rsSize) widget.computeSize = hidden ? () => [0, -4] : widget.__rsSize;
 }

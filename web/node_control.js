@@ -10,7 +10,7 @@
    or bypassing a node by hand does.
 */
 
-import { app } from "../../../scripts/app.js";
+import { app } from "../../scripts/app.js";
 import {
   createControlPanel,
   registerControl,

@@ -27,7 +27,7 @@
    outputs the same size — the preview simply shows a dash.
 */
 
-import { app } from "../../../scripts/app.js";
+import { app } from "../../scripts/app.js";
 
 const NODE_ID = "🐈‍⬛FitImageToSize";
 const NAME = "XXXXXLCat.FitImageToSize";
@@ -51,17 +51,24 @@ function numberValue(node, name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-/* Hide a widget the way the rest of the package does: both flags, because the
-   two are consulted in different places, plus a collapsed computeSize so a
-   layout that measures widgets still gives back zero height. */
+/* Hide a widget the official, cross-renderer way. We still flip `hidden` and
+   collapse computeSize — litegraph's canvas layout measures widgets by `hidden`
+   and the two flags are consulted in different places by core — but we also
+   declare the widget absent from every *surface* (canvas / vueNode / panel) so
+   it disappears under the VueNodes renderer too, not just litegraph. */
 function setHidden(widget, hidden) {
   if (!widget) return;
   if (widget.__fsSize === undefined) {
     widget.__fsSize = typeof widget.computeSize === "function" ? widget.computeSize : null;
+    widget.__fsSurfaces = widget.surfaces;
   }
   try {
     widget.hidden = hidden;
     if (widget.options) widget.options.hidden = hidden;
+    widget.surfaces =
+      hidden
+        ? { canvas: "never", vueNode: "never", panel: "never" }
+        : widget.__fsSurfaces;
   } catch (_) {}
   if (widget.__fsSize) widget.computeSize = hidden ? () => [0, -4] : widget.__fsSize;
 }

@@ -67,10 +67,48 @@ from comfy_api.latest import ComfyExtension  # noqa: E402
 
 
 class XXXXXLCatExtension(ComfyExtension):
-    """Registers the V3 🐈‍⬛XXXXXLCat nodes through the new V3 node API."""
+    """Registers the V3 🐈‍⬛XXXXXLCat nodes through the new V3 node API and
+    wires up the package-level monkeypatches once ComfyUI core is ready."""
 
     async def get_node_list(self):
         return list(_NODE_CLASSES)
+
+    async def on_load(self) -> None:
+        # Core is up by the time on_load runs: nodes.py awaits it immediately
+        # after comfy_entrypoint() returns and before node schemas are
+        # collected, so this is the correct home for install-time patches —
+        # not comfy_entrypoint() itself. Each install() carries its own
+        # idempotency guard, so re-entry (e.g. a reload) is safe.
+
+        # The packs only ship zh + en, and core looks a bundle up by its exact
+        # folder name — so a zh-TW UI would show our nodes in English. Alias
+        # every zh-* locale to the zh bundle (matches what web/i18n.js does).
+        try:
+            from . import locale_alias
+
+            locale_alias.install()
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
+
+        # Per-user asset isolation (input/<user>/ & output/<user>/; the legacy
+        # global input/ output/ pool is hidden from every account). Only takes
+        # effect when ComfyUI is launched with --multi-user; no-op otherwise.
+        # Login stays on ComfyUI's native "select user" flow — no password gate.
+        try:
+            from .nodes import multi_user_assets
+
+            multi_user_assets.install()
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
+
+        # History gallery: a sidebar tab listing every file in the account's own
+        # output/ and input/ trees, with download and on-disk delete.
+        try:
+            from .nodes import history_gallery
+
+            history_gallery.install()
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[XXXXXLCat] history gallery skipped: {exc}")
 
 
 # Kept in one place so the load log can never drift from the real registration.
@@ -87,36 +125,9 @@ _NODE_CLASSES = [
 
 
 async def comfy_entrypoint() -> XXXXXLCatExtension:
-    # The packs only ship zh + en, and core looks a bundle up by its exact folder
-    # name — so a zh-TW UI would show our nodes in English. Alias every zh-*
-    # locale to the zh bundle (matches what web/i18n.js does).
-    try:
-        from . import locale_alias
-
-        locale_alias.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] zh-* locale alias skipped: {exc}")
-
-    # Per-user asset isolation (input/<user>/ & output/<user>/; the legacy global
-    # input/ output/ pool is hidden from every account). Only takes effect when
-    # ComfyUI is launched with --multi-user; no-op (and zero impact) otherwise.
-    # Login stays on ComfyUI's native "select user" flow — no password gate.
-    try:
-        from .nodes import multi_user_assets
-
-        multi_user_assets.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] multi-user asset isolation skipped: {exc}")
-
-    # History gallery: a sidebar tab listing every file in the account's own
-    # output/ and input/ trees, with download and on-disk delete.
-    try:
-        from .nodes import history_gallery
-
-        history_gallery.install()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[XXXXXLCat] history gallery skipped: {exc}")
-
+    # Patches (locale alias, multi-user isolation, history gallery) now live in
+    # XXXXXLCatExtension.on_load(), which core awaits right after this returns —
+    # so the entry point's only job is to hand back the extension.
     return XXXXXLCatExtension()
 
 

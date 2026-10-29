@@ -11,7 +11,7 @@
    directly, which is exactly what muting or bypassing a node by hand does.
 */
 
-import { app } from "../../../scripts/app.js";
+import { app } from "../../scripts/app.js";
 import { pick } from "./i18n.js";
 
 /* Chrome strings for the panel itself. Subject-specific copy comes from the
