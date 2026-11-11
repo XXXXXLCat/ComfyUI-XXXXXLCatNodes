@@ -1,0 +1,2847 @@
+/* ============================================================================
+ * 本包对上方 vendored 画布（ComfyUI-Infinite-Canvas，MIT）的本地调整。
+ * 升级上游 dist 时这个文件会被覆盖，改完记得把下面几条规则补回来。
+ *
+ * 改动点：
+ *   1) 画布内的菜单改到左侧栏底部，现在只留「亮色 / 暗色」一项。
+ *      「退出画布」已从 .cm-pop 移到 .library-tabs 的第一项（提示词上方），
+ *      见 index-*.js 里的 .xcat-exit-tab；圆形按钮隐藏。
+ *   2) .cm-pop 的 v-if 已在 assets/index-*.js 中被改成常真
+ *      （搜索注释 xcat: 右下角菜单改为顶部常驻），否则它默认是收起状态。
+ *   3) 菜单里「释放显存」按钮已从渲染里去掉；「亮色模式」从 .library-tabs
+ *      移到 CanvasMenu 的 .cm-pop（搜索注释 xcat: 亮色 / 暗色留在侧栏底部）。
+ *   4) 右上角的「提示词 / 资产库 / 日志」三个胶囊改成 ComfyUI 那样的左侧栏。
+ *   5) 底栏的「画布管理」「资产管理」搬到左侧栏（见 .xcat-rail-sep
+ *      与 index-*.js 里 LibraryDock 的追加按钮），底栏只留聚焦 / 全览 / 工作流配置。
+ *   6) 主题项里同时放了太阳与月亮两个 svg、两段文案，显隐交给 html[data-theme]
+ *      —— 上游这个组件切主题时不会重新渲染，模板三元表达式换图标不生效。
+ *   7) 左侧栏与它展开的面板，配色整体改成 ComfyUI 的语义色（下面 --cg-*）：
+ *      画布原来那套偏蓝紫的 --c-* 令牌在本区域被重映射，一次覆盖面板内的
+ *      标题 / 计数 / 分类胶囊 / 切换器 / 输入框 / 保存按钮 / 页脚 / 空态。
+ *   8) 画布背景改抄 ComfyUI dark/light 调色板：--c-bg 底色 + 两层
+ *      <Background variant="lines">（10px 细线 / 100px 强调线），见文件末尾。
+ *   9) 三个贴栏面板（提示词 / 资产库 / 任务队列）的顶部留白按官方
+ *      SidebarTabTemplate.vue 补齐：.lib-head = min-h-16(64px) 垂直居中，
+ *      header 后第一块内容 = pt-2(8px)。原来内容直接压在 border-b 上。
+ *  10) 资产库标题文字大小照「画廊」/ 官方 Tab：面板标题 16px/700
+ *      （SidebarTabTemplate 的 truncate font-bold 继承 text-base），分类胶囊
+ *      text-sm(14px) + h-8(32px) + px-2.5(10px) + rounded-lg(8px) +
+ *      border-none + gap-2(8px)，选中 bg-accent。原来标题 13px/600、
+ *      胶囊 24px 药丸 + 11px 字。
+ *  11) 三个贴栏面板的边距 / 间距对齐「画廊」与官方 4px 网格：水平边距
+ *      12px -> px-4(16px)（header / 分类行 / 列表 / 网格 / 输入区 / 页脚
+ *      全部对齐同一条左边缘）；header gap 10px -> gap-2(8px)；分类行下边距、
+ *      输入区与页脚的 10px、空态 18px、更多 4px 一律收进 8px / 16px 网格；
+ *      卡片圆角 9px -> rounded-lg(8px)。原来标题放大后左右仍留 12px 显挤。
+ *  12) 面板滚动条：上游全局写了 `*{scrollbar-width:none}` +
+ *      `*::-webkit-scrollbar{width:0;display:none}`，把滑块全藏了（能滚但看不见）。
+ *      这里照官方 .scrollbar-custom（SidebarTabTemplate.vue 的 body）补回：
+ *      thin + 10px 轨道 + 6px 圆角滑块 + 透明轨道，覆盖 .lib-list /
+ *      .asset-grid / .float-body / .am-grid；亮色滑块用 --border 而不是 --muted
+ *      （后者在浅底上几乎不可见）。
+ *  13) 画布管理 / 资产管理 / 工作流配置三个弹窗的**内容区**照 ComfyUI 的
+ *      模板对话框（WorkflowTemplateSelectorDialog）与资产浏览器
+ *      （AssetBrowserModal）重排：内容容器 px-6/pb-10、过滤条 px-6/pb-4、
+ *      按钮 h-8 + rounded-lg + text-xs、输入 h-9、Tag h-6 + rounded-sm、
+ *      左栏 14rem / bg-card / NavItem(px-4 py-3 text-sm rounded-md)、
+ *      右面板 w-72(288px)、网格 minmax(15rem|min(240px,30vw))、卡片
+ *      rounded-lg|rounded-2xl + p-2、空态 40px 图标 + 18px/14px 文案。
+ *      原来这里是 10–13px 混排 + 10/12/14px 圆角 + 彩色描边。
+ *  14) 弹窗上限补成 BaseModalLayout 的 size="md"：max-width 1400px /
+ *      max-height 80vh（上游是 96vw / 92vh）。
+ *
+ * 选择器统一加 #app 前缀：上游是 scoped 样式（.cm-pop[data-v-xxx]，权重 0,2,0 ——
+ * 属性选择器按 class 计数），body / html 这种元素前缀反而更低，压不住它。
+ * 用 id 前缀稳稳胜出，也不用 !important，还不依赖样式表顺序。
+ * ========================================================================== */
+
+/* --------------------------------------------------------------------------
+ * ComfyUI 语义色。数值全部取自 ComfyUI 官方前端，不是目测：
+ *
+ * 出处 ①：comfyui_frontend_package/static/assets/main-BHksRiL4.css 的 :root
+ *     --background      = var(--color-charcoal-800)  #171718
+ *     --foreground      = var(--color-white)         #ffffff
+ *     --secondary/--card= var(--color-charcoal-600)  #262729
+ *     --muted           = var(--color-charcoal-300)  #3c3d42   选中底
+ *     --muted-foreground= var(--color-smoke-800)     #8a8a8a   未选中前景
+ *     --accent          = var(--color-charcoal-400)  #313235   hover 底
+ *     --border          = var(--color-charcoal-200)  #494a50
+ *     --input           = var(--color-charcoal-400)  #313235
+ *     --primary         = var(--color-azure-600)     #0b8ce9
+ *
+ * 出处 ②：8199 实例上 getComputedStyle 复核官方侧栏，与源码一致
+ *     栏容器 56×767、底 rgb(23,23,24)、右边线 = border-border/50（--border 半透明）、
+ *     shadow-md = 1px 1px 8px 0 rgba(0,0,0,.4)、
+ *     按钮 bg-transparent + text-muted-foreground + hover:bg-accent，
+ *     选中 .side-bar-button-selected = bg-muted + text-foreground（SidebarIcon.vue）。
+ *
+ * 亮色：上游前端包只出暗色一套（CSS 里没有 light 主题块，:root 本身就是 dark），
+ * 所以亮面按同一套 charcoal / smoke 色阶做镜像（浅色端取 smoke，深色端取 charcoal），
+ * 不自造颜色。
+ * ------------------------------------------------------------------------ */
+#app {
+    --cg-bg: #171718;              /* --background   charcoal-800 */
+    --cg-fg: #ffffff;              /* --foreground   white */
+    --cg-secondary: #262729;       /* --secondary    charcoal-600 */
+    --cg-muted: #3c3d42;           /* --muted        charcoal-300 */
+    --cg-muted-fg: #8a8a8a;        /* --muted-foreground smoke-800 */
+    --cg-accent: #313235;          /* --accent       charcoal-400 */
+    --cg-border: #494a50;          /* --border       charcoal-200 */
+    --cg-input: #313235;           /* --input        charcoal-400 */
+    --cg-primary: #0b8ce9;         /* --primary      azure-600 */
+    --cg-primary-fg: #ffffff;      /* primary 按钮前景 = text-foreground */
+    /* ComfyUI --destructive = --color-coral-700 #b33a3a（main-*.css :root），
+       只给「删除」类文案用，不做填充底。 */
+    --cg-destructive: #b33a3a;
+    --cg-shadow-color: rgb(0 0 0 / 0.4);
+    /* border-border/50 —— 官方栏容器就是这条半透明线 */
+    --cg-line: color-mix(in srgb, var(--cg-border) 50%, transparent);
+    /* shadow-md，官方栏容器用的就是它 */
+    --cg-shadow: 1px 1px 8px 0 var(--cg-shadow-color);
+    --cg-radius-lg: 8px;           /* 按钮 / 输入 rounded-lg */
+    /* 滚动条滑块：官方 .scrollbar-custom 用 --muted（见文件下方「面板滚动条」） */
+    --cg-scroll: var(--cg-muted);
+}
+
+html[data-theme="light"] #app {
+    --cg-bg: #f3f3f3;              /* smoke-100 */
+    --cg-fg: #09090a;              /* charcoal-950 */
+    --cg-secondary: #e9e9e9;       /* smoke-200 */
+    --cg-muted: #d9d9d9;           /* smoke-400 */
+    --cg-muted-fg: #55565e;        /* charcoal-100 */
+    --cg-accent: #e9e9e9;          /* smoke-200 */
+    --cg-border: #b4b4b4;          /* smoke-600 */
+    --cg-input: #ffffff;           /* white */
+    --cg-primary: #0b8ce9;         /* azure-600 */
+    --cg-primary-fg: #ffffff;
+    --cg-destructive: #b33a3a;     /* coral-700，亮底也用同一档 */
+    --cg-shadow-color: rgb(0 0 0 / 0.08);
+    /* 亮色下 --muted(#d9d9d9) 压在 #f3f3f3 面板上几乎看不见（对比度 1.2），
+       滑块改用 --border(smoke-600 #b4b4b4) —— 1.75，与暗色 #3c3d42 压 #171718
+       的 1.62 相当，仍是官方色阶里的颜色，不另造色。 */
+    --cg-scroll: var(--cg-border);
+}
+
+/* --------------------------------------- 侧栏尺度（照抄 ComfyUI 的真实值） */
+/* 出处：comfyui_frontend_package/static 的 SidebarIcon.vue、SideToolbar.vue，
+   以及 :root 上的 --sidebar-* 变量。贴边态（connected-sidebar）实测：
+     --sidebar-width            = 48px(floating) + 4px(padding) * 2 = 56px
+     --sidebar-item-height      = 56px
+     --sidebar-icon-size        = 1rem = 16px（.side-bar-button-icon 的 font-size）
+     图标实际渲染尺寸           = 19.2px：UnoCSS 的 .icon-[lucide--*] /
+                                     .icon-[comfy--*] 是 width:1.2em;height:1.2em，
+                                     1.2 × 16px = 19.2px（8199 实测 19.1875px）；
+                                     只有 PrimeIcons（pi pi-*）才是 16px
+     标签                       = text-2xs = 0.625rem = 10px，leading-none，
+                                     text-center / w-max / max-w-[52px] /
+                                     line-clamp-2 / whitespace-normal
+     图标与标签间距             = gap-2 = 8px
+     按钮内边距                 = p-2 = 8px；栏容器 connected-sidebar 是 4px 0
+     圆角                       = rounded-none = 0
+   颜色见上方 --cg-*（--muted / --accent / --foreground / --muted-foreground）。 */
+/* ComfyUI 的 UI 字体是 Inter：`main-*.css` 里 body 是 `font-family:Inter,Arial,sans-serif`
+   配 `@font-face{font-family:Inter;src:url(../fonts/inter-latin-normal.woff2)}`。
+   iframe 是独立文档，主页面加载的字体在这里不生效，所以按**官方同名 Inter** 再声明一次
+   （dist 里原本就写着 `font-family:Inter,Arial,sans-serif` 的几处 —— 顶部标签条、
+   保存弹窗 —— 以前因为这个名字没注册，实际一直在回落 Arial）。
+   另留 "XCat Inter" 作别名给侧栏令牌 --xcat-rail-font 用。
+   路径走 ComfyUI 根路由（server.py 的 `web.static('/', web_root)`），实测可直取。 */
+@font-face {
+    font-family: "Inter";
+    src: url("/fonts/inter-latin-normal.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Inter";
+    src: url("/fonts/inter-latin-italic.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "XCat Inter";
+    src: url("/fonts/inter-latin-normal.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* 上游 body 是 `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`
+   （系统栈），与 ComfyUI 的 `Inter, Arial, sans-serif` 不是一套字 —— 这是画布内
+   文字看着和主界面不像的根因。这里换成官方那一条，面板 / 按钮 / 列表全部继承。 */
+html,
+body {
+    font-family: "XCat Inter", Inter, Arial, sans-serif;
+}
+
+/* 上游只 reset 了 button,input{font:inherit}；textarea / select 仍会用系统 UI 字体 */
+#app textarea,
+#app select {
+    font-family: inherit;
+}
+
+#app {
+    --xcat-rail-w: 56px;
+    --xcat-rail-item-h: 56px;
+    /* 官方 .icon-[...] 是 1.2em × 16px = 19.2px，不是 16px */
+    --xcat-rail-icon: 19.2px;
+    /* 与 ComfyUI 一致：Inter / Arial / sans-serif，字重 500（Button 基类 font-medium） */
+    --xcat-rail-font: "XCat Inter", Inter, Arial, sans-serif;
+    --xcat-rail-weight: 500;
+}
+
+/* ------------------------------------------------- 侧栏底部：亮色 / 暗色 */
+/* 不再浮在右上角：沉到左侧栏底部，与上面几个入口同一列、同一套外观。
+   .cm-pop 里现在只剩主题一项；退出画布已移到侧栏顶部（提示词上方）。 */
+#app .canvas-menu {
+    top: auto;
+    right: auto;
+    bottom: 4px;
+    left: 0;
+    width: var(--xcat-rail-w);
+    /* 比侧栏高一层，压住 .library-tabs 的通高区域 */
+    z-index: 7;
+}
+
+/* 原来的汉堡圆形按钮不再需要，入口本身就是这一项 */
+#app .canvas-menu .cm-fab {
+    display: none;
+}
+
+/* 浮层外壳全部拆掉，只留里面那两个按钮 */
+#app .canvas-menu .cm-pop {
+    position: static;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+#app .canvas-menu .cm-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: var(--xcat-rail-item-h);
+    padding: 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-family: var(--xcat-rail-font);
+    font-size: 10px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+    letter-spacing: 0;
+    max-width: var(--xcat-rail-w);
+    white-space: nowrap;
+}
+
+#app .canvas-menu .cm-item:hover {
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+#app .canvas-menu .cm-item svg {
+    width: var(--xcat-rail-icon);
+    height: var(--xcat-rail-icon);
+    flex: 0 0 auto;
+}
+
+/* 侧栏第一项「退出画布」：排在「提示词」上方。文字与图标按主题取
+   --foreground（--cg-fg）：暗色 #ffffff 纯白、亮色 #09090a 纯黑。
+   亮色下栏底是 #f3f3f3，纯白会看不见，所以不能写死白色。
+   不走侧栏默认的 --cg-muted-fg（暗 #8a8a8a / 亮 #55565e）；
+   选择器比 .lib-tab:hover 多一个类，hover 时也不会被覆盖。 */
+#app .library-dock .library-tabs .xcat-exit-tab,
+#app .library-dock .library-tabs .xcat-exit-tab:hover {
+    color: var(--cg-fg);
+}
+
+#app .library-dock .library-tabs .xcat-exit-tab svg {
+    color: inherit;
+}
+
+/* 退场动画是给浮层写的（translateY），常驻后不需要 */
+#app .canvas-menu .cm-fade-enter-from,
+#app .canvas-menu .cm-fade-leave-to {
+    opacity: 1;
+    transform: none;
+}
+
+/* ------------------------------------------------- 亮色 / 暗色（侧栏底部） */
+/* 两个图标、两段文字都在 DOM 里，按主题显示其中一组。
+   暗色下显示太阳 +「亮色模式」（点击切亮），亮色下显示月亮 +「暗色模式」。
+   之所以不用模板三元表达式：这个组件切主题时不会重新渲染，表达式换不动。
+   按钮已从 .library-tabs 移到 CanvasMenu 的 .cm-pop（见 bundle xcat 补丁），
+   所以选择器不再限定 .lib-tab —— 用 #app 下的类名直接命中，两处都兼容。 */
+#app .xcat-ico-sun,
+#app .xcat-ico-moon,
+#app .xcat-lbl-light,
+#app .xcat-lbl-dark {
+    display: none;
+}
+
+#app .xcat-lbl-light,
+#app .xcat-lbl-dark {
+    line-height: 1;
+    white-space: nowrap;
+}
+
+html:not([data-theme="light"]) #app .xcat-ico-sun,
+html[data-theme="light"] #app .xcat-ico-moon {
+    display: block;
+}
+
+html:not([data-theme="light"]) #app .xcat-lbl-light,
+html[data-theme="light"] #app .xcat-lbl-dark {
+    display: block;
+}
+
+/* ------------------------------------------------------------ 左侧栏 */
+/* 上游是右上的胶囊排 + 下方面板；改成 ComfyUI 的左侧通高竖栏：
+   实色底（--background）+ 右侧 border-border/50 + shadow-md，面板紧贴它右边通高展开。 */
+#app .library-dock {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: 0;
+    gap: 0;
+    align-items: stretch;
+    flex-direction: row;
+}
+
+#app .library-dock .library-tabs {
+    align-self: stretch;
+    flex: 0 0 var(--xcat-rail-w);
+    flex-direction: column;
+    gap: 0;
+    padding: 4px 0;
+    border: 0;
+    border-right: 1px solid var(--cg-line);
+    border-radius: 0;
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+/* 每一项：16px 图标在上、10px 标签在下，整列满宽、直角 */
+#app .library-dock .lib-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: var(--xcat-rail-item-h);
+    padding: 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-family: var(--xcat-rail-font);
+    font-size: 10px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+    letter-spacing: 0;
+    /* 与 .side-bar-button-label 的 max-w 一致：栏宽 - padding */
+    max-width: var(--xcat-rail-w);
+    white-space: nowrap;
+}
+
+#app .library-dock .lib-tab svg {
+    width: var(--xcat-rail-icon);
+    height: var(--xcat-rail-icon);
+    flex: 0 0 auto;
+}
+
+/* 标签照 SidebarIcon.vue 的 .side-bar-button-label：
+   line-clamp-2 w-max max-w-[calc(var(--sidebar-width)-var(--sidebar-padding))]
+   text-center text-2xs leading-none wrap-break-word whitespace-normal。
+   上游原来是裸文本节点（带首尾空格），这里换成独立 span，才能单独控制字号、
+   行高、换行与最大宽度，位置与官方一致。 */
+#app .library-dock .library-tabs .xcat-tab-label {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    width: max-content;
+    max-width: calc(var(--xcat-rail-w) - 4px);
+    text-align: center;
+    font-size: 10px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+/* 选中：--muted 底 + --foreground 字，和 .side-bar-button-selected 一致 */
+#app .library-dock .lib-tab.is-active {
+    border-color: transparent;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* hover 放在选中之后 —— ComfyUI 的 SidebarIcon.vue 里也是 `.side-bar-button-selected`
+   写在 `.side-bar-button:hover` 前面（同权重靠顺序取胜），所以悬停在选中项上会转成
+   --accent，比选中再暗一档，有反馈。顺序反过来就没有这个反馈了。 */
+#app .library-dock .lib-tab:hover {
+    border-color: transparent;
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+/* 侧栏入口叫「画布」（面板标题仍是「画布管理」）；打开时这一项要像其它 tab
+   那样高亮。它没有 is-active 绑定（bundle 里那几个追加按钮只绑 onClick），
+   用 :has() 从面板反推 —— 面板开着就亮。改名后选择器跟着改成 title="画布"。
+   注意不能写成 `:has(.float-window:has(.cm))`：规范禁止 :has 套 :has，
+   Chrome 会整条判为无效选择器。 */
+#app:has(.float-window .cm) .library-dock .lib-tab[title="画布"] {
+    border-color: transparent;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* 分组之间的细线：贴栏面板类（提示词 / 资产库 / 日志 / 画布管理）与弹窗类
+   （资产管理 / 工作流配置）两组；主题开关已移到栏底，与 ComfyUI 侧栏项目组
+   留白的手法对应。线是静态 vnode，位置在 bundle 里（画布管理之后、资产管理
+   之前），挪动靠 `.workbuddy/tmp/patch/patch_rail_sep.py`。 */
+#app .library-dock .library-tabs .xcat-rail-sep {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 24px;
+    height: 1px;
+    margin: 6px 0;
+    background: var(--cg-line);
+    pointer-events: none;
+}
+
+/* --------------------------------------------------------- 面板配色重映射 */
+/* 面板内的类（lib-head / lib-title / lib-count / lib-cats / lib-cat / lib-switch /
+   lib-list / lib-empty / lib-more / lib-compose / compose-* / lib-foot）在上游
+   scoped 样式里全部引用画布自己的 --c-* 令牌。在这里把 --c-* 就地指向 --cg-*，
+   一次覆盖它们全部，且不用逐个补丁 —— 升级 dist 后这段仍然有效。
+   等价关系：surface(面板底)=--background，surface-3(输入)=--input，
+   text=--foreground，muted=--muted-foreground，line=border/50，accent=--primary。 */
+#app .library-dock {
+    --c-surface: var(--cg-bg);
+    --c-surface-2: var(--cg-secondary);
+    --c-surface-3: var(--cg-input);
+    --c-text: var(--cg-fg);
+    --c-strong-text: var(--cg-fg);
+    --c-text-dim: var(--cg-muted-fg);
+    --c-muted: var(--cg-muted-fg);
+    --c-muted-2: var(--cg-muted-fg);
+    --c-line: var(--cg-line);
+    --c-line-strong: var(--cg-border);
+    --c-border-strong: var(--cg-border);
+    /* 上游把「强调色」当成主色用（选中态、徽章、焦点环都是它）。ComfyUI 的
+       --primary(azure #0b8ce9) 只给极少数真正的确认动作（ExecuteButton /
+       ConfirmationDialog 的 variant="primary"），列表选中、徽章、tab 一律走
+       bg-secondary / bg-muted + border-foreground/60 —— 全是中性灰白。
+       所以这里 accent 指向 --foreground，不再用蓝色。 */
+    --c-accent: var(--cg-fg);
+    --c-accent-weak: color-mix(in srgb, var(--cg-fg) 12%, transparent);
+    --c-accent-ink: var(--cg-fg);
+    --c-on-accent: var(--cg-bg);
+    --c-shadow: var(--cg-shadow-color);
+    /* 上游 .compose-save 直接用这个全局亮黄，这里换成 --foreground（白/近黑） */
+    --accent-yellow: var(--cg-fg);
+    color: var(--cg-fg);
+}
+
+/* 面板紧贴竖栏右侧，通高、直角，与栏同底色 —— ComfyUI 的 .side-bar-panel 就是
+   bg-background，靠 header 的 border-b 与内容区分，不换底色也不叠重阴影 */
+#app .library-dock .library-panel {
+    flex: 0 0 auto;
+    width: min(360px, 40vw);
+    height: 100%;
+    border: 0;
+    border-right: 1px solid var(--cg-line);
+    border-radius: 0;
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+    box-shadow: var(--cg-shadow);
+}
+
+/* 面板头：ComfyUI 的 SidebarTabTemplate.vue header 是
+   `flex min-h-16 items-center justify-between border-b px-4`
+   —— min-h-16 = calc(var(--spacing) * 16) = 4px × 16 = 64px（main-*.css 实测
+   --spacing:.25rem），内容垂直居中；上游这里只有 padding:12px 12px 8px，
+   实测高度 38~47px，标题紧贴顶部画布标签栏，看起来和下方内容糊在一起。
+   水平边距按 px-4 取 16px；下面所有内容块也一起改成 16px（见下一条），
+   这样标题 / 分类胶囊 / 卡片网格 / 列表项左边缘仍在同一条线上。
+   header 内部间距取官方 gap-2 / 画廊 .xog-head 的 8px（上游是 10px）。 */
+#app .library-dock .lib-head {
+    min-height: 64px;
+    padding: 0 16px;
+    gap: 8px;
+    border-bottom: 1px solid var(--cg-line);
+}
+
+/* header 下方第一块内容（提示词 .lib-list / 资产库 .lib-cats / 任务队列
+   .lib-list.history-list / 可能的 .lib-compose）上游 padding-top 全是 0，
+   实测 gapHeadFirst = 0，第一个控件直接压在 header 的 border-b 上。官方
+   header slot 里 TabList 是 `px-4 pt-2 pb-px`、SidebarTopArea 是 `px-4 py-2`、
+   JobFilterActions 是 `px-4 py-2`，即顶部统一 pt-2 = 4px × 2 = 8px。
+   这里只补顶部 8px，水平与底部沿用上游，不改变任何内容尺寸与位置。 */
+#app .library-dock .library-panel > .lib-head + * {
+    padding-top: 8px;
+}
+
+/* 水平边距：官方 SidebarTabTemplate 的 px-4、SidebarTopArea 的 px-4 py-2、
+   TabList 的 px-4 pt-2 pb-px，以及画廊 .xog-head / .xog-tabs /
+   .xog-searchrow 全都是 16px。上游这里一律 12px，改完字号后左右显挤，
+   且与下面各块不对齐。一次把六类内容块的左右都提到 16px，
+   左边缘统一；上下 padding 仍由上面的 pt-2 规则与各块自己的规则负责。 */
+#app .library-dock .lib-cats,
+#app .library-dock .lib-list,
+#app .library-dock .asset-grid,
+#app .library-dock .lib-compose,
+#app .library-dock .lib-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+/* 块间间距收进 4px 网格：上游分类行 / 输入区 / 页脚是 10px、
+   空态 18px、更多 4px，和 8px 体系混着会显得参差。
+   分类行下方留 8px（画廊是 pb-px 1px，但画廊在分类行与网格之间还有一整行
+   32px 搜索框 padding:8px 16px；本面板没有搜索行，直接接网格，
+   所以取 pt-2 同值 8px，既不贴线也不空一大截）。 */
+#app .library-dock .lib-cats,
+#app .library-dock .lib-compose,
+#app .library-dock .lib-foot {
+    padding-bottom: 8px;
+}
+
+#app .library-dock .lib-foot {
+    padding-top: 8px;
+}
+
+#app .library-dock .lib-empty {
+    margin: 16px 0;
+}
+
+#app .library-dock .lib-more {
+    margin: 8px 0;
+}
+
+/* 卡片圆角 9px -> rounded-lg 8px（画廊 .xog-card / 官方按钮与输入） */
+#app .library-dock .asset-cell {
+    border-radius: var(--cg-radius-lg);
+}
+
+/* 面板标题：官方 SidebarTabTemplate.vue 的 <span class="truncate font-bold">
+   没写字号，继承 --text-base = 1rem = 16px、字重 700；历史画廊的标题也是
+   16px/700。上游这里写死 13px/600，比画廊小一号。三个贴栏面板共用 .lib-title，
+   一起改才不出现「资产库大、提示词小」。 */
+#app .library-dock .lib-title {
+    color: var(--cg-fg);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+#app .library-dock .lib-count,
+#app .library-dock .lib-more,
+#app .library-dock .lib-empty,
+#app .library-dock .lib-foot {
+    color: var(--cg-muted-fg);
+}
+
+#app .library-dock .lib-foot {
+    border-top: 1px solid var(--cg-line);
+}
+
+/* 提示词面板里输入卡片下面（footer 上方）那条线去掉：分隔线只保留卡片上方一条，
+   卡片下方不再压线（否则卡片被上下两条线夹住）。
+   用 .lib-compose + .lib-foot 相邻兄弟精准命中提示词面板；
+   资产库 / 任务队列的 footer 没有 .lib-compose 前邻，顶线保持不动。
+   footer 的 padding-top:8px 仍在，间距不变，只是不画线。 */
+#app .library-dock .lib-compose + .lib-foot {
+    border-top: 0;
+}
+
+/* 输入区（提示词面板 .lib-compose = 「未命名 / 输入要收藏的提示词… / 收藏」那张卡片）
+   与上方列表之间补一条分隔线。上游 .lib-compose 完全没有边界，列表最后一张卡
+   直接顶着输入卡片，层级看不出来；官方 ComfyUI 里贴边输入区（SidebarTopArea、
+   JobFilterActions、队列底部输入条）都是 `border-b` / `border-t` + py-2 的写法，
+   颜色用 --border，与 .lib-foot 的顶线同一套。
+   线画在 .lib-compose 自身上（它本来就是面板通宽容器，左右各 16px 只作用于子元素），
+   所以线和 header 的 border-b / footer 的 border-t 一样通到面板左右边缘；
+   再补 padding-top:8px，与 .lib-foot 的 padding-top:8px 同一节奏，
+   卡片不会贴死在线上。 */
+#app .library-dock .lib-compose {
+    padding-top: 8px;
+    border-top: 1px solid var(--cg-line);
+}
+
+/* 圆角与 ComfyUI 的 rounded-lg（按钮 / 输入）对齐，取消画布原有的 10px / 7px */
+#app .library-dock .compose-box {
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+}
+
+/* 焦点环：ComfyUI 的 --ring 就是 --muted-foreground（灰），不是蓝色光晕 */
+#app .library-dock .compose-box:focus-within {
+    border-color: var(--cg-muted-fg);
+}
+
+#app .library-dock .compose-name {
+    border-bottom: 1px solid var(--cg-line);
+    color: var(--cg-fg);
+}
+
+#app .library-dock .compose-text {
+    color: var(--cg-fg);
+}
+
+/* 保存：ComfyUI 的 Button secondary 变体 = bg-secondary text-foreground
+   hover:bg-accent。这类面板内的动作按钮在官方都走 secondary，不占用 primary 蓝。 */
+#app .library-dock .compose-save {
+    border: 0;
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+}
+
+#app .library-dock .compose-save:hover:not(:disabled) {
+    background: var(--cg-accent);
+}
+
+/* 分类胶囊（全部 / 图片 / 视频 / 音频）：照「画廊」的 .xog-chip，也就是
+   ComfyUI 官方 components/tab/Tab.vue + tab.variants.ts 的真值：
+     base     = cursor-pointer rounded-lg(8px) border-none text-sm(14px)
+     Tab.vue  = flex h-8(32px) items-center justify-center px-2.5(10px)
+     TabList  = gap-2(8px)
+     active   = bg-accent(--cg-accent #313235) text-foreground(--cg-fg)
+     inactive = bg-transparent text-muted-foreground(--cg-muted-fg)
+               hover:bg-accent
+   上游原本是 24px 药丸(999px) + 1px 边框 + 11px 字，文字明显比画廊小。
+   只放大字号会把 14px 字塞进 24px 药丸里，所以尺寸一并对齐画廊。 */
+#app .library-dock .lib-cats {
+    gap: 8px;
+    flex-wrap: wrap;                /* 画廊 .xog-tabs 也是 wrap，窄面板不溢出 */
+    /* 水平 16px / 下边距 8px 由上方「统一水平边距 / 块间间距」两条规则给出 */
+}
+
+#app .library-dock .lib-cat {
+    flex: 0 0 auto;                  /* 官方 Tab.vue 的 shrink-0，防 14px 字被挤扁 */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--cg-radius-lg);
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-size: 14px;
+    line-height: 1;
+}
+
+#app .library-dock .lib-cat:hover,
+#app .library-dock .lib-cat.is-active {
+    border: 0;
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+/* 来源切换器：轨道 --input，选中块 --background（比轨道深，与 ComfyUI 一致） */
+#app .library-dock .lib-switch {
+    background: var(--cg-input);
+}
+
+#app .library-dock .lib-switch button {
+    color: var(--cg-muted-fg);
+}
+
+#app .library-dock .lib-switch button:hover {
+    color: var(--cg-fg);
+}
+
+#app .library-dock .lib-switch button.is-active {
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+}
+
+/* 展开 / 收起的方向跟着换到左侧 */
+#app .library-dock .dock-enter-from,
+#app .library-dock .dock-leave-to {
+    transform: translate(-28px);
+}
+
+/* --------------------------------- 面板滚动条（照 ComfyUI 的 scrollbar-custom） */
+/* 上游 index-*.css 开头有一条全局清空，把整站的滚动条都藏了：
+
+       * { scrollbar-width: none; -ms-overflow-style: none }
+       * ::-webkit-scrollbar { width: 0; height: 0; display: none }
+
+   所以 .lib-list / .asset-grid / .float-body / .am-grid 虽然都是 overflow:auto、
+   滚轮也确实能滚，但界面上完全没有滑块，看不出「还能往下翻」。
+   ComfyUI 侧栏的做法是给 body 挂 .scrollbar-custom（SidebarTabTemplate.vue：
+   class="comfy-vue-side-bar-body scrollbar-custom h-0 grow overflow-x-hidden"），
+   真值取自 main-BHksRiL4.css：
+
+       .scrollbar-custom { scrollbar-width: thin;
+                           scrollbar-color: var(--muted) transparent;
+                           overflow-y: auto }
+       ::-webkit-scrollbar        { width: 10px; height: 10px; background: transparent }
+       ::-webkit-scrollbar-track  { background: transparent }
+       ::-webkit-scrollbar-thumb  { background: var(--muted);
+                                    border: 2px solid transparent;
+                                    border-radius: 9999px }
+
+   即无轨道底色，滑块内缩 2px、两端全圆角。两个坑都在实测里踩到了：
+
+   ① 只写 width 不够 —— 上面那条 display:none 仍然生效，必须显式 display:block；
+   ② **不能写 `scrollbar-width: thin` / `scrollbar-color`**（官方那条是这么写的）。
+      Windows 的 Chromium 一看到这两个标准属性就切回「原生细滚动条」、忽略
+      ::-webkit-scrollbar，结果轨道两端多出上下箭头（▲▼）、滑块变方头。
+      用 `file://` 对照页验过四种写法（.workbuddy/tmp/probe_scrollbar_variants.cjs）：
+         A 官方原样 / B 只有标准属性 -> 有箭头、方头
+         C 只有 webkit 伪元素     -> 被全局 none 压掉，看不到滑块
+         D `scrollbar-width:auto` 复位 + webkit 伪元素 -> 干净的圆角细条 ✅
+      所以这里走 D：用 auto 把全局那条 none 复位，再把外观交给 webkit 伪元素
+      （Chromium 对显式 auto 不当作「设过标准属性」，webkit 规则仍然生效）。 */
+/* 注意：弹窗的内容区 .float-body 不在这条规则里 —— 它已经改成
+   `overflow:hidden`、滚动交给各面板自己的容器；若还挂着 scrollbar-gutter:stable，
+   右侧会永久留出 10px 的空档，看起来就是弹窗最右边多出一条竖条。 */
+#app .library-dock .lib-list,
+#app .library-dock .asset-grid,
+#app .float-window .am-grid {
+    scrollbar-width: auto;           /* 复位全局的 none；不能写 thin，见上面 ② */
+    overflow-y: auto;
+    /* 官方侧栏 body 也写了 overflow-x:hidden；只设 overflow-y:auto 时，按规范
+       另一轴会变成 auto，内容一旦横向溢出就会多出一条横向滑块。 */
+    overflow-x: hidden;
+    /* 官方 NodeLibrarySidebarTabV2 的 scrollbar-gutter-stable：滑块出现 / 消失时
+       内容不左右跳（切分类、加载更多都会改变是否溢出）。 */
+    scrollbar-gutter: stable;
+}
+
+#app .library-dock .lib-list::-webkit-scrollbar,
+#app .library-dock .asset-grid::-webkit-scrollbar,
+#app .float-window .am-grid::-webkit-scrollbar {
+    display: block;                  /* 压掉全局那条 display:none */
+    width: 10px;
+    height: 10px;
+    background: transparent;
+}
+
+#app .library-dock .lib-list::-webkit-scrollbar-track,
+#app .library-dock .asset-grid::-webkit-scrollbar-track,
+#app .float-window .am-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Windows 下 Chromium 会在轨道两端画原生上下箭头（::-webkit-scrollbar-button），
+   官方那条 .scrollbar-custom 没写这条，是因为它走标准 scrollbar-width:thin；
+   我们要用 webkit 那套拿到 10px 轨道 + 6px 滑块，就得把按钮一起去掉，
+   否则两端各多出一截箭头块，和 ComfyUI 的细条外观对不上。 */
+#app .library-dock .lib-list::-webkit-scrollbar-button,
+#app .library-dock .asset-grid::-webkit-scrollbar-button,
+#app .float-window .am-grid::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+#app .library-dock .lib-list::-webkit-scrollbar-thumb,
+#app .library-dock .asset-grid::-webkit-scrollbar-thumb,
+#app .float-window .am-grid::-webkit-scrollbar-thumb {
+    background: var(--cg-scroll);
+    border: 2px solid transparent;   /* 滑块内缩，可见宽度 6px */
+    border-radius: 9999px;
+    /* 官方那条只写了 border，默认 background-clip:border-box 会把底色画到透明
+       边框下面，实测出来是满轨道 10px 的粗条（像素量过：x 405..414 全是底色）。
+       这里显式裁到 padding-box，才是那 2px 边框本来要的「10px 轨道里 6px 细条」，
+       也是 ComfyUI 界面上看到的样子。 */
+    background-clip: padding-box;
+}
+
+#app .library-dock .lib-list::-webkit-scrollbar-corner,
+#app .library-dock .asset-grid::-webkit-scrollbar-corner,
+#app .float-window .am-grid::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* ------------------------------------------------ 底部工具条（画布右下角） */
+/* 结构与图标照 ComfyUI 的 GraphCanvasMenu.vue + CanvasModeSelector.vue：
+     容器 .floating-panel = rounded-xl(12px) + padding 4px + gap 4px
+                            + background(--background) + shadow(inset 高光 + 0 2px 16px #0006)
+     按钮 = size-8(32×32) + rounded-lg(8px) + 透明底 + hover:bg-accent + 选中 bg-muted
+     图标 = size-4(16px)，分隔线 = h-[27px] w-px bg-border
+   位置从「底部居中」改到「右下角」，与画布右上没有了遮挡关系。
+   官方是 inset-x-0 bottom-0 + ml-auto 贴画布右下角；这里是独立 iframe、没有底部面板，
+   所以留 8px 对称外边距（right / bottom 同值，落在 4px 网格上）。间距一律 4px 体系：
+   padding 4 + 相邻项 gap 4 + 分隔线 1×27，不额外加 margin。
+   按钮顺序：模式选择 │ 适应视图 缩放控制 │ 网格吸附 隐藏连接线 —— 开关组按官方习惯
+   把「隐藏连接线」收在最后（ComfyUI 工具栏也是 minimap / link visibility 收尾）。
+   按钮里的图标是 lucide（mouse-pointer-2 / hand / focus / chevron-down /
+   route-off / grid-3x3），path 取自 ComfyUI 产物里的 --svg data URI，不是重画。 */
+#app .canvas-tabbar {
+    left: auto;
+    right: 8px;
+    bottom: 8px;
+    transform: none;
+    gap: 4px;
+    padding: 4px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+    box-shadow:
+        inset 0 1px 0 0 #ffffff1a,
+        0 2px 16px 0 var(--cg-shadow-color);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+#app .canvas-tabbar .tb-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--cg-radius-lg);
+    background: transparent;
+    /* 图标与文字一律 text-foreground（dark 下就是 #fff）。这里以前写成了
+       --muted-foreground(#8a8a8a)，是照左侧栏的 .side-bar-button 抄的 —— 侧栏那个
+       组件确实用 muted-foreground，但工具条用的是 Button 的 secondary 变体，
+       其定义是 `bg-secondary text-foreground hover:bg-accent`，不是灰字。 */
+    color: var(--cg-fg);
+    transition: background 0.15s, color 0.15s;
+}
+
+#app .canvas-tabbar .tb-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+}
+
+/* 开关类按钮的激活态：ComfyUI 用 `not-active:bg-muted`（即 :not(:active)），
+   激活时是 --muted(#3c3d42) 实底。官方 CSS 里 hover:bg-accent 排在它之后，
+   所以悬停在激活项上仍然转成 --accent(#313235) —— 这里保持同样的先后。 */
+#app .canvas-tabbar .tb-btn.is-on {
+    background: var(--cg-muted);
+}
+
+#app .canvas-tabbar .tb-btn:hover {
+    background: var(--cg-accent);
+}
+
+/* 分隔线：ComfyUI 是 h-[27px] w-px bg-border（实色 --border，不是 banner 那条半透明线） */
+#app .canvas-tabbar .tb-sep {
+    width: 1px;
+    height: 27px;
+    margin: 0;
+    align-self: center;
+    background: var(--cg-border);
+}
+
+/* 下拉/弹层的定位锚点 */
+#app .canvas-tabbar .tb-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* 模式选择器：--muted 底的 32×32 图标块 + 16px 箭头 + 右侧 2px，和 ComfyUI 一致 */
+#app .canvas-tabbar .tb-mode {
+    width: auto;
+    gap: 4px;
+    padding: 0 2px 0 0;
+    background: transparent;
+}
+
+#app .canvas-tabbar .tb-mode:hover {
+    background: transparent;
+}
+
+#app .canvas-tabbar .tb-mode-ico {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+    transition: background 0.15s;
+}
+
+#app .canvas-tabbar .tb-mode:hover .tb-mode-ico {
+    background: var(--cg-accent);
+}
+
+/* 箭头与模式按钮里的图标同色：Button 的 secondary 变体给的是 text-foreground */
+#app .canvas-tabbar .tb-mode-caret {
+    display: grid;
+    place-items: center;
+    color: var(--cg-fg);
+}
+
+/* 缩放按钮：ComfyUI 是 h-8 w-15（32×60）+ text-xs + px-2 */
+#app .canvas-tabbar .tb-zoom {
+    width: 60px;
+    gap: 4px;
+    padding: 0 8px;
+    font-family: var(--xcat-rail-font);
+    font-size: 12px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+}
+
+#app .canvas-tabbar .tb-zoom .tb-mode-caret svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 弹层：ComfyUI 的 Popover 是 side="top" sideOffset=8，圆角 8、p-1、border + shadow */
+#app .canvas-tabbar .tb-pop {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 168px;
+    padding: 4px;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow:
+        inset 0 1px 0 0 #ffffff1a,
+        0 2px 16px 0 var(--cg-shadow-color);
+}
+
+#app .canvas-tabbar .tb-pop--zoom {
+    left: auto;
+    right: 0;
+    width: 250px;
+    padding: 8px;
+    border-radius: 12px;
+}
+
+#app .canvas-tabbar .tb-mi {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--cg-radius-lg);
+    background: transparent;
+    color: var(--cg-fg);
+    font-family: var(--xcat-rail-font);
+    font-size: 12px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+    text-align: left;
+    white-space: nowrap;
+}
+
+#app .canvas-tabbar .tb-mi:hover {
+    background: var(--cg-accent);
+}
+
+/* 当前生效的那一项（模式选择里对应 role="menuitemradio" 的 aria-checked 样式） */
+#app .canvas-tabbar .tb-mi.is-on {
+    background: var(--cg-muted);
+}
+
+#app .canvas-tabbar .tb-mi svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    color: var(--cg-fg);
+}
+
+/* 快捷键提示：ComfyUI 用 text-[9px]，颜色继承弹层的 text-foreground（#fff），
+   不是灰字 —— ZoomControlsModal / CanvasModeSelector 里那个 span 都没有 muted 类。 */
+#app .canvas-tabbar .tb-mi-k {
+    margin-left: auto;
+    padding-left: 12px;
+    font-size: 9px;
+    color: var(--cg-fg);
+}
+
+/* 缩放面板里的百分比输入：ComfyUI 的 NumberField = bg-input + border + rounded-lg */
+#app .canvas-tabbar .tb-zoom-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px 0 8px;
+}
+
+#app .canvas-tabbar .tb-zoom-input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font-family: var(--xcat-rail-font);
+    font-size: 12px;
+    font-weight: var(--xcat-rail-weight);
+    line-height: 1;
+}
+
+/* 焦点环用 --ring = --muted-foreground，与 ComfyUI 输入框一致 */
+#app .canvas-tabbar .tb-zoom-input:focus {
+    border-color: var(--cg-muted-fg);
+    outline: none;
+}
+
+#app .canvas-tabbar .tb-zoom-pct {
+    color: var(--cg-fg);
+    font-family: var(--xcat-rail-font);
+    font-size: 12px;
+}
+
+/* 隐藏连接线：挂在 html 上而不是 .vue-flow 上 —— .vue-flow 的 class 归 Vue 管，
+   外部加类会在下一次 patch 时被抹掉。 */
+html.xcat-links-hidden .vue-flow__edge {
+    display: none;
+}
+
+/* 亮色下浮条与画布底（#f3f3f3 上再叠一层更浅的网格）几乎同色，官方那套 inset 高光
+   是给暗色写的，这里补一圈 45% 的描边（走 box-shadow，不改盒模型尺寸）。 */
+html[data-theme="light"] #app .canvas-tabbar {
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--cg-border) 45%, transparent),
+        0 2px 16px 0 var(--cg-shadow-color);
+}
+
+/* --------------------------------------- 画布管理 / 资产管理 / 工作流配置 弹窗 */
+/* 上游本身已经有一个 fixed 居中的 .float-window（CanvasManager / AssetManager /
+   WorkflowConfig 共用），只是尺度与外观和 ComfyUI 不像：92vw×86vh、圆角 20、
+   header 只有 10/14 padding、标题 13px、关闭按钮 28×28。
+   这里按 ComfyUI 的 BaseModalLayout（模板对话框就是它，size="md"）收口：
+     容器 = h-[80vh] w-[90vw] max-w-[1400px] + rounded-2xl(16px) + border
+            + bg-background + shadow-lg（ComfyUI 把 shadow-lg 覆盖成 0 2px 16px #0006）
+     header = h-18(72px) + px-6 + 16px/600 标题
+     关闭   = w-10(40×40) 的 Button，图标 size-4
+   官方这个弹窗**没有遮罩层**（dialog 自身背景透明、无 backdrop-filter，直接浮在
+   画布上），所以这里也不加变暗蒙层，避免比原版更重。
+   窗口内的 --c-* 令牌就地重映射成 --cg-*，与左侧栏面板用同一套 ComfyUI 语义色。 */
+#app .float-window {
+    --c-surface: var(--cg-bg);    --c-surface-2: var(--cg-secondary);
+    --c-surface-3: var(--cg-input);
+    --c-panel: var(--cg-bg);
+    --c-text: var(--cg-fg);
+    --c-strong-text: var(--cg-fg);
+    --c-text-dim: var(--cg-muted-fg);
+    --c-muted: var(--cg-muted-fg);
+    --c-muted-2: var(--cg-muted-fg);
+    --c-line: var(--cg-line);
+    --c-line-strong: var(--cg-border);
+    --c-border-strong: var(--cg-border);
+    --c-hover: var(--cg-accent);
+    /* 同上：强调色一律中性。ComfyUI 的 --primary 蓝只出现在极少数确认动作上，
+       这三个面板里没有任何一个按钮够格 —— 官方的保存/加载/删除在对话框里
+       全是 secondary / outline 变体，所以这里连"主按钮"也不给蓝。 */
+    --c-accent: var(--cg-fg);
+    --c-accent-weak: color-mix(in srgb, var(--cg-fg) 10%, transparent);
+    --c-accent-ink: var(--cg-fg);
+    --c-on-accent: var(--cg-bg);
+    --c-shadow: var(--cg-shadow-color);
+    --accent-yellow: var(--cg-fg);
+    /* 让 .float-body 能吃满「弹窗高 − 72px 标题栏」的剩余高度 */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--cg-border);
+    border-radius: 16px;
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+    box-shadow: 0 2px 16px 0 var(--cg-shadow-color);
+    /* BaseModalLayout SIZE_CLASSES.md = h-[80vh] w-[90vw] max-w-[1400px]。
+       宽高由 JS 的 width/height props 给 inline（90vw/80vh），这里只补上限；
+       上游自己写的是 max-width:96vw / max-height:92vh，撑到满屏更像全屏面板。 */
+    max-width: 1400px;
+    max-height: 80vh;
+}
+
+#app .float-window .float-head {
+    flex: 0 0 auto;
+    height: 72px;
+    padding: 0 12px 0 24px;
+    gap: 12px;
+    /* 官方 BaseModalLayout 的 header 是 `h-18 px-6`，与内容区共用 bg-background，
+       没有 border-b —— 靠留白分区，不画线。上游这里有一条 1px 分隔线，去掉。 */
+    border-bottom: 0;
+}
+
+#app .float-window .float-title {
+    color: var(--cg-fg);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#app .float-window .float-close {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--cg-radius-lg);
+    background: transparent;
+    color: var(--cg-fg);
+    transition: background 0.15s;
+}
+
+#app .float-window .float-close:hover {
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+#app .float-window .float-close svg {
+    width: 16px;
+    height: 16px;
+}
+
+#app .float-window .float-body {
+    padding: 16px;
+    color: var(--cg-fg);
+}
+
+/* ------------------- 弹窗内部：去掉上游的蓝色强调，换成 ComfyUI 的中性灰白层级 */
+/* 上游这三个面板把 --c-accent 当"主题色"用在了选中卡、徽章、分段 tab、保存按钮上，
+   而 --c-accent 以前被我们指到 --cg-primary(azure #0b8ce9)，于是整片泛蓝。
+   核对 ComfyUI 的真实用法后分三档处理（依据都在 main-*.css / 组件源码里）：
+     选中 / 当前项 → bg-secondary(--secondary charcoal-600) + border-foreground/60
+     徽章 / 标签   → bg-muted + text-foreground（或 border-border + muted-foreground）
+     动作按钮     → Button 的 secondary 变体 bg-secondary text-foreground hover:bg-accent
+   蓝色(--primary) 只留给官方 ExecuteButton / ConfirmationDialog 那种确认动作，
+   这三个面板里没有这样的动作，所以一处蓝都不留。 */
+
+/* 画布管理：当前画布 / 批量选中的卡 */
+#app .float-window .cm-card.is-current {
+    border-color: color-mix(in srgb, var(--cg-fg) 22%, transparent);
+    background: var(--cg-secondary);
+}
+
+#app .float-window .cm-card.is-selected {
+    border-color: color-mix(in srgb, var(--cg-fg) 60%, transparent);
+    background: var(--cg-secondary);
+}
+
+/* 画布管理：品牌标签 +「当前」徽章 */
+#app .float-window .cm-brand {
+    border-color: var(--cg-border);
+    background: transparent;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .cm-current {
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* 资产管理：分类胶囊 */
+#app .float-window .am-btn.is-active {
+    border-color: var(--cg-muted);
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-cat.is-active {
+    border-color: var(--cg-muted);
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-cat.is-active .am-cat-count {
+    color: var(--cg-muted-fg);
+}
+
+/* 资产管理：素材选中 —— 前景色描边 + 一圈淡环，不用彩色 */
+#app .float-window .am-cell.is-selected {
+    border-color: color-mix(in srgb, var(--cg-fg) 60%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cg-fg) 25%, transparent);
+}
+
+/* 工作流配置：保存 = secondary（官方对话框里的保存/加载都是这个变体） */
+#app .float-window .wf-save {
+    border-color: var(--cg-border);
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+}
+
+#app .float-window .wf-save:hover:not(:disabled) {
+    background: var(--cg-accent);
+}
+
+/* 复选框勾选：ComfyUI 的 checked 是前景色实块 + 深色勾 */
+#app .float-window .cm-check:checked,
+#app .float-window .am-check input:checked {
+    border-color: var(--cg-fg);
+    background: var(--cg-fg);
+}
+
+/* 工作流配置里的小节点图：上游按 class_type 做哈希取色相（hue 0–360），于是
+   一屏彩虹 —— 红/蓝/青/橄榄色混杂，和 ComfyUI 的节点配色（按类别、且只在标题栏
+   上一点点色）完全不是一回事。这里把 --n-hue 派生出来的四个颜色全部压回中性：
+   节点底 = --secondary、描边 = --border、端口与 #id = --muted-foreground。
+   注意 --n-hue 是行内 style 绑定的，改它没意义，所以覆盖的是消费端声明。 */
+#app .float-window .preview-node {
+    border-color: var(--cg-border);
+    background: var(--cg-secondary);
+    box-shadow: none;
+}
+
+#app .float-window .preview-node:hover {
+    border-color: color-mix(in srgb, var(--cg-fg) 34%, transparent);
+}
+
+#app .float-window .preview-node.is-configurable {
+    border-color: color-mix(in srgb, var(--cg-fg) 55%, transparent);
+}
+
+#app .float-window .preview-handle {
+    background: var(--cg-muted-fg);
+}
+
+#app .float-window .preview-id {
+    color: var(--cg-muted-fg);
+}
+
+/* ==========================================================================
+ * 三个弹窗的内部内容区：照 ComfyUI 的模板对话框（WorkflowTemplateSelectorDialog）
+ * 与资产浏览器（AssetBrowserModal）重排。上面那段只把「外框」对齐了
+ * BaseModalLayout，里面仍是上游自己那套：11–13px 混排字号、10/12/14px 的
+ * 圆角与间距、五颜六色的 border、150–200px 的小药丸。这里按官方组件的真实
+ * class 重做一遍，数值出处逐条写在注释里。
+ *
+ * 官方骨架（BaseModalLayout.vue）：
+ *   • 左栏        w=14rem(224px) bg-card(--secondary) px-3；
+ *                 header h-18(72px) pl-6 pr-3，标题 text-base(16px) font-semibold
+ *   • 内容容器    px-6(24px) pb-10(40px)，自身滚动，内容不再加 padding
+ *   • #contentFilter  px-6 pb-4（模板）/ px-6 pt-2 pb-6（资产过滤器）
+ *   • 右面板      w-72(288px)
+ * 官方控件（button.variants.ts / tag.variants.ts）：
+ *   • Button md   h-8(32px) rounded-lg(8px) text-xs(12px)；选中态 inverted =
+ *                 bg-foreground + text-background
+ *   • Button lg   h-10(40px)；输入框 h-9(36px)
+ *   • Tag         h-6(24px) px-2 text-xs rounded-sm(4px) bg-muted
+ *   • NavItem     px-4 py-3 text-sm(14px) rounded-md(6px)，active bg-muted / hover bg-accent
+ * 官方网格（AssetGrid.vue / 模板卡）：
+ *   repeat(auto-fill, minmax(15rem,1fr))，gap-4(16px)（资产）/ gap-2（模板）
+ *   卡片 AssetCard.vue：rounded-2xl(16px) bg-secondary p-2，图 rounded-xl(12px)
+ *   卡片 模板卡：rounded-lg p-2 + hover:bg-secondary/50，标题 text-sm font-semibold
+ * 官方空态（AssetGrid）：图标 40px + text-lg(18px) 标题 + text-sm(14px) 说明
+ * ======================================================================== */
+
+/* ---------------------------------------------- 内容容器：px-6 / pb-10 */
+/* 上游 .float-body 是「padding:16px + 自己滚动」，与官方的「容器无内边距、
+   由内容区 px-6 pb-10 负责、滚动交还给列表」不一致；内层 .cm/.am/.wf-config
+   本来就 height:100%，所以直接清零并把滚动下放，避免两层滚动条。 */
+#app .float-window .float-body {
+    /* 关键：上游 .float-body 是普通 block，高度由内容撑，内层 .am/.cm/.wf-config
+       的 height:100% 因此解析成"内容高"——内容少时弹窗底部空一大块（实测 .am 只有
+       330px，可用 448px）。外层改成 flex 列、body 吃剩余高度后，三栏才真正撑满。 */
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+    /* 不能 hidden：资产管理把 input/output 分段绝对定位到标题栏，
+       它要跨出内容区的上边界，hidden 会直接裁掉。弹窗自己的圆角与
+       边界由 .float-window（overflow:hidden）负责。 */
+    overflow: visible;
+    /* 内容区不再自己滚动（滚动都下放到面板内部），必须把 gutter 关掉，
+       否则右侧永久留 10px 空档 —— 就是弹窗最右边那条竖条。 */
+    scrollbar-gutter: auto;
+    color: var(--cg-fg);
+    font-size: 14px;
+}
+
+/* ------------------------------------------------------ 画布管理（cm） */
+/* 外框：不再用弹窗，改成和「提示词」一模一样的贴栏侧滑面板（ComfyUI 的
+   .side-bar-panel）：紧贴左侧竖栏右侧、通高、与栏同底色、靠右边线分区，
+   头上 64px 标题栏 + 1px 下划线，内容区自己滚。
+   数值全部取自实测（8199，1500×950）：
+     .library-dock  x=0  y=38  → 顶部画布标签条 38px（--workflow-tabs-height）
+     竖栏 57(56 + 1px 边线)     → 面板 left 57
+     面板 360×912、bg #171718、border-right 1px --cg-line 50%、shadow 1px 1px 8px
+     .lib-head 64px / padding 0 16px / 标题 16px 700
+   两条必须：
+     ① 遮罩 .float-mask 要去掉 —— 侧滑面板不挡画布，也和提示词一致（点画布照常可用）；
+     ② width/height 得 !important —— 上游组件把尺寸写成 :style="{width:90vw,height:80vh}"，
+        内联样式优先于普通声明。
+   面板宽度跟 .library-panel 取同一档 min(360px,40vw)，左右不参差。 */
+#app .float-mask:has(+ .float-window .cm) {
+    display: none;
+}
+
+#app .float-window:has(.cm) {
+    position: fixed;
+    left: 57px;
+    top: 38px;
+    bottom: 0;
+    width: min(360px, 40vw) !important;
+    height: auto !important;
+    max-width: none;
+    max-height: none;
+    transform: none;
+    border: 0;
+    border-right: 1px solid var(--cg-line);
+    border-radius: 0;
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+}
+
+#app .float-window:has(.cm) .float-head {
+    height: 64px;
+    min-height: 64px;
+    padding: 0 16px;
+    gap: 8px;
+    border-bottom: 1px solid var(--cg-line);
+}
+
+#app .float-window:has(.cm) .float-title {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+/* × 去掉：「删除所选」已占这个位置，关闭改为再点一次栏内「画布管理」或 Esc */
+#app .float-window:has(.cm) .float-close {
+    display: none;
+}
+
+#app .float-window:has(.cm) .float-body {
+    padding: 0;
+    /* 必须是 visible：「删除所选」浮到标题栏后，它仍是 .float-body 的后代，
+       隐藏溢出会把按钮整块裁掉（和之前分段浮标题栏同一个坑）。滚动交给 .cm-list。 */
+    overflow: visible;
+    font-size: 14px;
+}
+
+#app .float-window .cm {
+    box-sizing: border-box;
+    height: 100%;
+    /* 顶部不再留 8px：头部行已绝对定位移出文档流，列表要正好接在 64px 标题栏下
+       （101 行，和提示词面板首块内容同一条基线）。 */
+    padding: 0 16px 16px;
+    gap: 0;
+    color: var(--cg-fg);
+}
+
+/* #contentFilter：整行浮到标题栏右侧（原 × 的位置），高度 32px 与标题栏垂直居中 */
+#app .float-window .cm-bar {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    gap: 8px;
+    z-index: 2;
+}
+
+/* 「已保存 / 有未保存的改动 / 保存中…」这行状态文字按需求去掉 */
+#app .float-window .cm-state {
+    display: none;
+}
+
+#app .float-window .cm-bar-right {
+    gap: 8px;
+}
+
+/* Button md：h-8 / rounded-lg / text-xs，secondary → hover accent */
+#app .float-window .cm-btn {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background 0.15s;
+}
+
+#app .float-window .cm-btn:hover:not(:disabled) {
+    border: 0;
+    background: var(--cg-accent);
+}
+
+/* 没勾选任何画布时「删除所选」是禁用的，且现在常驻标题栏 —— 不压一下会落到
+   .cm-btn 的 secondary 底，看着像能点。 */
+#app .float-window .cm-btn:disabled {
+    background: transparent;
+    color: var(--cg-muted-fg);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* destructive-textonly：透明底 + coral-700 文字 */
+#app .float-window .cm-btn.is-danger:not(:disabled) {
+    border: 0;
+    background: transparent;
+    color: var(--cg-destructive);
+}
+
+#app .float-window .cm-btn.is-danger:hover:not(:disabled) {
+    border: 0;
+    background: color-mix(in srgb, var(--cg-destructive) 10%, transparent);
+}
+
+/* 列表：窄面板里改成逐行列表（官方侧栏的历史 / 任务列表就是竖排），
+   一行一个画布，不再用 15rem 的卡片网格 —— 360px 里网格只会剩一列、
+   每格还占 168px 高，一屏看不了几个。
+   间距 8px、每项 1px --cg-line 描边 + 10px 圆角，与旁边「提示词」的
+   .prompt-item 完全同一套（实测 317×98 / border 1px rgba(73,74,80,.5) /
+   radius 10 / 列表 gap 8），两个面板来回切不会觉得语言换了。 */
+#app .float-window .cm-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    /* 顶部 8px：头部行已浮到标题栏，列表直接顶到分隔线会显得贴死 */
+    padding: 8px 0 0;
+    overflow-y: auto;
+}
+
+/* 卡片 → 两行清单项：第 1 行「名称 + 三个图标」，第 2 行「节点数·时间 + 复选框」。
+   DOM 顺序是 top(brand+actions) / name / meta，用 grid 重新排。
+   交互照官方列表项：hover 亮一档、当前项 bg-secondary、选中项 2px 前景描边。 */
+#app .float-window .cm-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 2px;
+    min-height: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--cg-line);
+    border-radius: 10px;
+    background: transparent;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+#app .float-window .cm-card:hover {
+    border-color: var(--cg-border);
+    background: color-mix(in srgb, var(--cg-secondary) 60%, transparent);
+}
+
+/* 当前 / 选中：官方 focused 卡 = bg-secondary + outline-4 foreground，
+   这里按比例收成 2px 内缩描边（卡片小、4px 会吃掉圆角）。 */
+#app .float-window .cm-card.is-current,
+#app .float-window .cm-card.is-selected {
+    border-color: transparent;
+    background: var(--cg-secondary);
+}
+
+#app .float-window .cm-card.is-selected {
+    outline: 2px solid var(--cg-fg);
+    outline-offset: -2px;
+}
+
+/* 图标组落在第 1 行右侧（名称右边），品牌徽章在窄面板里是噪音，藏掉 */
+#app .float-window .cm-card-top {
+    grid-area: 1 / 2 / 2 / 3;
+    gap: 2px;
+}
+
+#app .float-window .cm-check {
+    grid-area: 2 / 2 / 3 / 3;
+}
+
+#app .float-window .cm-card-name {
+    grid-area: 1 / 1 / 2 / 2;
+    min-width: 0;
+}
+
+/* 第二行「节点数·时间 + 复选框」横跨两列：复选框落到最右，和上面三个图标对齐 */
+#app .float-window .cm-card-meta {
+    grid-area: 2 / 1 / 3 / 3;
+}
+
+#app .float-window .cm-brand {
+    display: none;
+}
+
+/* 卡片左上角徽章 = 模板卡 top-left 徽章（h-6 px-2 rounded-md bg-zinc-700/50 text-xs） */
+#app .float-window .cm-brand {
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 6px;
+    background: color-mix(in srgb, #3f3f46 50%, transparent);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0;
+}
+
+/* 「当前」= Tag（h-6 px-2 rounded-sm text-xs bg-muted） */
+#app .float-window .cm-current {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+    font-size: 12px;
+    line-height: 1;
+}
+
+/* 名称：清单项一行显示、超长省略（原来是两行 clamp，窄面板里会被图标挤成三行） */
+#app .float-window .cm-card-title {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+/* 重命名输入：h-9 rounded-lg border-border/50 透明底 */
+#app .float-window .cm-rename {
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 14px;
+}
+
+/* 时间行：去掉上游那个带边框的小盒子，回归纯文字（官方卡片次要信息就是 text-xs） */
+#app .float-window .cm-card-meta {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 8px;
+}
+
+#app .float-window .cm-card-meta-text {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .cm-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+#app .float-window .cm-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+#app .float-window .cm-check {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+/* 空态：官方 AssetGrid 的 40px 图标 + 18px 标题 + 14px 说明 */
+#app .float-window .cm-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px 0;
+    font-size: 14px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .cm-empty::before {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 40px;
+    margin-bottom: 8px;
+    background: currentColor;
+    opacity: 0.5;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/svg%3E");
+    -webkit-mask-size: 40px 40px;
+    mask-size: 40px 40px;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+}
+
+#app .float-window .cm-msg {
+    font-size: 12px;
+    color: var(--cg-destructive);
+}
+
+/* ------------------------------------------------------ 资产管理（am） */
+/* 结构与官方 AssetBrowserModal 一一对应：
+     .am-bar   ↔ #contentFilter（px-6 pb-4）
+     .am-side  ↔ LeftSidePanel（14rem / bg-card / px-3 / NavItem）
+     .am-grid  ↔ AssetGrid（minmax 15rem / gap 16px）
+     .am-right ↔ #rightPanel（w-72 = 288px） */
+#app .float-window .am {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr) 352px;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+}
+
+#app .float-window .am-body {
+    display: contents;
+}
+
+#app .float-window .am-bar {
+    grid-area: 1 / 2 / 2 / 3;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 24px 16px;
+    border-bottom: 0;
+}
+
+/* 搜索框从「动作组末尾」提到最左：官方 SearchInput 在中列 header 最左、
+   flex-1 max-w-lg，动作（上传）在最右；上游把搜索塞在刷新/删除后面。
+   用 display:contents 拆掉动作组 + order 重排，DOM 不动。 */
+#app .float-window .am-actions {
+    display: contents;
+}
+
+#app .float-window .am-bar .am-search {
+    order: 1;
+    flex: 1 1 240px;
+    width: auto;
+    max-width: 512px;
+}
+
+#app .float-window .am-bar .am-total {
+    order: 3;
+}
+
+#app .float-window .am-bar .am-btn {
+    order: 4;
+}
+
+/* input / output = 切换按钮（segmented toggle）：一条全圆角的浅色「槽」，
+   选中的那块是槽内更深的胶囊，未选中只有灰字。
+   色值不是目测：槽 = --cg-input(charcoal-400 #313235)、选中块 = --cg-bg
+   (charcoal-800 #171718)，正是 ComfyUI 面板里输入类控件「槽亮于底、按下块
+   回到底色」的层次；选中字 --foreground、未选中字 muted-foreground(#8a8a8a)。
+   结构对应官方 ToggleGroup（toggleGroup.variants.ts）+ WidgetToggleSwitch.vue
+   那套「带标签布尔控件」，只是把方角换成胶囊：圆角 999px、槽内边距 2px、
+   两块间隔 2px，24px 项高 → 28px 槽高（与参考图 26/22 的比例一致）。
+   原来这里是两个**透明底**的 Tabs 文字：暗面 selected 底色 --secondary 压在
+   --background 上几乎同色，看上去就是标题右边多出两个灰字，完全不像按钮。
+   位置在弹窗标题栏「资产管理」右侧，见下方 .am-side > .am-tabs。 */
+#app .float-window .am-tabs {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 2px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--cg-input);
+}
+
+#app .float-window .am-tabs button {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1;
+    text-align: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+/* 未选中 hover：在槽里淡一点亮起来，前景保持 muted-foreground。 */
+#app .float-window .am-tabs button:hover {
+    background: color-mix(in srgb, var(--cg-bg) 45%, transparent);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-tabs button.is-active {
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-tabs button.is-active:hover {
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-total {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .am-actions {
+    gap: 8px;
+}
+
+#app .float-window .am-btn {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background 0.15s;
+}
+
+#app .float-window .am-btn:hover:not(:disabled) {
+    border: 0;
+    background: var(--cg-accent);
+}
+
+#app .float-window .am-btn.is-active {
+    border: 0;
+    background: var(--cg-fg);
+    color: var(--cg-bg);
+}
+
+#app .float-window .am-btn.is-danger:not(:disabled) {
+    border: 0;
+    background: transparent;
+    color: var(--cg-destructive);
+}
+
+#app .float-window .am-btn.is-danger:hover:not(:disabled) {
+    border: 0;
+    background: color-mix(in srgb, var(--cg-destructive) 10%, transparent);
+}
+
+/* 搜索框 = SearchInput（h-9 / border-border/50 / 透明底 / rounded-lg） */
+#app .float-window .am-search {
+    width: 224px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 12px;
+    transition: border-color 0.15s;
+}
+
+#app .float-window .am-search::placeholder {
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .am-search:focus {
+    border-color: var(--cg-border);
+    outline: none;
+}
+
+/* 左栏 = LeftSidePanel：bg-card(--secondary) + px-3，无右边框（靠底色分区）。
+   分段已经浮到标题栏，所以这里只剩「文件类型 + 分类列表」，列表自己滚。
+   position 必须是 static：让它里面那个绝对定位的分段以 .float-window 为
+   包含块（否则会相对左栏定位）；overflow 也不能 hidden，不然浮上去的分段
+   会被裁掉。 */
+#app .float-window .am-side {
+    grid-area: 1 / 1 / 3 / 2;
+    position: static;
+    display: flex;
+    flex-direction: column;
+    width: auto;
+    min-width: 0;
+    padding: 8px 12px 12px;
+    border-right: 0;
+    background: var(--cg-secondary);
+    overflow: visible;
+}
+
+/* 切换按钮落在弹窗标题栏：「资产管理」右侧。
+   DOM 上它仍挂在 .am-side 里（vnode 不动），用绝对定位浮回标题栏。
+   .am-side 已改成 position:static，于是包含块是 .am（上游 position:relative），
+   .am 的顶边正好是 header 的底边，所以：
+     top  = −72(header 高) + (72 − 28(槽高)) / 2 = −50
+     left = 24(header 左内距) + 64(「资产管理」4 字 × 16px) + 12(间距) = 100
+   标题字号写死 16px/600（官方 text-base font-semibold），64px 因此稳定。
+   内容区 .float-body 与左栏都已放开 overflow，浮上去不会被裁。 */
+#app .float-window .am-side > .am-tabs {
+    position: absolute;
+    top: -50px;
+    left: 100px;
+    width: auto;
+    margin: 0;
+    z-index: 1;
+}
+
+#app .float-window .am-side-inner {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    gap: 4px;
+}
+
+#app .float-window .am-side-title {
+    margin: 0;
+    padding: 0 16px 8px;
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+}
+
+/* NavItem：rounded-md px-4 py-3 text-sm，active bg-muted / hover bg-accent */
+#app .float-window .am-cat {
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 14px;
+    line-height: 1.2;
+    transition: background 0.15s;
+}
+
+#app .float-window .am-cat:hover {
+    border: 0;
+    background: var(--cg-accent);
+}
+
+#app .float-window .am-cat.is-active {
+    border: 0;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+#app .float-window .am-cat-count {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .am-side-tip {
+    margin: 8px 16px 16px;
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 网格：官方媒体资产网格（mediaAssetViewOptions.ts 的 getMediaAssetGridColumns）
+   = repeat(auto-fill, minmax(min(240px, 30vw), 1fr))，AssetsSidebarGridView 的
+   容器是 grid gap-2 p-2。min(…,·vw) 是官方防窄容器只挤一列的写法，照抄。
+   本包把下限从 240 收到 160：中列 ~790px 可用宽下从 3 列变 4 列（每格约 191px），
+   缩略图更小、一屏看得更多；左右各留 24px 与上方内容对齐，底部 40px 收口。 */
+#app .float-window .am-grid {
+    grid-area: 2 / 2 / 3 / 3;
+    min-height: 0;
+    align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(min(160px, 25vw), 1fr));
+    gap: 8px;
+    padding: 8px 24px 40px;
+}
+
+/* 缩略图卡 = MediaAssetCard：rounded-lg(8px) + p-2，hover 淡描边。
+   （模型卡 AssetCard 才是 rounded-2xl，媒体资产是 8px。） */
+#app .float-window .am-cell {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--cg-secondary);
+}
+
+#app .float-window .am-cell:hover {
+    outline: 1px solid color-mix(in srgb, var(--cg-fg) 25%, transparent);
+    outline-offset: -1px;
+}
+
+#app .float-window .am-cell.is-active {
+    border-color: transparent;
+    outline: 1px solid color-mix(in srgb, var(--cg-fg) 45%, transparent);
+    outline-offset: -1px;
+}
+
+#app .float-window .am-cell.is-selected {
+    border-color: transparent;
+    outline: 2px solid var(--cg-fg);
+    outline-offset: -2px;
+    box-shadow: none;
+}
+
+#app .float-window .am-name {
+    padding: 16px 8px 6px;
+    font-size: 12px;
+}
+
+#app .float-window .am-badge {
+    right: 8px;
+    top: 6px;
+    font-size: 12px;
+}
+
+#app .float-window .am-check {
+    left: 8px;
+    top: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+#app .float-window .am-check input {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+#app .float-window .am-ext {
+    font-size: 12px;
+}
+
+/* 右面板 = BaseModalLayout 的 #rightPanel（w-72 = 288px，bg-card，无左边框） */
+#app .float-window .am-right {
+    grid-area: 1 / 3 / 3 / 4;
+    width: auto;
+    min-width: 0;
+    border-left: 0;
+    background: var(--cg-secondary);
+    overflow: hidden;
+}
+
+/* 预览区固定正方形：上游 `.am-preview` 是 `flex:1 1 58%`、`.am-preview-body`
+   是 `flex:1 1 auto`，高度跟着右栏分比走，宽 256 / 高 181 就是长方形。
+   这里让预览按内容定高（flex:0 0 auto）、body 用 aspect-ratio:1/1 锁成正方形，
+   剩下的高度交给下面「提示词」区（它本来自己滚）。
+   宽度取 `min(100%, 46vh)`：正常窗口下吃满右栏（352−24=328 见方），
+   窗口很矮时按视高收，避免把提示词区挤没。 */
+#app .float-window .am-preview {
+    flex: 0 0 auto;
+    padding: 12px;
+}
+
+#app .float-window .am-preview-body {
+    flex: 0 0 auto;
+    width: min(100%, 46vh);
+    margin-inline: auto;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    background: var(--cg-bg);
+}
+
+/* 亮面 --bg(#f3f3f3) 压 --secondary(#e9e9e9) 只差 1.09，预览框几乎看不出边界，
+   补一条发丝线把方块的范围勾出来（暗面对比够，不需要）。 */
+html[data-theme="light"] #app .float-window .am-preview-body {
+    border: 1px solid var(--cg-line);
+}
+
+#app .float-window .am-preview-tools {
+    top: 10px;
+    right: 10px;
+    gap: 4px;
+}
+
+#app .float-window .am-preview-tools button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+}
+
+#app .float-window .am-preview-meta {
+    gap: 4px;
+    padding-top: 12px;
+}
+
+#app .float-window .am-preview-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#app .float-window .am-preview-sub {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+/* 预览锁定正方形后，剩余高度全部给提示词区（上游是 42% 定比，会跟着缩） */
+#app .float-window .am-prompt {
+    flex: 1 1 auto;
+    min-height: 0;
+    /* 与上方预览区同一边距（12px），两块左边缘才落在同一条线上 */
+    padding: 0 12px 12px;
+    border-top: 0;
+}
+
+#app .float-window .am-prompt-head {
+    padding-bottom: 8px;
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .am-prompt-head button {
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+    font-size: 12px;
+}
+
+#app .float-window .am-prompt-head button:hover {
+    background: var(--cg-accent);
+}
+
+#app .float-window .am-prompt-body {
+    border-radius: 8px;
+    background: var(--cg-bg);
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+#app .float-window .am-hint {
+    margin: 16px 0;
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+/* 网格里的空态（没有素材 / 没有搜索结果）：官方 AssetGrid 的 40px search 图标
+   + text-lg 标题 + text-sm 说明，居中、上下 64px。 */
+#app .float-window .am-grid > .am-hint {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 64px 0;
+    font-size: 14px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .am-grid > .am-hint::before {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 40px;
+    margin-bottom: 8px;
+    background: currentColor;
+    opacity: 0.5;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+    -webkit-mask-size: 40px 40px;
+    mask-size: 40px 40px;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+}
+
+#app .float-window .am-msg {
+    bottom: 24px;
+    padding: 8px 16px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+/* --------------------------------------------------- 工作流配置（wf） */
+#app .float-window .wf-config {
+    box-sizing: border-box;
+    gap: 16px;
+    padding: 0 24px 40px;
+}
+
+/* 左栏宽度对齐官方面板 14rem(224px) */
+#app .float-window .wf-left {
+    flex: 0 0 224px;
+    gap: 16px;
+}
+
+/* 分组块 = 官方 Card：bg-secondary + rounded-lg + p-4(16px) */
+#app .float-window .wf-block {
+    gap: 8px;
+    padding: 16px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--cg-secondary);
+}
+
+#app .float-window .wf-label {
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+    letter-spacing: 0;
+}
+
+#app .float-window .wf-input {
+    height: 36px;
+    padding: 0 28px 0 12px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 12px;
+}
+
+#app .float-window .wf-input:focus {
+    border-color: var(--cg-border);
+}
+
+#app .float-window .wf-input::placeholder {
+    color: var(--cg-muted-fg);
+}
+
+/* Button md（32px / 8px 圆角 / 12px）。块底已经是 secondary，
+   块内按钮改用 --muted 才分得出来（官方 card 里的 Button 也走 secondary，
+   那是在 bg-background 上，而这里块本身是 bg-card）。 */
+#app .float-window .wf-primary,
+#app .float-window .wf-upload,
+#app .float-window .wf-save,
+#app .float-window .wf-danger {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background 0.15s;
+}
+
+#app .float-window .wf-primary:hover,
+#app .float-window .wf-upload:hover,
+#app .float-window .wf-save:hover:not(:disabled),
+#app .float-window .wf-danger:hover {
+    border: 0;
+    background: var(--cg-accent);
+}
+
+#app .float-window .wf-upload {
+    border: 1px dashed var(--cg-border);
+    background: transparent;
+}
+
+#app .float-window .wf-danger {
+    background: transparent;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .wf-danger:hover {
+    background: color-mix(in srgb, var(--cg-destructive) 10%, transparent);
+    color: var(--cg-destructive);
+}
+
+#app .float-window .wf-hint {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+    line-height: 1.6;
+}
+
+#app .float-window .wf-list {
+    gap: 2px;
+}
+
+/* 列表项 = NavItem 收紧版：rounded-md + text-sm，active bg-muted */
+#app .float-window .wf-item {
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+#app .float-window .wf-item:hover {
+    background: var(--cg-accent);
+}
+
+#app .float-window .wf-item.is-active {
+    border: 0;
+    background: var(--cg-muted);
+}
+
+#app .float-window .wf-item-name {
+    font-size: 14px;
+}
+
+#app .float-window .wf-item-meta {
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .wf-empty-list {
+    padding: 16px 12px;
+    border: 1px dashed var(--cg-line);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .wf-msg {
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--cg-muted);
+    font-size: 12px;
+}
+
+/* 右侧头卡 / 预览 */
+#app .float-window .wf-head {
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-secondary);
+}
+
+#app .float-window .wf-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#app .float-window .wf-sub {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--cg-muted-fg);
+}
+
+#app .float-window .wf-preview {
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: var(--cg-bg);
+}
+
+#app .float-window .wf-tools {
+    top: 8px;
+    right: 8px;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+}
+
+#app .float-window .wf-tools button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+}
+
+#app .float-window .wf-empty {
+    font-size: 12px;
+}
+
+#app .float-window .wf-empty.is-tip {
+    inset: auto 0 16px;
+    font-size: 12px;
+}
+
+/* -------------------------------------------------- 亮面下的按钮/当前卡 */
+/* ComfyUI 官方前端只有暗色一套（main-*.css 没有 light 主题块），亮面是按同一套
+   charcoal / smoke 色阶镜像出来的。镜像的副作用：--secondary(#e9e9e9) 压在
+   --background(#f3f3f3) 上对比只有 1.09，按钮和「当前卡」在亮面几乎看不出边界
+   （暗面 secondary 对 background 是 1.55）。这两类底在亮面换成 --muted
+   (smoke-400 #d9d9d9)，与暗面对应关系一致，不另造色。
+   输入框、虚线上传按钮本来就是 border 描边，不动。 */
+html[data-theme="light"] #app .float-window .cm-btn:not(.is-danger),
+html[data-theme="light"] #app .float-window .am-btn:not(.is-danger):not(.is-active),
+html[data-theme="light"] #app .float-window .wf-primary,
+html[data-theme="light"] #app .float-window .wf-save,
+html[data-theme="light"] #app .float-window .am-prompt-head button {
+    background: var(--cg-muted);
+}
+
+/* 切换按钮在亮面：槽取 --muted(smoke-400 #d9d9d9)，选中块回到 --cg-bg
+   (#f3f3f3) —— 与暗面同一层关系（槽比面板底深一档 / 选中块回到面板底色）。
+   直接用暗面那对令牌不行：亮面 --input 是纯白，压在 #f3f3f3 上槽会消失。 */
+html[data-theme="light"] #app .float-window .am-tabs {
+    background: var(--cg-muted);
+}
+
+html[data-theme="light"] #app .float-window .am-tabs button.is-active {
+    background: var(--cg-bg);
+    color: var(--cg-fg);
+}
+
+/* 画布管理侧滑面板里的「当前 / 选中」项：同上，亮面 --secondary 压 --background 只有
+   1.09，换 --muted(#d9d9d9) 才看得出（暗面本来就是 bg-secondary）。 */
+html[data-theme="light"] #app .float-window .cm-card.is-current,
+html[data-theme="light"] #app .float-window .cm-card.is-selected {
+    background: var(--cg-muted);
+}
+
+/* 选中 / 危险态在亮面仍是官方语义：inverted = 前景色底 + 反色字，
+   危险 = 透明底 + coral 字。上面那条用 :not() 排除了它们，这里重申一次，
+   防止 html 前缀带来的权重差把它们一起刷成灰底。 */
+html[data-theme="light"] #app .float-window .am-btn.is-active {
+    background: var(--cg-fg);
+    color: var(--cg-bg);
+}
+
+html[data-theme="light"] #app .float-window .cm-btn.is-danger:not(:disabled),
+html[data-theme="light"] #app .float-window .am-btn.is-danger:not(:disabled) {
+    background: transparent;
+    color: var(--cg-destructive);
+}
+
+html[data-theme="light"] #app .float-window .cm-card.is-current,
+html[data-theme="light"] #app .float-window .cm-card.is-selected {
+    background: var(--cg-muted);
+}
+
+html[data-theme="light"] #app .float-window .cm-brand {
+    background: color-mix(in srgb, #3f3f46 72%, transparent);
+}
+
+/* 这三处新出现的滚动容器也要有滑块（规则同上方「面板滚动条」，
+   上游全局把 ::-webkit-scrollbar 抹掉了）。 */
+#app .float-window .cm-list,
+#app .float-window .am-side-inner,
+#app .float-window .am-prompt-body,
+#app .float-window .wf-left,
+#app .float-window .wf-list {
+    scrollbar-width: auto;
+    scrollbar-gutter: stable;
+}
+
+#app .float-window .cm-list::-webkit-scrollbar,
+#app .float-window .am-side-inner::-webkit-scrollbar,
+#app .float-window .am-prompt-body::-webkit-scrollbar,
+#app .float-window .wf-left::-webkit-scrollbar,
+#app .float-window .wf-list::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+    height: 10px;
+    background: transparent;
+}
+
+#app .float-window .cm-list::-webkit-scrollbar-track,
+#app .float-window .am-side-inner::-webkit-scrollbar-track,
+#app .float-window .am-prompt-body::-webkit-scrollbar-track,
+#app .float-window .wf-left::-webkit-scrollbar-track,
+#app .float-window .wf-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#app .float-window .cm-list::-webkit-scrollbar-thumb,
+#app .float-window .am-side-inner::-webkit-scrollbar-thumb,
+#app .float-window .am-prompt-body::-webkit-scrollbar-thumb,
+#app .float-window .wf-left::-webkit-scrollbar-thumb,
+#app .float-window .wf-list::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: var(--cg-scroll);
+    background-clip: padding-box;
+}
+
+#app .float-window .cm-list::-webkit-scrollbar-button,
+#app .float-window .am-side-inner::-webkit-scrollbar-button,
+#app .float-window .am-prompt-body::-webkit-scrollbar-button,
+#app .float-window .wf-left::-webkit-scrollbar-button,
+#app .float-window .wf-list::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+/* ------------------------------------------------- 弹窗遮罩（点外部关闭） */
+/* ComfyUI 的弹窗是原生 <dialog> + showModal()，遮罩来自 `dialog::backdrop`
+   （main-*.css：`dialog::backdrop{background:#00000080}`，即 50% 黑），
+   原生 modal 还会顺带吃掉所有背景点击 —— 用户要求的"变暗 + 其他区域不可点"
+   就是这两件事。上游这三个面板只是普通 fixed div，没有遮罩层，所以：
+   1) 渲染上把浮窗包成 [.float-mask, .float-window] 的 Fragment（见 README 的
+      JS 补丁清单第 10 条），遮罩点击 = 关闭，等同原生 dialog 点 backdrop 关闭；
+   2) 层级压在工具条(30) / 预览气泡(40) 之上，但低于 asset-mask(999) 与
+      node-ghost(9999)，避免挡住全屏素材预览。
+   颜色不抄 0.5 以外的值：官方就是 #00000080，暗亮两套主题共用同一个值。 */
+#app .float-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background: #00000080;
+    cursor: default;
+}
+
+#app .float-window {
+    z-index: 910;
+}
+
+/* ------------------------------------ 顶部画布切换条（对齐 ComfyUI 的 workflow tabs） */
+/* 出处：GraphCanvas.vue 里 workflow-tabs 的容器
+     class="flex h-(--workflow-tabs-height) w-full items-center
+            border-b border-border/50 bg-background shadow-md"
+   其中 --workflow-tabs-height: 2.375rem = 38px；WorkflowTabs.vue 外层 px-1、gap-1；
+   TabsTrigger base 是 rounded-lg(8px) + text-sm + text-muted-foreground，
+   data-[state=active]:bg-secondary + text-foreground，未选中 hover:bg-secondary/50；
+   WorkflowTab 覆盖成 h-full min-w-22.5(90px) pl-3 pr-2，label 是 max-w-[150px] truncate；
+   未保存点是 size-2(8px) 圆点，当前 tab 用 bg-foreground；
+   末尾的「+」是 Button variant="muted-textonly" size="icon"，图标 lucide 在别处但 ComfyUI
+   此处实际用 <i class="pi pi-plus">（PrimeIcons 实心 +），故这里用 pi-plus 的实心 path；
+   透明底 + muted-foreground，hover 才出 bg-accent。
+   关闭按钮照 WorkflowTab.vue 的 close-button：图标 lucide--x（16px, stroke 2, round），
+   位置 absolute top-50% right-2(8px) size-4(16px) 垂直居中，颜色 text-muted-foreground，
+   当前且无状态常显、hover 显、当前脏仅 hover 显。
+   这里只换颜色令牌（--cg-*），尺度与层级照抄。 */
+#app .canvas-tabs-strip {
+    position: relative;
+    z-index: 8;
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    height: 38px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--cg-line);
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+}
+
+#app .canvas-tabs-scroll {
+    /* ComfyUI 里 tab 条是 flex-auto（宽度随内容），「+」紧跟在最后一个 tab 后面，
+       剩余空白留在尾部；这里保持同一行为，不要用 flex:1 把 + 推到最右。 */
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+#app .canvas-tabs-list {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    width: max-content;
+}
+
+#app .canvas-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    min-width: 90px;
+    max-width: 200px;
+    padding: 0 26px 0 12px;
+    position: relative;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-family: Inter, Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+#app .canvas-tab:hover {
+    background: color-mix(in srgb, var(--cg-secondary) 50%, transparent);
+    color: var(--cg-fg);
+}
+
+#app .canvas-tab.is-active {
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+}
+
+#app .canvas-tab.is-busy {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+#app .canvas-tab-label {
+    min-width: 0;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 未保存点：ComfyUI 是 8px 实心圆，当前 tab 用前景色 */
+#app .canvas-tab-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+#app .canvas-tabs-empty {
+    padding: 0 8px;
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+}
+
+#app .canvas-tabs-add {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-left: 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+#app .canvas-tabs-add:hover {
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+#app .canvas-tabs-add:active {
+    background: var(--cg-muted);
+}
+
+/* 亮色下 --cg-secondary(#e9e9e9) 与顶栏底 #f3f3f3 只差一档，选中块几乎看不出，
+   所以亮色取同一色阶的下一级 --cg-muted(#d9d9d9)，和左侧栏选中一致；
+   暗色仍用 ComfyUI 的 bg-secondary(#262729)。 */
+html[data-theme="light"] #app .canvas-tab.is-active {
+    background: var(--cg-muted);
+}
+
+/* 关闭按钮：照 ComfyUI WorkflowTab.vue 的 close-button 原样对齐。
+   图标 = lucide--x（16px, stroke 2, round）；位置 = absolute top-50% right-2(8px) size-4(16px)
+   垂直居中；颜色 text-muted-foreground。可见性规则（照 ComfyUI）：
+   当前标签且无状态 → 常显；任意标签 hover → 显；当前且脏 → 仅 hover 显。 */
+#app .canvas-tab-close {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    cursor: pointer;
+    visibility: hidden;
+    opacity: 0;
+    transition: background 0.12s, color 0.12s, opacity 0.12s, visibility 0.12s;
+}
+
+/* 任意标签 hover 时显示 ×（ComfyUI: group-hover/tab:visible） */
+#app .canvas-tab:hover .canvas-tab-close {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* 当前标签且无脏标记：× 常驻（ComfyUI: isActiveTab && !hasStatusIndicator → visible） */
+#app .canvas-tab.is-active:not(.is-dirty) .canvas-tab-close {
+    visibility: visible;
+    opacity: 1;
+}
+
+#app .canvas-tab-close:hover {
+    background: color-mix(in srgb, var(--cg-fg) 16%, transparent);
+    color: var(--cg-fg);
+    opacity: 1;
+}
+
+#app .canvas-tab-close svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+}
+
+/* --------------------------------------- 画布管理：卡片网格（恢复上游默认） */
+/* 用户要求改用卡片（不用列表）。上游 CanvasManager 即卡片网格（grid +
+   repeat(auto-fill,minmax(214px,1fr)) + 16px 圆角 + 内联打开/删除按钮 + 元信息盒）；
+   卡片点击 = 打开（上游 onClick 已接 store.open，自动进顶部条 open-tabs）；
+   当前/选中卡的中性配色见上一段 .cm-card.is-current / .is-selected。
+   卡片右上角内联三枚 .cm-icon 按钮，顺序为：复制 / 编辑名称 / 删除；
+   自定义右击菜单已移除，头部的「新建画布」按钮也已删除（新建走顶部标签栏 +）。 */
+
+/* 保存画布命名弹窗 —— 按 ComfyUI 官方「保存工作流」弹窗源码复刻
+   源码链：dialogService.prompt() -> GlobalDialog.vue -> DialogContent.vue
+   (dialog.variants.ts: surface=card / size=md) / DialogHeader.vue /
+   DialogTitle.vue / DialogClose.vue / PromptDialogContent.vue /
+   Button (button.variants.ts: 默认 variant=secondary) / Input.vue /
+   DialogOverlay.vue。标题为纯文本（官方 DialogTitle 无前置图标）。
+   数值来自 Tailwind 类；配色只用 :root 语义令牌（--cg-* = ComfyUI
+   charcoal/smoke/azure 调色板），不采样截图。
+   注：z-index 用 10000 而非官方 z-1700 —— 画布是独立 iframe，需要盖住
+   右下浮动工具条等高层元素。 */
+#app .xcat-save-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, .7);                /* DialogOverlay: bg-black/70 */
+    font-family: Inter, Arial, sans-serif;
+}
+
+/* dialogContentVariants: rounded-2xl border bg-background shadow-lg,
+   size md -> sm:max-w-xl (36rem), w-[calc(100vw-1rem)], max-h-[85vh], 居中 */
+#app .xcat-save-dlg {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10001;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: calc(100vw - 1rem);
+    max-width: 36rem;                             /* 576px */
+    max-height: 85vh;
+    border: 1px solid var(--cg-border);           /* --border charcoal-200 */
+    border-radius: 16px;                          /* rounded-2xl */
+    background: var(--cg-bg);                     /* --background charcoal-800 */
+    color: var(--cg-fg);                          /* --foreground white */
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1);
+    outline: none;
+    overflow: hidden;
+}
+
+/* DialogHeader: flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2 */
+#app .xcat-save-head {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 16px 16px 8px;
+}
+
+/* DialogTitle: min-w-0 text-base(16px) font-semibold text-foreground，纯文本 */
+#app .xcat-save-title {
+    display: block;
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--cg-fg);
+    overflow-wrap: anywhere;
+}
+
+/* DialogClose: Button size=icon (32px) rounded-lg, variant=muted-textonly */
+#app .xcat-save-x {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-muted-fg);                    /* --muted-foreground smoke-800 */
+    cursor: pointer;
+    transition: background-color .1s, color .1s;
+}
+
+#app .xcat-save-x:hover {
+    background: var(--cg-accent);                 /* hover:bg-accent charcoal-400 */
+    color: var(--cg-fg);
+}
+
+/* GlobalDialog 内容包裹: flex min-h-0 flex-1 flex-col overflow-auto px-4 py-2 */
+#app .xcat-save-body {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: auto;
+    padding: 8px 16px;
+}
+
+/* PromptDialogContent: flex flex-col gap-2 pt-8 */
+#app .xcat-save-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 32px;
+}
+
+/* PromptDialogContent label: flex flex-col gap-1 text-sm text-muted-foreground */
+#app .xcat-save-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--cg-muted-fg);
+}
+
+/* Input.vue: h-10 w-full min-w-0 rounded-lg border-none bg-secondary
+   px-4 py-2 text-sm text-foreground, focus-visible:ring-1 ring-ring */
+#app .xcat-save-input {
+    display: flex;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-secondary);              /* --secondary charcoal-600 */
+    color: var(--cg-fg);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 20px;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+}
+
+#app .xcat-save-input::placeholder {
+    color: var(--cg-muted-fg);
+}
+
+#app .xcat-save-input:focus {
+    box-shadow: 0 0 0 1px var(--cg-muted-fg);    /* --ring = --muted-foreground */
+}
+
+/* Button: base rounded-md font-inter text-sm font-medium + size md
+   (h-8 rounded-lg p-2 text-xs), 官方默认 variant=secondary
+   (bg-secondary text-foreground hover:bg-accent), 父级 flex-col 自动拉伸全宽 */
+#app .xcat-save-confirm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cg-secondary);              /* bg-secondary charcoal-600 */
+    color: var(--cg-fg);                          /* text-foreground */
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color .1s;
+}
+
+#app .xcat-save-confirm:hover {
+    background: var(--cg-accent);                 /* hover:bg-accent charcoal-400 */
+}
+
+/* ------------------------------------------------- 资产管理：右侧预览区等比显示 */
+/* 上游 .am-preview-body 是 display:grid + 隐式 auto 行，媒体只写了
+   max-width/max-height:100% + object-fit:contain。grid 的 auto 行高由内容决定，
+   百分比 max-height 在这里退化成 none（循环依赖），于是竖向素材只按宽度
+   max-width:100% 撑开，长边超出预览框被 overflow:hidden 裁掉；横向素材高度
+   小于框高，所以看起来正常 —— 就是"按宽度控制"的现象。
+   上游自己在 .cmp-side video / .vp-video 里用的是
+   width:100%;height:100%;object-fit:contain（盒尺寸确定，contain 才生效），
+   这里照抄那套：绝对定位铺满 position:relative 的 .am-preview-body，
+   让宽高都成为确定值，图片和视频一律等比完整显示、居中。
+   注意 object-fit 对没有确定盒尺寸的 <img> 不起作用，光加 contain 没用。 */
+#app .float-window .am-preview-body img,
+#app .float-window .am-preview-body video {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+    object-position: center;
+}
+
+/* 右上角的下载 / 删除按钮要盖在铺满的媒体之上 */
+#app .float-window .am-preview-tools {
+    z-index: 2;
+}
+
+/* ------------------------------------------------- 画布背景：对齐 ComfyUI */
+/* 真源（sourcemap）：src/assets/palettes/{dark,light}.json 的
+   colors.litegraph_base.BACKGROUND_IMAGE（100×100 平铺图）与
+   CLEAR_BACKGROUND_COLOR；colorPaletteService.ts 把二者交给 litegraph，
+   Comfy.ColorPalette 默认值是 'dark'。
+   把那张图放大到 4 倍逐像素看过：100px 块内每 10px 一条 1px 细线，
+   块边缘（每 100px）一条更深的强调线；不是点阵。
+   dark : 底 #222222 / 细线 #191919 / 强调 #141414
+   light: 底 #dddddd / 细线 #e6e6e6 / 强调 #ebebeb
+   本包是 Vue Flow 不是 litegraph，所以用两层 <Background variant="lines">
+   （gap 10 / gap 100）复刻，线色由 qa() 的 canvasGridColor /
+   canvasGridMajorColor 按主题返回（见 bundle xcat 补丁）。scaledGap = gap × zoom，
+   因此网格和 ComfyUI 一样随缩放 / 平移。
+   这里只改 --c-bg —— 上游 body{background:var(--c-bg)} 是画布唯一底色来源，
+   侧栏 / 面板用的是 --cg-* 与 --c-surface*，不受影响。 */
+:root {
+    --c-bg: #222222;
+}
+
+html[data-theme="light"] {
+    --c-bg: #dddddd;
+}
+
+/* ------------------------------------------------- 「拖拽」= ComfyUI read_only */
+/* 真源：LGraphCanvas.ts 的 _processPrimaryButton()，read_only 时左键在任何位置
+   （包括节点上）都变成 dragging_canvas；useCanvasInteractions.ts 的
+   handleLeftButtonReadOnlyPointer 也把只读态左键 pointer 事件转发给画布。
+   Vue Flow 的 .vue-flow__nodes 本身是 pointer-events:none，只有
+   .vue-flow__node / .vue-flow__edge / .vue-flow__nodesselection-rect /
+   .vue-flow__handle 接管事件；只读时把这些也关掉，事件就落到
+   .vue-flow__pane，由 d3-zoom 平移画布，节点自然不可选 / 拖 / 连。
+   光标照 _updateCursorStyle：readOnly=grab、draggingCanvas=grabbing。 */
+html.xcat-canvas-hand .vue-flow__pane,
+html.xcat-canvas-hand .vue-flow__viewport {
+    cursor: grab !important;
+}
+
+html.xcat-canvas-hand.xcat-canvas-grabbing .vue-flow__pane,
+html.xcat-canvas-hand.xcat-canvas-grabbing .vue-flow__viewport {
+    cursor: grabbing !important;
+}
+
+html.xcat-canvas-hand .vue-flow__node,
+html.xcat-canvas-hand .vue-flow__edge,
+html.xcat-canvas-hand .vue-flow__nodesselection-rect,
+html.xcat-canvas-hand .vue-flow__handle {
+    pointer-events: none !important;
+}
+
+/* 可编辑（选择）模式的光标照 litegraph _updateCursorStyle：
+   非只读是 default，框选时 crosshair，拖画布时 grabbing；
+   上游 Vue Flow 给 .vue-flow__pane.draggable 写了 grab，会让两种模式看起来一样。 */
+html:not(.xcat-canvas-hand) .vue-flow__pane {
+    cursor: default !important;
+}
+
+html:not(.xcat-canvas-hand) .vue-flow__pane.selection {
+    cursor: crosshair !important;
+}
+
+html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
+    cursor: grabbing !important;
+}
+
+/* 官方 CanvasModeSelector 用 ImperativePopover：打开时聚焦当前选中项，
+   上下键在菜单项间移动，Esc 关闭并把焦点还给按钮。 */
+#app .canvas-tabbar .tb-mi:focus-visible {
+    outline: none;
+    background: var(--cg-accent);
+}

@@ -21,6 +21,10 @@ const TEMP_HOT = "#B33A3A";
 const BOX_BG = "#262729"; // 段/按钮底色
 const TEXT_COLOR = "#FFFFFF"; // 数值文字颜色
 const LABEL_COLOR = "rgba(255,255,255,.55)"; // 标签文字颜色
+// 画布入口用醒目的黄绿底色，文字随之换成深色（否则白字压不住亮底）
+const CANVAS_BG = "#F2FF59";
+const CANVAS_BG_HOVER = "#E1EF3F";
+const CANVAS_INK = "#15170A";
 
 let root = null;
 let segs = {};
@@ -164,31 +168,85 @@ async function runCleanup(kind, btn, inputs) {
 }
 
 /** 清理按钮：与状态行同高（30px）的英文两行按钮，上=VRAM/RAM，下=Cleanup */
-function mkCleanupButton(kind, top, bottom, inputs) {
+/**
+ * 菜单栏两行按钮的共用外观：清理按钮与画布入口都走这里。
+ * palette 可选，用来给某个按钮换一套底色/文字色（默认沿用状态段的深灰底白字）。
+ * strongBottom: 第二行也用 11px/600 主色（画布入口用，两行同款）。
+ */
+function mkBarButton(top, bottom, title, palette) {
+  const skin = palette || {};
+  const bg = skin.bg || BOX_BG;
+  const bgHover = skin.bgHover || "rgba(255,255,255,.12)";
+  const inkStrong = skin.inkStrong || TEXT_COLOR;
+  const inkSoft = skin.inkSoft || LABEL_COLOR;
+  const border = skin.border || "rgba(255,255,255,.14)";
+  const strongBottom = skin.strongBottom === true;
   const btn = mk("button");
   btn.type = "button";
-  btn.title = top + " " + bottom;
+  btn.title = title || top + " " + bottom;
   btn.style.cssText = [
     "display:flex;flex-direction:column;align-items:center;justify-content:center;",
     "width:50px;height:30px;flex-shrink:0;border-radius:4px;",
-    "border:1px solid rgba(255,255,255,.14);background:" + BOX_BG + ";",
-    "color:#FFFFFF;cursor:pointer;padding:0;line-height:1.15;",
+    "border:1px solid " + border + ";background:" + bg + ";",
+    "cursor:pointer;padding:0;line-height:1.15;",
     "transition:background .15s;",
   ].join("");
   const line1 = mk("div");
   line1.textContent = top;
-  line1.style.cssText = "font-size:11px;font-weight:600;color:" + TEXT_COLOR + ";";
+  line1.style.cssText = "font-size:11px;font-weight:600;color:" + inkStrong + ";";
   const line2 = mk("div");
   line2.textContent = bottom;
-  line2.style.cssText = "font-size:10px;color:" + LABEL_COLOR + ";";
+  // 画布入口两行同款（11px / 600 / 深色），清理按钮的第二行仍走弱化样式
+  line2.style.cssText = strongBottom
+    ? "font-size:11px;font-weight:600;color:" + inkStrong + ";"
+    : "font-size:10px;color:" + inkSoft + ";";
   btn.append(line1, line2);
   btn.addEventListener("mouseenter", () => {
-    if (!btn.disabled) btn.style.background = "rgba(255,255,255,.12)";
+    if (!btn.disabled) btn.style.background = bgHover;
   });
   btn.addEventListener("mouseleave", () => {
-    if (!btn.disabled) btn.style.background = BOX_BG;
+    if (!btn.disabled) btn.style.background = bg;
   });
+  return btn;
+}
+
+function mkCleanupButton(kind, top, bottom, inputs) {
+  const btn = mkBarButton(top, bottom, top + " " + bottom);
   btn.addEventListener("click", () => runCleanup(kind, btn, inputs));
+  return btn;
+}
+
+/** 竖分隔符：把画布入口与清理按钮分开 */
+function mkSeparator() {
+  const sep = mk("div");
+  sep.style.cssText = "width:1px;height:22px;background:rgba(255,255,255,.22);margin:0 3px;flex:0 0 auto;";
+  return sep;
+}
+
+/**
+ * 无限画布入口：位于清理按钮左侧。
+ * 页面本体与路由来自 infinite_canvas/（vendored 子包），弹窗由
+ * web/infinite_canvas.js 提供，这里只负责菜单栏按钮与桥接。
+ */
+function mkCanvasButton() {
+  const btn = mkBarButton("Infinite", "Canvas", "Infinite Canvas", {
+    bg: CANVAS_BG,
+    bgHover: CANVAS_BG_HOVER,
+    inkStrong: CANVAS_INK,
+    border: "rgba(0,0,0,.22)",
+    strongBottom: true,
+  });
+  btn.id = "xcat-infinite-canvas-entry";
+  btn.addEventListener("click", () => {
+    const bridge = window.__XXXXXLCatInfiniteCanvas;
+    if (bridge && typeof bridge.toggle === "function") {
+      bridge.toggle();
+      return;
+    }
+    // 入口脚本可能尚未 setup，把动作排队，桥接装好后补放一次
+    if (!window.__XXXXXLCatInfiniteCanvasPending) window.__XXXXXLCatInfiniteCanvasPending = [];
+    window.__XXXXXLCatInfiniteCanvasPending.push("toggle");
+  });
   return btn;
 }
 
@@ -198,6 +256,9 @@ function build() {
   root.style.cssText =
     "display:flex;flex-direction:row;gap:5px;flex-wrap:wrap;align-items:center;" +
     "user-select:none;cursor:default;";
+  // 画布入口固定在清理按钮左侧，与清理按钮之间用竖分隔符隔开
+  root.append(mkCanvasButton());
+  root.append(mkSeparator());
   // 清理按钮放在状态行左侧：RAM Cleanup 在左、VRAM Cleanup 在右（与状态段同高 30px）
   root.append(
     mkCleanupButton("ram", "RAM", "Cleanup", {
@@ -210,9 +271,7 @@ function build() {
   root.append(
     mkCleanupButton("vram", "VRAM", "Cleanup", { offload_model: true, offload_cache: true })
   );
-  const sep = mk("div");
-  sep.style.cssText = "width:1px;height:18px;background:rgba(255,255,255,.16);margin:0 2px;";
-  root.append(sep);
+  root.append(mkSeparator());
   segs.cpu = mkSeg("cpu", "CPU", COLORS.cpu);
   segs.ram = mkSeg("ram", "RAM", COLORS.ram);
   segs.gpu = mkSeg("gpu", "GPU", COLORS.gpu);
