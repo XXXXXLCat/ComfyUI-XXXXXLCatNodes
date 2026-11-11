@@ -3,3 +3,5 @@ __pycache__/
 batch/*.db
 .workbuddy/memory/
 .workbuddy/tmp/
+# vendored infinite_canvas 补丁的中间备份：文件留在磁盘上（唯一的原始 dist 副本），不进库
+*.bak.js
