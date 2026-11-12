@@ -321,25 +321,7 @@
     true
   )
 
-  /* 文本节点不接收媒体文件：拖入直接吞掉，避免 media 里塞进看不见的数据。
-     捕获阶段拦截，赶在 Vue Flow 的 drop 处理之前。 */
-  document.addEventListener(
-    'drop',
-    function (ev) {
-      var el = ev.target && ev.target.closest ? ev.target.closest('.vue-flow__node') : null
-      if (!el) return
-      var flow = window.__xcatFlow
-      if (!flow || !flow.getNodes) return
-      var id = el.getAttribute('data-id')
-      var n = flow.getNodes.value.find(function (x) { return x.id === id })
-      var role = n && window.__xcatRole ? window.__xcatRole(n.data) : ''
-      if (role === 'asset-text') {
-        ev.preventDefault()
-        ev.stopPropagation()
-      }
-    },
-    true
-  )
+  /* 媒体文件拖入拦截统一交给 xcat-no-media-import.js（生成类 + 素材文本）。 */
 
   window.__xcatNodeMenu = { openAt: openAt, close: closeMenu, create: createNode }
 

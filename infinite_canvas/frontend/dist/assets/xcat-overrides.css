@@ -4036,3 +4036,255 @@ html[data-theme="light"] .xcat-nodemenu.is-canvas {
 #app .demo-node:has(.xcat-text-wrap) > .xcat-node-name {
     display: none;
 }
+
+
+/* ------------------------------------------------------------------------
+ * 生成节点不接受素材导入（2026-11-13 02:40）
+ * bundle 模板把空节点的「点击上传」按钮换成 .xcat-gen-empty 说明文字；
+ * xcat-no-media-import.js 在捕获阶段拦 dragover / drop，命中时给节点描红
+ * 并用 ::after 显示一句说明（文案由 data-xcat-deny-text 传进来）。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .xcat-gen-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 0 20px;
+    color: var(--cg-muted-fg);
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+    user-select: none;
+    pointer-events: none;
+}
+
+#app .flow-wrap .demo-node.xcat-drop-denied {
+    outline: 2px solid var(--cg-destructive);
+    outline-offset: -2px;
+}
+
+#app .flow-wrap .demo-node.xcat-drop-denied::after {
+    content: attr(data-xcat-deny-text);
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    z-index: 60;
+    transform: translateX(-50%);
+    padding: 6px 10px;
+    border: 1px solid var(--cg-destructive);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cg-destructive) 25%, var(--cg-bg));
+    box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
+    color: var(--cg-fg);
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+
+/* ------------------------------------------------------------------------
+ * 文本节点按 Markdown 显示（2026-11-13 02:50）
+ * xcat-markdown.js 往 .xcat-text-wrap 插一块 .xcat-text-render；
+ * 平时 textarea 透明（仍保留 DOM 供 Vue 绑定与双击编辑），渲染层覆盖其上；
+ * 编辑态反过来：渲染层 display:none，textarea 恢复不透明。
+ * 渲染层 pointer-events:none 是硬要求——鼠标放上去必须仍能拖动节点
+ * （滚轮滚动由脚本在捕获阶段按坐标改写，不靠 DOM 命中）。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .xcat-text-wrap {
+    position: relative;
+}
+
+#app .flow-wrap .xcat-text-area {
+    opacity: 0;
+}
+
+#app .flow-wrap .demo-node.xcat-text-editing .xcat-text-area {
+    opacity: 1;
+}
+
+#app .flow-wrap .xcat-text-render {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    overflow: auto;
+    padding: 8px 10px;                /* 与 textarea 完全对齐，切编辑不跳字 */
+    border-radius: 12px;
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.65;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    user-select: none;
+    pointer-events: none;
+    scrollbar-width: auto;
+}
+
+#app .flow-wrap .demo-node.xcat-text-editing .xcat-text-render {
+    display: none;
+}
+
+#app .flow-wrap .xcat-text-render::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+}
+
+#app .flow-wrap .xcat-text-render::-webkit-scrollbar-button {
+    display: none;
+}
+
+#app .flow-wrap .xcat-text-render::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--cg-scroll, var(--cg-line));
+    background-clip: padding-box;
+}
+
+#app .flow-wrap .xcat-text-render > :first-child {
+    margin-top: 0;
+}
+
+#app .flow-wrap .xcat-text-render > :last-child {
+    margin-bottom: 0;
+}
+
+#app .flow-wrap .xcat-text-render h1,
+#app .flow-wrap .xcat-text-render h2,
+#app .flow-wrap .xcat-text-render h3,
+#app .flow-wrap .xcat-text-render h4,
+#app .flow-wrap .xcat-text-render h5,
+#app .flow-wrap .xcat-text-render h6 {
+    margin: 0.55em 0 0.3em;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+#app .flow-wrap .xcat-text-render h1 { font-size: 1.5em; }
+#app .flow-wrap .xcat-text-render h2 { font-size: 1.32em; }
+#app .flow-wrap .xcat-text-render h3 { font-size: 1.16em; }
+#app .flow-wrap .xcat-text-render h4 { font-size: 1.05em; }
+#app .flow-wrap .xcat-text-render h5 { font-size: 1em; }
+#app .flow-wrap .xcat-text-render h6 { font-size: 0.92em; }
+
+#app .flow-wrap .xcat-text-render h1,
+#app .flow-wrap .xcat-text-render h2 {
+    padding-bottom: 0.2em;
+    border-bottom: 1px solid var(--cg-line);
+}
+
+#app .flow-wrap .xcat-text-render p {
+    margin: 0 0 0.6em;
+}
+
+#app .flow-wrap .xcat-text-render strong { font-weight: 700; }
+#app .flow-wrap .xcat-text-render em { font-style: italic; }
+#app .flow-wrap .xcat-text-render del { opacity: 0.6; }
+
+#app .flow-wrap .xcat-text-render a {
+    color: var(--cg-primary);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--cg-primary) 45%, transparent);
+}
+
+#app .flow-wrap .xcat-text-render code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--cg-muted) 65%, transparent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88em;
+}
+
+#app .flow-wrap .xcat-text-render pre {
+    margin: 0.5em 0;
+    padding: 8px 10px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cg-muted) 38%, transparent);
+    overflow: auto;
+}
+
+#app .flow-wrap .xcat-text-render pre code {
+    padding: 0;
+    background: none;
+}
+
+#app .flow-wrap .xcat-text-render blockquote {
+    margin: 0.5em 0;
+    padding: 2px 0 2px 10px;
+    border-left: 3px solid var(--cg-border);
+    color: var(--cg-muted-fg);
+}
+
+#app .flow-wrap .xcat-text-render ul,
+#app .flow-wrap .xcat-text-render ol {
+    margin: 0.35em 0 0.6em;
+    padding-left: 1.5em;
+}
+
+#app .flow-wrap .xcat-text-render li { margin: 0.12em 0; }
+#app .flow-wrap .xcat-text-render li > ul,
+#app .flow-wrap .xcat-text-render li > ol { margin: 0.12em 0; }
+
+#app .flow-wrap .xcat-text-render hr {
+    height: 0;
+    margin: 0.8em 0;
+    border: 0;
+    border-top: 1px solid var(--cg-line);
+}
+
+#app .flow-wrap .xcat-text-render table {
+    width: 100%;
+    margin: 0.5em 0;
+    border-collapse: collapse;
+    font-size: 0.92em;
+}
+
+#app .flow-wrap .xcat-text-render th,
+#app .flow-wrap .xcat-text-render td {
+    padding: 4px 8px;
+    border: 1px solid var(--cg-line);
+    text-align: left;
+}
+
+#app .flow-wrap .xcat-text-render th {
+    font-weight: 700;
+    background: color-mix(in srgb, var(--cg-muted) 40%, transparent);
+}
+
+#app .flow-wrap .xcat-text-render img {
+    max-width: 100%;
+    max-height: 220px;
+    border-radius: 6px;
+}
+
+#app .flow-wrap .xcat-text-render .xcat-md-check {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid var(--cg-border);
+    border-radius: 3px;
+    line-height: 12px;
+    text-align: center;
+    font-size: 11px;
+    vertical-align: -1px;
+}
+
+#app .flow-wrap .xcat-text-render .xcat-md-check.is-checked {
+    border-color: var(--cg-primary);
+    background: var(--cg-primary);
+    color: var(--cg-primary-fg);
+}
+
+#app .flow-wrap .xcat-text-render li:has(> .xcat-md-check) {
+    margin-left: -1.35em;
+    list-style: none;
+}
+
+#app .flow-wrap .xcat-text-render .xcat-md-hint {
+    color: var(--cg-muted-fg);
+    opacity: 0.75;
+}

@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Infinite-Canvas</title>
-  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js?v=20261113m"></script>
+  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js?v=20261113n"></script>
   <link rel="stylesheet" crossorigin href="/infinite_canvas/app/assets/index-5rMw4exW.css?v=20261112o">
   <!-- 本包本地调整，必须排在上面这个样式之后 -->
-  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css?v=20261113l">
+  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css?v=20261113n">
   <script defer src="/infinite_canvas/app/assets/xcat-audio-wave.js?v=20261112d"></script>
   <script defer src="/infinite_canvas/app/assets/xcat-media-controls.js?v=20261112g"></script>
   <script defer src="/infinite_canvas/app/assets/xcat-node-names.js"></script>
@@ -17,11 +17,15 @@
   <!-- 连线中点圆点，点击断开（ComfyUI drawCenterMarker） -->
   <script defer src="/infinite_canvas/app/assets/xcat-edge-mid.js?v=20261112d"></script>
   <!-- 左栏「新建节点」八选一（素材：图片/视频/音频/文本 · 生成：图片/视频/音频/文本） -->
-  <script defer src="/infinite_canvas/app/assets/xcat-new-node.js?v=20261113k"></script>
-  <!-- 画布内 Ctrl+V 粘贴外部图片 / 视频 / 音频 / 文字，直接建素材节点 -->
-  <script defer src="/infinite_canvas/app/assets/xcat-paste.js?v=20261113i"></script>
+  <script defer src="/infinite_canvas/app/assets/xcat-new-node.js?v=20261113n"></script>
+  <!-- 生成类节点 / 素材文本节点不接受媒体导入（拖入 + 点击上传都拦） -->
+  <script defer src="/infinite_canvas/app/assets/xcat-no-media-import.js?v=20261113a"></script>
+  <!-- 画布内 Ctrl+V 粘贴 / 拖入图片 / 视频 / 音频 / 文字 / txt / md，直接建素材节点 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-paste.js?v=20261113k"></script>
   <!-- 文本节点：双击进入编辑，平时与普通节点一样可拖动 -->
   <script defer src="/infinite_canvas/app/assets/xcat-text-edit.js?v=20261113j"></script>
+  <!-- 文本节点：平时按 Markdown 渲染显示，双击编辑原始源码 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-markdown.js?v=20261113b"></script>
 </head>
 <body>
   <!-- 连线描边滤镜：复刻 ComfyUI litegraph 的 render_connections_border

@@ -1708,6 +1708,40 @@ textarea 吃掉，节点删不掉。进入时光标放在文本末尾。
 **样式**（`xcat-overrides.css`）：14px / 行高 1.65 / padding 8×10 / 无边框无背景，
 颜色 `var(--c-text)`（暗 `#e6e6ea`、亮 `#23232b`），滚动条按面板那套 6px 细条。
 
+**按 Markdown 渲染显示（`assets/xcat-markdown.js`，2026-11-13 02:50）**
+
+`asset-text` / `gen-text` 平时显示**解析后的排版**，双击才回到 Markdown 源码编辑。
+实现不改 bundle：脚本往 `.xcat-text-wrap` 追加一块 `.xcat-text-render`，读
+`textarea.value` 解析成 HTML；平时 textarea `opacity:0`（DOM 与 Vue 绑定都保留），
+`.xcat-text-editing` 时反转——渲染层 `display:none`、textarea 恢复不透明。
+渲染层恒定 `pointer-events:none`，这是「鼠标放上去与其它节点一致、可拖动」的前提；
+实测命中元素是 `.xcat-text-wrap`、不带 `.nodrag`，文本节点与素材图片节点的拖拽位移一致。
+
+- **自带解析器**，不引 CDN / npm（画布是离线 iframe，上游 bundle 里也没有
+  marked / markdown-it）。支持 ATX 标题、段落、粗体 / 斜体 / 删除线、行内代码、
+  围栏代码块、引用（可嵌套）、有序 / 无序列表（缩进嵌套 + 任务列表）、GFM 表格
+  （含对齐）、分割线、链接 / 图片 / 自动链接、反斜杠转义。
+  段落内单换行渲染 `<br>`（GFM `breaks:true`）——画布里写提示词逐行换行是刚需，
+  CommonMark 默认「软换行 = 空格」不好用。
+- **安全**：文本先整体 HTML 转义再解析；行内代码、图片、链接生成的标签先抽成
+  占位符，避免内容被强调规则二次改写（也防 URL 里的 `_` 被当斜体）；
+  `javascript:` / `data:` / `file:` 链接一律退化成纯文本；
+  `<a>` 带 `rel="noopener noreferrer"`。
+- **同步**：`input` 捕获事件即时重绘，`MutationObserver` 负责新节点 / 画布恢复 /
+  复制节点挂载渲染层，另有 300ms 定时兜底撤销 / `updateNodeData` 这类不走
+  input 的程序性改值（比对 `_xcatMdSrc` 短路）。
+- **长文本滚动**：渲染层 `pointer-events:none` 收不到滚轮，脚本在 document 捕获
+  阶段按坐标判断是否落在文本区，把滚轮改写成渲染层 `scrollTop` 并
+  `stopPropagation` 挡住 Vue Flow 缩放；到顶 / 到底时放行，画布仍可正常缩放。
+- 样式走 `--cg-*` 语义色（标题下边框 `var(--cg-line)`、代码底 `var(--cg-muted)`、
+  引用 `var(--cg-muted-fg)`、链接 `var(--cg-primary)`），暗 / 亮两套都实测可读。
+- 空节点显示「双击输入 Markdown 文本…」；**markdown 只是显示层，存储仍是
+  `data.text` 里的原始字符串**，旧画布 / 复制 / 保存 / 连线都不受影响。
+
+限制：不是完整 CommonMark（不支持 HTML 块、脚注、定义列表、代码块语法高亮）；
+渲染层不可选中文字、链接不可点（`pointer-events:none` 的代价），要复制内容请
+双击进入源码编辑。
+
 实测（8198 隔离实例）：菜单七项、新建 role/`workflow:""`/`text:""` 正确、
 真实键盘输入写回 `data.text` 且焦点不丢、顶部只剩删除、面板 `display:none`、
 名称胶囊 `display:none`、拖入 `preventDefault` 且 media 仍为 0、
@@ -1721,6 +1755,7 @@ textarea 吃掉，节点删不掉。进入时光标放在文本末尾。
 | 剪贴板内容 | 结果 |
 |---|---|
 | 文件（image/*、video/*、audio/*） | 每个文件建一个素材节点，`role = asset-image/video/audio` |
+| 文件（`.txt` / `.md` 等） | 读文件内容建一个**素材文本**节点 `asset-text`，内容写进 `data.text`（见下节） |
 | 只有纯文本 | 建一个素材文本节点，内容写进 `data.text` |
 | 在输入框 / 文本节点里粘贴 | 完全不拦，正常粘文字 |
 | 画布内部复制的节点 | 上游在 keydown 里 `preventDefault`，浏览器不派发 paste，不会撞车 |
@@ -1743,6 +1778,35 @@ textarea 吃掉，节点删不掉。进入时光标放在文本末尾。
 x=777/1305（差 528）、上传完成后 `pending:false` 且 `ref` 有文件名；
 再粘 mp4 → `asset-video` 自动挪到 x=1833；粘纯文本 → `asset-text`，`data.text` 为粘贴内容；
 在文本节点的 textarea 里粘文本 → `prevented:false`，节点数不变。
+
+#### 粘贴 / 拖入 txt、md 文件 → 素材文本节点（2026-11-13 03:00）
+
+`assets/xcat-paste.js` 增加文本文件分支：扩展名 `.txt/.text/.md/.markdown/.mdown/.mkd/.mdx`，
+或 mime 为 `text/plain` / `text/markdown`（兼容没有扩展名的剪贴板文件）。
+判成文本文件就**不走上载**，直接读字节 → 建 **`asset-text`（素材文本）** 节点，
+`data.text` 为文件内容，`workflow` 留空——和「只粘贴纯文本」完全是同一种节点，
+不挂工作流、不出现生成面板，也不是 `gen-text`。
+
+- **编码**：UTF-8 / UTF-8 BOM / UTF-16 LE·BE BOM / GBK 自动识别。先用
+  `TextDecoder('utf-8',{fatal:true})` 严格解码，抛错就退 GBK；BOM 单独剥掉，
+  避免中文 Windows 记事本的 ANSI 文件乱码或开头多一个 `\uFEFF`。
+- **拖入也支持**：`drop` 捕获阶段只在「落在画布空白处 + 这批文件里含文本文件」
+  时接管，落点用事件的 `clientX/clientY`；纯媒体文件仍完全交给上游 `onDrop`，
+  落在节点上不接管（由 `xcat-no-media-import.js` 决定拒收）。`dragover` 只补
+  `dropEffect='copy'`。
+- **整批串行**：解码是异步的，`handleFiles` 用 `for … await` 串行，否则多个
+  `createTextFile` 在 await 之间会算出重复的 `nextId()`。
+- 混合剪贴板（md + png）会同时建 `asset-text` 和 `asset-image`，仍按 528px 横排；
+  连续两次粘贴由 `placeClear` 自动错开；纯文本粘贴仍是 `asset-text`（未改）。
+- 新节点的内容会通过 `xcat-markdown.js` 自动按 Markdown 渲染，双击仍可编辑源码。
+
+实测（8198 干净实例 + 合成 ClipboardEvent / DragEvent）：`.md` / `.txt` / UTF-8 BOM /
+GBK（「中文测试」不乱码）全部得到 `asset-text` 且 `data.text` 正确、渲染层有 `h1`；
+md+png 混合 → `asset-text` + `asset-image(media:1)`；纯文本 → `asset-text`；
+输入框内粘贴 `prevented:false` 且节点数不变；拖 .md 到空白 → `asset-text`；
+拖纯 png → 上游建 `asset-image`、无多余文本节点；连续两次粘贴 x=777/1305 不重叠。
+汇总断言 `genText:0 / assetText:2 / allWfEmpty:true / allRendered:true`，
+选中节点下方截图确认没有生成面板与运行按钮。
 
 ### 第八种节点：生成文本 `gen-text`（2026-11-13 02:30）
 
@@ -1776,6 +1840,49 @@ x=777/1305（差 528）、上传完成后 `pending:false` 且 `ref` 有文件名
 
 限制：后端 `/api/execute` 只回传媒体文件，没有文本产物通道，所以工作流运行出来的文字
 **不会自动写进文本区**；这里的文本区目前由用户手动填写 / 编辑。
+
+### 生成节点禁止导入素材（2026-11-13 02:40）
+
+用户要求：生成节点不允许导入图片 / 视频 / 音频，不能拖进节点里。先查清上游能把媒体塞进
+**已有节点**的路径只有三条（`App.vue` / `Node/index.vue` 源码）：
+
+| 入口 | 上游处理 |
+|---|---|
+| 系统文件拖到节点 | `App.vue onDrop` → `appendMedia(nodeId, files)` |
+| 资产库素材拖到节点 | `App.vue onDrop` (`FILE_ASSET_DRAG_TYPE`) → `appendItems(targetId, …)` |
+| 空节点「点击上传」 | `file input` → `onFilesPicked` → `appendMedia` |
+
+（从节点媒体条拖出的 `ASSET_DRAG_TYPE` 落到节点上，上游本来就 `return`，不构成导入。）
+
+改动：
+
+- 新增 `assets/xcat-no-media-import.js`：在 **document 捕获阶段**拦 `dragover` / `drop`，
+  命中 `gen-*` 或 `asset-text` 就 `preventDefault + stopPropagation`，`dropEffect='none'`
+  （浏览器直接显示禁止光标），上游 `onDrop` 收不到。`click` / `change` 两道兜底防止
+  以后又冒出新的上传入口。原来写在 `xcat-new-node.js` 里的 asset-text 拦截并到这里。
+- bundle 空状态模板（`patch_gen_empty.py`，备份 `.genempty.bak.js`）：
+  `P("div",Ex,[xcatIsGen(e.data)?f("div",{class:"xcat-gen-empty"},"选择工作流并运行，生成结果会显示在这里",-1):f("button",{class:"node-upload",…`
+  —— 生成类空节点不再显示「点击上传」按钮，换成运行提示。
+- CSS：`.xcat-gen-empty` 居中灰字；拒绝时 `.xcat-drop-denied` 给节点描红并用 `::after`
+  显示 `data-xcat-deny-text`（生成类「生成节点不接受素材，请在下方运行工作流」，
+  文本节点「文本节点不接受图片 / 视频 / 音频」），1.5s 后或 dragend 时清掉。
+
+**刻意保留**的四条路径：
+
+1. 工作流运行产物走 `useGraph.appendItems`（`useGraph.js:1677`），完全不经过这些 DOM 事件；
+2. 连线输入写的是 `inputMedia`，不是 `media`；
+3. 面板素材条 `.media-strip` 内部 `ASSET_DRAG_TYPE` 且无文件的排序拖放放行，
+   否则已有素材顺序会拖不动；
+4. 拖到画布空白处新建素材节点、素材节点自身接收拖入，都不受影响。
+
+`?v=20261113n`(bundle) / `?v=20261113m`(css) / `?v=20261113l`(new-node) / 新脚本 `?v=20261113a`。
+
+实测（8198 干净实例）：生成节点无 `.node-upload`、有 `.xcat-gen-empty`；拖文件 / 资产库
+素材 → `dropEffect=none`、`.flow-wrap` 收不到 drop（探针 0）、`media` 恒 0、节点描红；
+文件框 `change` 被吞（`files=0`）；素材图片节点拖同样文件 → `media: 0→1`、探针 1（无误伤）；
+`appendItems` 手动塞运行产物 → `media: 0→1`（未堵）；选中生成节点后 `.strip-item`
+的 ASSET 拖放 → dragover/drop 均到达 `.flow-wrap`、不描红（排序放行）；
+`gen-text` 与 `asset-text` 拖文件同样拦下。
 
 ## 功能
 
