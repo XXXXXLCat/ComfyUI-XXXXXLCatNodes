@@ -3154,15 +3154,12 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
 }
 
 /* ==================================================================
-   视频控制条避让 resize 手柄
+   视频控制条避让 resize 手柄（历史规则，现已由 .xcat-mbar 接管）
    ------------------------------------------------------------------
-   .vp-bar 是通宽的底部控制条（padding:7px 10px 8px），最右侧是静音按钮；
-   .node-resize 固定在 right:4px / bottom:4px、22×22、z-index:21。
-   内容铺满节点后两者压在同一个角上，实测重叠 16×18px，且 resize 盖在
-   静音按钮上（elementFromPoint 命中 resize 的 svg），音量根本点不到。
-   把控制条右内边距加到 36px：静音按钮与进度条右端一起左移，右下角
-   26px 让给 resize，二者之间还留 10px 间隙。只影响视频控制条，
-   图片 / 音频 / 空节点不受影响。
+   上游 .vp-bar 现在被 xcat-media-controls.js 隐藏（display:none），
+   视频条改由 .xcat-mbar 自绘。这条规则保留仅作双保险：万一隐藏失效、
+   上游条重新露出，右内边距仍是 36px，不会盖住 .node-resize。
+   新条的避让规则见下方 `.demo-node .xcat-mbar`。
    ================================================================== */
 #app .demo-node .vp-bar {
     padding-right: 36px;
@@ -3270,7 +3267,7 @@ html[data-theme=light] {
 
 
 /* ==================================================================
-   音频节点控制条（自绘，零上游依赖）
+   媒体控制条（视频 / 音频共用一套自绘，零上游依赖）
    ------------------------------------------------------------------
    上一版直接复用上游 .vp-bar / .vp-btn / .vp-time / .vp-seek + scoped 属性，
    排查「时间右侧三个蓝点 / 每秒抖一下」时一直被那套东西干扰：
@@ -3282,14 +3279,17 @@ html[data-theme=light] {
        不触发布局）；
      · 时间拆成「当前 / 分隔 / 总长」三段固定宽度，秒数进位不改变总宽；
      · 不用任何原生表单控件，没有 ::-webkit-slider-thumb 的内缩与吸整像素。
-   几何仍与视频 .vp-bar 对齐：gap 8 / padding 7 8 8 10 / 按钮 20 / 时间 10px。
+   视频节点同样换掉了上游 .vp-bar（那条被 JS 隐藏，新建 .xcat-vbar），
+   两种条共用 .xcat-mbar 的几何：gap 8 / padding 7 10 8 / 按钮 20 /
+   时间 10px / 进度 3px + 9px 圆点 / 音量条 60px。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
     display: none;
 }
 
-.xcat-aw-bar {
+/* 音频条 .xcat-aw-bar 与视频条 .xcat-vbar 共用这一套几何与配色 */
+.xcat-mbar {
     position: absolute;
     left: 0;
     right: 0;
@@ -3298,11 +3298,17 @@ html[data-theme=light] {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 36px 8px 10px;
+    padding: 7px 10px 8px;
     background: linear-gradient(transparent, #000000c7 45%);
     color: #f2f2f2;
     touch-action: none;
     user-select: none;
+}
+
+/* 节点里右下角有 .node-resize 手柄（right 4 / bottom 4 / 22×22 / z-index 21），
+   控制条右内边距给 36px 让开它；大预览里没有手柄，用上面的 10px。 */
+.demo-node .xcat-mbar {
+    padding-right: 36px;
 }
 
 /* 按钮：与上游 .vp-btn 同尺寸同色 */
@@ -3429,48 +3435,9 @@ html[data-theme=light] {
     box-shadow: 0 0 0 3px rgba(255, 255, 255, .28);
 }
 
-/* 视频控制条末尾那个原生音量滑块（上游没有，由本包追加） */
-.xcat-vol {
-    flex: 0 0 auto;
-    width: 60px;
-    height: 3px;
-    margin: 0;
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background: linear-gradient(to right,
-        var(--accent-yellow) 0,
-        var(--accent-yellow) var(--vol, 100%),
-        rgba(255, 255, 255, .32) var(--vol, 100%),
-        rgba(255, 255, 255, .32) 100%);
-}
+/* 视频条原来的原生 <input type=range> 音量滑块已随整条换掉，
+   .xcat-vol 相关规则删除（新版音量条走 .xaw-vol 自绘滑块）。 */
 
-.xcat-vol::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    width: 9px;
-    height: 9px;
-    border: 0;
-    border-radius: 50%;
-    background: var(--accent-yellow);
-}
-
-.xcat-vol::-moz-range-thumb {
-    width: 9px;
-    height: 9px;
-    border: 0;
-    border-radius: 50%;
-    background: var(--accent-yellow);
-}
-
-/* 大预览里没有 resize 手柄，右侧不用额外让位 */
-.xcat-audio-wave.is-preview .xcat-aw-bar {
-    padding-right: 10px;
-}
 
 
 

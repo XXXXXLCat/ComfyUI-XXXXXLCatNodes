@@ -1,27 +1,31 @@
 /* ==================================================================
-   xcat-media-controls.js — 媒体控制条补强（不动压缩 bundle）
+   xcat-media-controls.js — 媒体控制条（视频 / 音频共用一套自绘实现）
    ------------------------------------------------------------------
-   1) 视频节点：上游 .vp-bar 的音量按钮只有「静音 / 取消静音」两个状态，
-      这里在控制条末尾追加一个音量滑块，直接读写同一个 <video>.volume。
-      Vue 自己的 onVolumechange 仍会同步静音按钮图标，互不干扰。
-      视频条本身完全交给上游，本脚本一个字节都不改。
-   2) 音频节点：xcat-audio-wave.js 生成的波形保留不变，在波形底部补一条
-      控制条 —— 这一版是**完全自绘**的，不引用上游任何 .vp-* class，
-      也不补 data-v-5b5d8e84 scoped 属性：
-        · 进度 / 音量都是 div + span 画的（轨道 + 填充 + 圆点），
-          没有任何原生 input[type=range]；
-        · 位置用 transform: scaleX / translate3d 驱动，亚像素、走合成层，
-          不会像原生 thumb 那样按整像素吸附、也不会触发重排；
-        · 时间拆成「当前 / 分隔 / 总长」三段定宽，秒数进位不改变总宽，
-          右侧元素不会每秒被挤动一下；
-        · 播放时用 rAF 跟随 currentTime（而不是只听 timeupdate 的 ~4Hz），
-          暂停 / 拖动时用事件补一帧。
-      几何与视频条对齐：gap 8 / padding 7 8 8 10 / 按钮 20 / 时间 10px /
-      进度 3px 高 + 9px 圆点。右侧 36px 留白给 .node-resize 手柄。
+   视频节点与音频节点现在用**同一份**控制条代码：播放 / 时间 / 进度 /
+   静音 / 音量，全部自绘，不引用上游 .vp-btn / .vp-time / .vp-seek，
+   也不补 data-v-5b5d8e84 scoped 属性。
 
-   为什么全用 DOM 注入而不是改 bundle：.vp-bar 是压缩产物里的 Vue 组件，
-   改它要重写渲染函数与 patch flag；而 Vue 对 vnode 之外追加的 DOM 不会
-   清理（children 由 vnode 数组管理，不按 childNodes 索引重排），注入安全。
+   这套东西要解决的三个观感问题：
+     · 原生 input[type=range] 的 thumb 位置按整像素吸附，222px 的条上
+       每秒只走 1.55px，看起来就是「一顿一顿」；而且 thumb 内缩 4.5px，
+       0% / 100% 与轨道对不齐。
+     · 进度填充用 background 百分比（--progress），同样只能整像素跳。
+     · 时间文字由浏览器按内容撑宽，秒数从 9 进位到 10 时整串变宽，
+       右边元素每秒被挤一下；甚至被压窄后画出省略号「…」。
+   新实现：进度 / 音量是 div + span 画的（轨道 + 填充 + 圆点），位置只用
+   transform: scaleX / translate3d 驱动（亚像素、走合成层、不触发布局）；
+   时间拆成「当前 / 分隔 / 总长」三段定宽（22 + 9 + 22 = 53px），进位
+   不改总宽；播放时用 rAF 每帧跟随媒体时间，而不是只听 timeupdate 的 ~4Hz。
+
+   视频条怎么换：
+     上游 .vp-bar 是压缩 bundle 里的 Vue 组件（<div class="video-player">
+     下 [video, .vp-bar]），改它要重写渲染函数。做法与节点操作按钮一致：
+     把原 .vp-bar 隐藏（保留 DOM，Vue 的 patch 仍以它为锚点，不会出错），
+     在同一个 .video-player 里追加自己的 .xcat-vbar。Vue 不会清理 vnode
+     之外的追加节点（children 按 vnode 数组管理，不按 childNodes 索引重排）。
+
+   几何：gap 8 / padding 7 10 8 / 按钮 20 / 时间 10px / 进度 3px + 9px
+   圆点 / 音量条 60px；节点里右内边距 36px 让开 .node-resize（见 CSS）。
    ================================================================== */
 (function () {
   'use strict';
@@ -56,23 +60,8 @@
     });
   }
 
-  /* ---------------------------------------------------------- 视频音量滑块 */
-  function mkVolumeInput() {
-    var s = document.createElement('input');
-    s.className = 'xcat-vol nodrag';
-    s.type = 'range';
-    s.min = '0'; s.max = '1'; s.step = '0.01'; s.value = '1';
-    s.title = '音量';
-    s.setAttribute('aria-label', '音量');
-    /* 拖动滑块不能触发 Vue Flow 的拖节点 / 卡片切素材 */
-    ['mousedown', 'pointerdown', 'click', 'dblclick', 'wheel'].forEach(function (t) {
-      s.addEventListener(t, function (e) { e.stopPropagation(); });
-    });
-    return s;
-  }
-
   /* ---------------------------------------------------------- 自绘滑块
-     返回 { root, set }。set(0..1) 只改变量 + transform，不碰布局。
+     返回 { root, set }。set(0..1) 只改变换，不碰布局。
      轨道左右各内缩 4.5px，圆点中心正好落在轨道两端。 */
   function mkSlider(cls, label, onInput) {
     var root = document.createElement('div');
@@ -168,64 +157,12 @@
     return b;
   }
 
-  /* 把音量滑块 / 静音按钮与一个媒体元素绑定。
-     paint(v) 负责把 0..1 画到滑块上（原生 input 或自绘滑块都行）。
-     ownMute=true 时由本脚本切换静音（音频控制条）；
-     false 时静音按钮归 Vue 管，只靠 volumechange 同步（视频控制条）。 */
-  function bindVolume(media, paint, muteBtn, ownMute) {
-    function sync() {
-      var v = media.muted ? 0 : (typeof media.volume === 'number' ? media.volume : 1);
-      paint(v);
-      if (muteBtn) {
-        var silent = media.muted || media.volume === 0;
-        muteBtn.innerHTML = silent ? ICON_MUTE : ICON_VOL;
-        muteBtn.title = silent ? '取消静音' : '静音';
-      }
-    }
-    if (ownMute && muteBtn) {
-      muteBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        media.muted = !media.muted;
-        if (!media.muted && media.volume === 0) media.volume = .5;
-        sync();
-      });
-    }
-    media.addEventListener('volumechange', sync);
-    sync();
-    return sync;
-  }
-
-  /* ---------------------------------------------------------- 视频节点 */
-  function installVideoBar(bar) {
-    if (installed.has(bar) || bar.querySelector('.xcat-vol')) return;
-    var host = bar.parentElement;
-    var video = host && host.querySelector('.vp-video');
-    if (!video) return;                       // 组件还没渲染完，下次扫描再装
-    var slider = mkVolumeInput();
-    bar.appendChild(slider);                  // 追加到末尾，不插进 vnode 中间
-    function paintVol(v) {
-      slider.value = String(v);
-      slider.style.setProperty('--vol', (v * 100) + '%');
-    }
-    bindVolume(video, paintVol, null, false);
-    slider.addEventListener('input', function () {
-      var v = Math.max(0, Math.min(1, Number(slider.value) || 0));
-      video.volume = v;
-      if (v > 0 && video.muted) video.muted = false;
-      paintVol(v);
-    });
-    installed.set(bar, true);
-  }
-
-  /* ---------------------------------------------------------- 音频波形 */
-  function installAudioWave(wave) {
-    if (installed.has(wave)) return;
-    /* xcat-audio-wave.js 会先清空容器再建 <audio>，等它就绪 */
-    var audio = wave.querySelector('.xcat-wave-audio');
-    if (!audio) return;
-
+  /* ---------------------------------------------------------- 控制条
+     为任意媒体元素（<video> / <audio>）建一条自绘控制条。
+     cls 决定挂哪个 class（xcat-aw-bar / xcat-vbar），几何由 .xcat-mbar 提供。 */
+  function buildBar(media, cls) {
     var bar = document.createElement('div');
-    bar.className = 'xcat-aw-bar nodrag';
+    bar.className = 'xcat-mbar ' + cls + ' nodrag';
 
     var play = mkIconButton('xaw-btn xaw-play', '播放', ICON_PLAY);
     var mute = mkIconButton('xaw-btn xaw-mute', '静音', ICON_VOL);
@@ -243,59 +180,44 @@
     time.appendChild(tSep);
     time.appendChild(tDur);
 
+    function duration() {
+      var d = media.duration;
+      return (d && isFinite(d) && d > 0) ? d : 0;
+    }
+
     var seek = mkSlider('xaw-seek', '进度', function (p) {
       var d = duration();
       if (!d) return;
-      try { audio.currentTime = p * d; } catch (_) { /* ignore */ }
-      /* 波形靠这个事件重绘播放头 */
-      try { audio.dispatchEvent(new Event('timeupdate')); } catch (_) { /* ignore */ }
+      try { media.currentTime = p * d; } catch (_) { /* ignore */ }
+      paintProgress();
+      paintTime();
     });
 
     var vol = mkSlider('xaw-vol', '音量', function (p) {
-      audio.volume = p;
-      if (p > 0 && audio.muted) audio.muted = false;
+      media.volume = p;
+      if (p > 0 && media.muted) media.muted = false;
     });
 
-    /* 顺序与视频 .vp-bar 一致：播放 / 时间 / 进度 / 静音 / 音量 */
+    /* 顺序与上游 .vp-bar 一致：播放 / 时间 / 进度 / 静音 / 音量 */
     bar.appendChild(play);
     bar.appendChild(time);
     bar.appendChild(seek.root);
     bar.appendChild(mute);
     bar.appendChild(vol.root);
-    wave.appendChild(bar);
-    stopAll(bar);
-
-    /* 按钮上的 stopPropagation 先于整条的 stopAll 生效没关系，
-       关键是不能让 pointerdown 冒到 Vue Flow 触发拖节点 */
-    play.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (!audio.getAttribute('src')) return;
-      if (audio.paused) {
-        var p = audio.play();
-        if (p && p.catch) p.catch(function () { /* 无手势 / 源不可播 */ });
-      } else audio.pause();
-    });
-
-    function duration() {
-      var d = audio.duration;
-      return (d && isFinite(d) && d > 0) ? d : 0;
-    }
 
     var lastSec = -1, playing = false, raf = 0;
 
-    /* 只写 transform，不读布局（span() 里读 clientWidth 每帧一次，
-       会强制同步布局；这里缓存下来，尺寸变了由 ResizeObserver 重画） */
+    /* 只写 transform，不读布局；paint 内部也不读 clientWidth（已缓存） */
     function paintProgress() {
       var d = duration();
-      seek.set(d ? Math.min(1, Math.max(0, audio.currentTime / d)) : 0);
+      seek.set(d ? Math.min(1, Math.max(0, (media.currentTime || 0) / d)) : 0);
     }
     function paintTime() {
-      var d = duration();
-      var s = Math.floor(audio.currentTime || 0);
+      var s = Math.floor(media.currentTime || 0);
       if (s === lastSec) return;          // 秒数没变就不碰 DOM
       lastSec = s;
-      tCur.textContent = fmt(audio.currentTime);
-      tDur.textContent = fmt(d);
+      tCur.textContent = fmt(media.currentTime);
+      tDur.textContent = fmt(duration());
     }
     function frame() {
       if (!playing) return;
@@ -305,35 +227,88 @@
     }
     function repaint() { paintProgress(); paintTime(); }
 
-    audio.addEventListener('loadedmetadata', function () { lastSec = -1; repaint(); });
-    audio.addEventListener('durationchange', function () { lastSec = -1; repaint(); });
-    audio.addEventListener('timeupdate', function () { if (!playing) repaint(); });
-    audio.addEventListener('seeked', function () { lastSec = -1; repaint(); });
-    audio.addEventListener('play', function () {
+    play.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (media.paused) {
+        if (!media.getAttribute('src')) return;
+        var p = media.play();
+        if (p && p.catch) p.catch(function () { /* 无手势 / 源不可播 */ });
+      } else media.pause();
+    });
+
+    media.addEventListener('loadedmetadata', function () { lastSec = -1; repaint(); });
+    media.addEventListener('durationchange', function () { lastSec = -1; repaint(); });
+    media.addEventListener('timeupdate', function () { if (!playing) repaint(); });
+    media.addEventListener('seeked', function () { lastSec = -1; repaint(); });
+    media.addEventListener('play', function () {
       playing = true;
       play.innerHTML = ICON_PAUSE;
       play.title = '暂停';
       cancelAnimationFrame(raf);
       frame();
     });
-    audio.addEventListener('pause', function () {
+    media.addEventListener('pause', function () {
       playing = false;
       play.innerHTML = ICON_PLAY;
       play.title = '播放';
       cancelAnimationFrame(raf);
       repaint();
     });
-    audio.addEventListener('ended', function () {
+    media.addEventListener('ended', function () {
       playing = false;
       cancelAnimationFrame(raf);
       lastSec = -1;
       repaint();
     });
 
-    bindVolume(audio, function (v) { vol.set(v); }, mute, true);
+    /* 静音按钮由本脚本自己管（上游那颗已被隐藏） */
+    function syncVol() {
+      var v = media.muted ? 0 : (typeof media.volume === 'number' ? media.volume : 1);
+      vol.set(v);
+      var silent = media.muted || media.volume === 0;
+      mute.innerHTML = silent ? ICON_MUTE : ICON_VOL;
+      mute.title = silent ? '取消静音' : '静音';
+    }
+    mute.addEventListener('click', function (e) {
+      e.stopPropagation();
+      media.muted = !media.muted;
+      if (!media.muted && media.volume === 0) media.volume = .5;
+      syncVol();
+    });
+    media.addEventListener('volumechange', syncVol);
 
+    stopAll(bar);
+    syncVol();
     lastSec = -1;
     repaint();
+
+    return bar;
+  }
+
+  /* ---------------------------------------------------------- 视频节点 */
+  function installVideoBar(bar) {
+    if (installed.has(bar)) return;
+    var host = bar.parentElement;              // .video-player（position:relative）
+    if (!host) return;
+    var video = host.querySelector('.vp-video');
+    if (!video) return;                        // 组件还没渲染完，下次扫描再装
+
+    /* 原条保留在 DOM 里（Vue 的 patch 锚点），只藏起来 */
+    bar.style.display = 'none';
+    bar.setAttribute('data-xcat-off', '1');
+
+    host.appendChild(buildBar(video, 'xcat-vbar'));
+    installed.set(bar, true);
+  }
+
+  /* ---------------------------------------------------------- 音频波形 */
+  function installAudioWave(wave) {
+    if (installed.has(wave)) return;
+    /* xcat-audio-wave.js 会先清空容器再建 <audio>，等它就绪 */
+    var audio = wave.querySelector('.xcat-wave-audio');
+    if (!audio) return;
+
+    wave.appendChild(buildBar(audio, 'xcat-aw-bar'));
     installed.set(wave, true);
   }
 
@@ -361,13 +336,10 @@
     install: installAll,
     stats: function () {
       return {
-        videoBars: document.querySelectorAll('.vp-bar .xcat-vol').length,
+        videoBars: document.querySelectorAll('.xcat-vbar').length,
         audioBars: document.querySelectorAll('.xcat-aw-bar').length,
-        seeks: document.querySelectorAll('.xaw-seek').length,
-        vols: Array.from(document.querySelectorAll('.xaw-vol')).map(function (s) {
-          var th = s.querySelector('.xaw-thumb');
-          return { tf: th && th.style.transform };
-        })
+        hiddenUpstream: document.querySelectorAll('.vp-bar[data-xcat-off]').length,
+        seeks: document.querySelectorAll('.xaw-seek').length
       };
     }
   };

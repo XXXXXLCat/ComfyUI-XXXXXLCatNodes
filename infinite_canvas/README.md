@@ -977,6 +977,54 @@ currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
 `hoverHead:false / cursor:default`；0.1 倍速播放时鼠标不动、播放头走远后
 `hoverHead` 自动 false；控制台无报错。截图 `wave-grab-*.png`。
 
+### 控制条整体重做：视频 / 音频共用一套自绘（2026-11-12 续 4）
+
+前面几轮一直在「修」借用上游 `.vp-*` 的音频条，用户最终判定方向不对，直接
+下令：**「或者你直接删除这几个控件，重新做一组」**。于是音频条整组换成自绘
+（`5b7ec0a`），接着用户补了一句 **「视频节点也一样要改啊」**，视频条同步替换。
+
+- **视频条怎么换**：`.vp-bar` 是压缩 bundle 里 `VideoPlayer` 的渲染产物
+  （`.video-player` 下 `[video.vp-video, div.vp-bar]`），改它等于重写渲染函数。
+  做法与节点操作按钮一致 —— **把原条隐藏但留在 DOM 里**（`display:none` +
+  `data-xcat-off="1"`，Vue 的 patch 仍以它为锚点，children 按 vnode 数组管理、
+  不按 childNodes 索引重排，所以不会报错），再往同一个 `.video-player` 里追加
+  自己的 `div.xcat-mbar.xcat-vbar`。原条里的 `input.vp-seek` 仍在、仍会被
+  `timeupdate` 写值，但 `display:none` 不进渲染、不产生任何像素。
+- **两套条共用一份实现**：`xcat-media-controls.js` 里 `buildBar(media, cls)`
+  只管 `<video>` / `<audio>` 的事件与时间，几何全部来自 `.xcat-mbar`；
+  音频挂 `.xcat-aw-bar`、视频挂 `.xcat-vbar`，内部统一 `.xaw-*`。
+- **几何**：`padding: 7px 10px 8px` + `gap 8`；节点里
+  `.demo-node .xcat-mbar { padding-right: 36px }` 让开 `.node-resize`
+  （right 4 / bottom 4 / 22×22 / z-index 21），大预览里没有手柄就回到 10px。
+  子元素：按钮 20×20 / 时间 53.28（三段 `22+9+22`）/ 进度 222.72×14（其中线 3px）
+  / 音量条 60。
+- **为什么必须是自绘**：原生 `input[type=range]` 的 thumb 按整像素吸附、内缩
+  4.5px，222.72px 的条播放 99.88s 每秒只走 1.55px，看起来就是每秒一顿；
+  `--progress` 渐变同理只能整像素跳；时间串宽度随数字变化还会挤动右侧元素，
+  被压窄时浏览器直接画省略号（就是用户看到的「三个蓝点」）。
+  新实现：轨道 / 填充 / 圆点三个 `span`，位置只写
+  `transform: scaleX()` + `translate3d()`（亚像素、合成层、不触发布局），
+  宽度缓存在 `spanPx`（`ResizeObserver` 更新），paint 每帧不读 `clientWidth`。
+- **播放跟随**：不再只吃 `timeupdate` 的 ~4Hz，播放中 `requestAnimationFrame`
+  每帧刷进度；秒数没变就不碰文本节点。
+
+**实测**（8199 + CDP 真实鼠标，节点 `81` = `11月9日(1).mp4`，缩放归 1）：
+
+| 指标 | 结果 |
+|---|---|
+| bar | 454×35，`pad 7px 36px 8px 10px`，gap 8 |
+| 时间 / 进度 / 音量 | 53.28 / 222.72 / 60（与音频条逐项相同） |
+| 40 帧采样 | 39 帧有位移，**整数位移帧 0%**，步长 0.10~0.30px 连续 |
+| 时间宽度 | 全程恒定 53.28（`0:00/0:15` → `0:01/0:15` 不变） |
+| 拖动 | 30%→80% ⇒ `currentTime 12.19 / thumb translate3d(173.9px)`，节点坐标不变 |
+| 静音 / 播放 | `muted` 双向切换、图标与 title 同步；播放 / 暂停图标正常 |
+| 上游条 | `display:none`，`height:0`，不占位不吞事件 |
+| 控制台 | 无报错 |
+
+`index.html` 资源版本：`xcat-overrides.css?v=20261112g`、
+`xcat-media-controls.js?v=20261112g`（改这两份文件后必须同时改版本号，
+否则浏览器会拿旧缓存）。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。
