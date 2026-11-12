@@ -267,12 +267,44 @@
     两个标签时删当前 → `[Unsaved Canvas(active), 另一个]`，被删 id 已出数组；
     切标签、`+` 新建、`×` 关闭均正常。
 
-改动集中在四个文件：
+29. **连线中点补一个圆点，点它断开这条线**：圆点半径 5、线色实心、随缩放变，
+   `zoom<0.6` 隐藏 —— 全部照 ComfyUI `pathRenderer.drawCenterMarker()` 的源码；
+   点击走 `flow.removeEdges([id])`，与 Delete 删边同一条 action（自动存盘生效）。
+   hover 命中圆 ⇒ 镂空成**圆环**（外径不变、中间挖黑孔）；上游那个悬停就冒出来、
+   hover 变红的 `.edge-delete`（18px 圆 + 红叉）整块隐藏。
+   实现是新文件 `assets/xcat-edge-mid.js` + `xcat-overrides.css` 里的
+   `.xcat-edge-mid` / `.xcat-edge-mid-hit` 几条规则，详见下节「连线中点圆点」。
+
+30. **框选键改回 `Ctrl + 拖`、剪线只认 `Alt + 拖`**（bundle 两处）：上游把
+   `Ctrl` 和 `Alt` 都当剪线套索，早先只能让框选退到 `Shift`。现在
+   `selectionKeyCode = "Control"`、剪线入口 `me()` 只判断 `altKey`；
+   剪线轨迹同时从红改成白（纯 CSS）。详见「选择 / 拖拽 的功能语义」节。
+
+31. **一个节点只对应一个素材 / 一对节点只能连一条线**（bundle 九处）：
+   `appendMedia` / `appendItems` 从「往后追加数组」改成「只留一个」（拖到已有素材的
+   节点上 = 替换）；空白处一次拖入多个文件 = 每个文件建一个节点、横向排开
+   （间距 `节点宽 + 48`，注意要先把基准点换算成画布坐标再加偏移，否则会跟着
+   zoom 一起缩水）；`addEdge` 入口按**无序点对**去重。详见下节同名小节。
+
+32. **顶部操作按钮按素材类型出现**（bundle 一处 + 新增 `xcatFanActions()`）：
+   裁切 / 扩图 / 宫格只在 `kind === "image"` 时渲染，下载要有当前素材，全部下载要
+   ≥2 个素材；无素材的节点只剩「预览」一枚（删除节点由
+   `xcat-node-actionbar.js` 追加在行末）。   面板左侧工具列共用同一份过滤结果。
+   详见「操作按钮按素材类型出现」节。
+
+33. **拖进来的素材节点不再挂生成参数**（bundle 七处 + 两段 CSS）：上游 `baseData()`
+   给每个新节点都塞 `workflow = 默认工作流`，于是「拖一张图进画布」得到的节点也带
+   提示词框、高宽比 / 百万像素参数和「运行」按钮。现在建素材节点时 `workflow = ""`，
+   面板里的提示词 / 参数网格 / 运行行只在 `data.workflow` 非空时渲染（`xcatIsGen()`），
+   面板宽度跟着收缩成一条素材条。详见「素材节点 vs 生成节点」节。
+
+改动集中在五个文件：
 
 | 文件 | 改动 |
 | --- | --- |
 | `__init__.py`（子包后端） | 新增 `POST /infinite_canvas/api/workflows/{name}/rename`：`os.replace` 改 json、`.fields.json` 跟着改名、`canvas_settings.json` 的 `workflow_order` 就地换名；重名 409 / 空名 400 / 源不存在 404 |
-| `frontend/dist/index.html` | 多引一个 `<link>` 指向 `assets/xcat-overrides.css` |
+| `frontend/dist/index.html` | 多引一个 `<link>` 指向 `assets/xcat-overrides.css`；再引 `xcat-edge-mid.js`（正文里的 `#xcat-link-halo` 滤镜也在这里） |
+| `frontend/dist/assets/xcat-edge-mid.js` | 新增文件：给每条边插中点一个实心 `<circle>` + 一个 r=10 的透明命中圆（命中圆叠在上面，hover 时圆点 `.is-hot` 镂空成圆环）、`cx/cy = path.getPointAtLength(len/2)`、`zoom<0.6` 隐藏、点击 `removeEdges` 断开；边是「一条一个 svg」，必须全局按 `data-id` 遍历，另加 500ms 兜底轮询补首次渲染漏掉的边 |
 | `frontend/dist/assets/xcat-overrides.css` | 新增文件：`--cg-*` 的 ComfyUI 语义色、侧栏尺度变量、`.library-dock` 左侧通高栏、`.canvas-menu` 沉到底部、栏底主题项的双图标 / 双文案按 `html[data-theme]` 显隐、分组细线、面板内 `--c-*` 令牌重映射、右下角工具条与两个弹层、`html.xcat-links-hidden`、`@font-face` 按官方同名注册 Inter（normal + italic，另留 `"XCat Inter"` 别名）+ `html,body` 全量 Inter 栈 + `#app textarea/select` 字体继承、资产管理右侧预览区等比完整显示（`.am-preview-body img/video` 绝对定位铺满 + `width/height:100%` + `object-fit:contain`，修上游 `max-height:100%` 在 grid auto 行里失效、竖向图片/视频只按宽度撑开被裁的问题；`.am-preview-tools` 补 `z-index:2`）、面板滚动条（`.lib-list` / `.asset-grid` / `.am-grid`，以及弹窗内的 `.cm-list` / `.am-side-inner` / `.am-prompt-body` / `.wf-left` / `.wf-list`：`scrollbar-width:auto` 复位全局 none + `::-webkit-scrollbar` 10px 轨道 / 6px 圆角滑块 / 隐藏 button / `background-clip:padding-box`，`--cg-scroll` 暗 `--muted` 亮 `--border`；配合 `overflow-x:hidden`、`scrollbar-gutter:stable`（**不含 `.float-body`**：它已不滚动，留着 gutter 会在弹窗右侧空出 10px））、画布底色 `--c-bg` 按 ComfyUI dark/light
    调色板改 `#222222` / `#dddddd`、主题项双图标显隐选择器泛化成 `#app .xcat-ico-*` / `#app .xcat-lbl-*`（按钮已从 `.lib-tab` 移到 `.cm-item`）、`xcat-canvas-hand` 只读模式（节点 / 边 / handle 的 `pointer-events:none` 与 grab/grabbing 光标）、非只读 pane 的 default / crosshair 光标、`.tb-mi:focus-visible`、`.xcat-exit-tab` 文字与 svg 按 `var(--cg-fg)` 取色（暗白亮黑，hover 不回落）、`--xcat-rail-icon: 19.2px`（官方 `1.2em`）、`.xcat-tab-label` 按官方 `side-bar-button-label` 的 10px / leading-none / text-center / w-max / max-width 52px / line-clamp-2 / whitespace-normal、`.library-tabs` padding 改 `4px 0`、`.lib-head` 改官方 `min-h-16` 64px 垂直居中 + `.library-panel > .lib-head + *` 补 `pt-2` 8px（三面板顶部留白）、`.lib-title` 16px/700、`.lib-cats` gap 8px + wrap、`.lib-cat` 按官方 Tab 改 14px / 32px / 10px / 8px / 无边框 / shrink-0、⑪ 六类内容块（`.lib-cats` / `.lib-list` / `.asset-grid` / `.lib-compose` / `.lib-foot` / `.lib-head`）水平边距统一 `px-4` 16px、header gap 与块间距统一 8px（4px 网格）、空态 16px / 更多 8px、`.asset-cell` 圆角 8px、三个弹窗的内容区按模板对话框 / 资产浏览器重排（容器 `px-6 pb-10`、按钮 `h-8 rounded-lg text-xs`、输入 `h-9`、左栏 224px + NavItem、右面板 352px、网格 `minmax(15rem)` / `minmax(min(240px,30vw))`、卡片 `rounded-lg p-2`、空态 40px mask 图标、弹窗 `max-width:1400px`、标题栏 `border-bottom:0`；亮面按钮 / 当前卡底改 `--muted` 并用 `:not()` 排除 `inverted` / `destructive`，详见下节）；画布管理贴栏侧滑面板（`.float-mask:has(+ .float-window .cm)` 隐藏遮罩、`.float-window:has(.cm)` 固定定位 57/38→底 + `min(360px,40vw)` + 64px 头 + 无圆角右边线、`.cm` 两行清单项 `.cm-card` 的 grid 重排与 `.cm-card-meta` 跨两列、`.cm-brand` 隐藏、栏内高亮 `#app:has(.float-window .cm) .lib-tab[title="画布管理"]`、亮面 `.cm-card.is-current` 用 `--cg-muted`、头部 `.cm-bar` 绝对定位浮到标题栏右侧 + `.cm-state` 与 `.float-close` 隐藏 + `.cm-btn:disabled` 弱化、`.float-body` 改 `overflow:visible`） |
 | `frontend/dist/assets/index-*.js` | 三十处，注释 `xcat:` 可搜的几处：① `.cm-pop` 的渲染条件 `o.value?` 改成 `!0?`（菜单常驻）；② 菜单里「亮色模式」按钮改为放进 `.cm-pop`（2026-11-12 起是该菜单唯一一项）；③ 菜单里「释放显存」按钮置空；④「退出画布」去掉 `is-danger` 类，之后又整体移出 `.cm-pop`（见㉑）；⑤ `TM()` 里把 Vue Flow 实例挂到 `window.__xcatFlow`；⑥ 底栏组件 `bk` 整段重写（保留 `__name: "index"` 与 `emits`，图标 SVG 用 lucide 的 path；2026-11-12 又按 ComfyUI `read_only` 语义重写了选择 / 拖拽接线：V/H/空格、菜单 aria、只读光标类，详见「选择 / 拖拽 的功能语义」）；⑦ 底栏删掉「聚焦节点」「工作流配置」两个按钮。另十三处无注释：⑧ `LibraryDock` 的 setup 取 `close` 与 `qa().toggleTheme`，在 `.library-tabs` 末尾追加分组细线 + 画布管理 / 资产管理 / 工作流 / 亮色模式四个按钮；⑨⑩ 底栏删掉画布管理、资产管理、亮色模式三个按钮（连同末尾的分隔符）；⑪ 三处 `width:"92vw",height:"86vh"` → `90vw` / `80vh`；⑫ 浮窗组件 `WS` 的根改成 `[div.float-mask, div.float-window]` Fragment 并补 `aria-modal`（弹窗遮罩）；⑬ App 的 setup 里追加顶部画布切换条（`onMounted` 里插 DOM + `watch` 同步，见下节）；⑭ 在 ⑬ 基础上重做（详见下节「顶部画布切换条」）：store 注入 `saveAsNew` / `duplicate` / `resetToUnsaved` 三方法，并把 `open` / `create` / `remove` 接到 `window.__xcatOpenTabs`（**open-tabs 模型**）。**Unsaved Canvas 用 `id=""` 作为常驻标签始终排在首位**——打开 / 新建画布只会往后面追加，不会把它挤掉；关闭掉最后一个真实画布后它自动回到首位（保证至少 1 个标签）。顶部条**每个标签（含 Unsaved）都带 × 关闭按钮**：关闭图标严格照 ComfyUI `WorkflowTab.vue` 用 `lucide--x`（16px、`right-2`/`size-4`、`top-50%` 垂直居中、`text-muted-foreground`），可见性规则＝当前且无脏标记常显、其余（含当前脏）hover 显；末尾「＋」新建按钮 2026-11-12 起改用 ComfyUI 前端包的 `lucide--plus` 细线加号（原先照 `WorkflowTabs.vue` 用 PrimeIcons `pi-plus` 实心加号，为与侧栏 / 面板图标统一已换，见㉔）。画布管理面板恢复为上游**卡片网格**（`.cm-list` 仍是 `grid; minmax(214px,1fr)`），卡片右上角内联 **复制 / 编辑名称 / 删除** 三枚 `.cm-icon` 按钮（`duplicate` 从 `canvasStore` 注入 `CanvasManager` 的 setup）；头部「新建画布」按钮与自定义右击菜单（`.xcat-cm-menu`）已删除，新建只走顶部标签栏「+」（`bootstrap` 无画布时默认进 Unsaved Canvas；`window` 上挂 `keydown` 捕获 Ctrl/Cmd+S 保存，有 `currentId` 走 `saveNow`、否则 `saveAsNew`）。所有新代码集中在旧顶部条注入块 `const canvasTabBusy=te(!1);` 到 `canvasTabsSync()});` 这一段，store 注入在 `w.value=!0}}const q=F=>` 之前，可用注释 `xcat:` 检索；⑮-⑳ 画布背景与栏底主题：`qa()` 把 `canvasGridColor` 换成 ComfyUI 调色板线色并新增 `canvasGridMajorColor`，App setup 解构后者；主画布 `<Background>` 由 20px 点阵换成两层 `variant:"lines"`（`gap:10` / `gap:100`，强调层传 `id:"xcat-major"` 避免 pattern id 撞车），工作流预览小画布同样换 10px 线格；`.library-tabs` 里的主题按钮连同 分组细线删除，按钮移进 `CanvasMenu` 的 `.cm-pop`、排在「退出画布」之前（复用 setup 里已有的 `u()` → `toggleTheme`）；㉑ **退出画布挪到侧栏顶部**：`CanvasMenu` 的 `.cm-pop` 里删掉该 `cm-item` 及 setup 里的 `c()`，在 `LibraryDock` 的 `.library-tabs` 首位插入 `.lib-tab.xcat-exit-tab`（沿用原退出 svg；`onClick` 内联 `window.self!==window.top` → postMessage / `history.back()` / `/`），CSS 按 `var(--cg-fg)` 给文字与 svg 取色（暗白亮黑）；㉒ 侧栏 9 枚图标全换 lucide，由 `.workbuddy/tmp/patch_rail_lucide.py` 解 ComfyUI 前端包 CSS 的 `--svg` 后按按钮顺序替换（保留 `xcat-ico-sun` / `xcat-ico-moon` 的 class）；㉓ `.library-tabs` 的 7 个 `On(" 文字 ",-1)` 裸文本节点换成 `f("span",{class:"xcat-tab-label"},"文字",-1)`，让字号 / 行高 / 换行 / 居中能单独按官方设置；㉔ 面板内 12 枚 `f("svg")` 整体换成 lucide（保留 width/height/class/-1，`viewBox` 统一 24、`stroke` 由 data URI 的 black 改 `currentColor`），顶部标签栏 `innerHTML` 的实心「+」换 `lucide--plus`，由 `.workbuddy/tmp/patch_panel_lucide.py` 完成；㉕ `AssetManager` 的 input/output 分段 `f("div",GS,...)` 整体从 `.am-bar` 移到 `.am-side` 首子节点（「文件类型」上方）、左栏折叠按钮 `f("button",{class:"am-side-toggle"...})` 整段删除（`a` 仍是 `te(!0)`、`.am-side` 的 `is-collapsed` 判断保留但恒 false），并把手改过的 aside children patchFlag 由 `2`(CLASS) 降为 `0`(全量 diff) 防优化跳过，；㉖ 画布管理侧栏按钮的 onClick 由 `xcatCloseDock(),Ul("canvas")` 改成 `xcatCloseDock(),Ja("canvas")?Qa("canvas"):Ul("canvas")`（再点一次关闭，与其它 tab 一致），由 `.workbuddy/tmp/patch/patch_cm_toggle.py` 完成；㉗ `.library-tabs` 的分组细线 `f("span",{class:"xcat-rail-sep"},null,-1)` 从「画布管理」前移到「资产管理」前（画布管理归入上面那组贴栏面板），由 `.workbuddy/tmp/patch/patch_rail_sep.py` 完成；㉘ 侧栏那一项的 `title` 与 `.xcat-tab-label` 文字「画布管理」→「画布」，且「提示词 / 资产库 / 日志」三个 tab 的 onClick 改成切换前先 `Ja("canvas")&&Qa("canvas")`（画布面板开着时点面板 tab 会自动关掉），由 `.workbuddy/tmp/patch/patch_rail_name_close.py` 完成由 `.workbuddy/tmp/patch_tabs_to_rail.py` 完成；㉙ `WorkflowConfig` 加重命名：setup 里注入 `xcatRenameWorkflow()`（原生 DOM 弹层 + `POST /workflows/{name}/rename`），`.wf-actions` 里插 `class="wf-rename"` 按钮（`key:2`，夹在「保存配置」与「删除」之间），由 `.workbuddy/tmp/patch/patch_wf_rename.py` 完成（备份 `index-BXU58XDe.wfrename.bak.js`）；㉚ **删除画布后顶部条不出 Unsaved Canvas 的修复**（三处）：store 的 `remove` 末尾补 `window.__xcatPruneTabs(O)`，并在已无真实标签时把 `__xcatOpenTabs` 重置为 `[""]`；顶部条 `sync()` 渲染前先过滤掉 list 里已不存在的 id（`filter(id => id==="" || list 里有它)`），别处删除也不留空标签栏；`sync()` 里 Unsaved 的隐藏条件补上 `qt.currentId.value!==""`（当前就停在 Unsaved 时，即使还有别的标签也把它显示出来，避免"没有任何 active 标签"）。由 `.workbuddy/tmp/patch/patch_tabs_del.py` 完成（幂等，备份 `index-BXU58XDe.deltab.bak.js`） |
@@ -534,18 +566,27 @@ App 的根节点是 **block**（`openBlock()` + `createElementBlock`），Vue �
 本包是 Vue Flow 不是 litegraph，`bk` 组件的 `applyMode()` 用 store 选项等价实现：
 `panOnDrag = [0,1,2]`（两模式左键都平移）；选择时
 `nodesDraggable / nodesConnectable / elementsSelectable / edgesUpdatable = true`、
-`selectionKeyCode = "Shift"`、`deleteKeyCode = "Backspace"`；拖拽时这些全关，
+`selectionKeyCode = "Control"`、`deleteKeyCode = "Backspace"`；拖拽时这些全关，
 `selectionKeyCode / deleteKeyCode = null`，并给 `<html>` 加 `xcat-canvas-hand`
 （CSS 让 `.vue-flow__node / edge / handle / nodesselection-rect` 全部
 `pointer-events:none`，事件落到 pane 由 d3-zoom 平移；光标 `grab` / `grabbing`）。
 非只读时 pane 光标 `default`、框选时 `crosshair`、拖画布时 `grabbing`。
 模式持久化在 `localStorage["xcat:canvas-toolbar"]`。
 
-**唯一与官方不同的按键**：ComfyUI 用 `Ctrl/Cmd + 拖` 框选，但上游无限画布的
-`canvasGraph` 把 `Ctrl/Alt + 左键拖` 用作「切断连线」套索（`me()` 在 pointerdown
-捕获阶段 `preventDefault + stopPropagation`，会挡住 Vue Flow 的 pointerdown）。
-为不破坏这个既有功能，框选沿用 Vue Flow 原生的 `Shift + 拖`，`Ctrl/Alt` 仍归剪线；
-`multiSelectionKeyCode` 保持上游默认（`Control` / Mac `Meta`）。
+**键位分工（与 ComfyUI 一致）**：`Ctrl + 左键拖` = 框选，`Alt + 左键拖` = 剪线。
+
+上游无限画布的 `canvasGraph` 原本把 `Ctrl` 和 `Alt` **都**当「切断连线」套索
+（`me()` 在 pointerdown 捕获阶段 `preventDefault + stopPropagation`，会挡掉
+Vue Flow 的框选），所以早先这一项只能退让成 `Shift + 拖`。现在改回来了，两处
+bundle 补丁（`patch_selection_keys.py`，幂等，备份 `.selkeys.bak.js`）：
+
+| 位置 | 原 | 现 |
+|---|---|---|
+| `applyMode()` | `selectionKeyCode = "Shift"` | `"Control"` |
+| `canvasGraph` 剪线入口 `me()` | `if (button!==0 \|\| !(ctrlKey\|\|altKey)) return` | `if (button!==0 \|\| !altKey) return` |
+
+`multiSelectionKeyCode` 保持上游默认（非 mac `Control` / mac `Meta`）：与框选同键
+不冲突 —— 框选只从 pane 上按下触发，`Ctrl + 点节点` 仍是加选。
 
 按钮顺序（从左到右）：模式选择 │ 适应视图 缩放控制 │ 网格吸附 隐藏连接线 —— 两个开关按
 ComfyUI 的做法把「隐藏连接线」收在末尾（官方工具栏也是 minimap / link visibility 收尾）。
@@ -696,8 +737,9 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
 - `#app .demo-node`：`border:0 / padding:0 / radius:12`，保留 `background:var(--c-panel-2)`
   仅供空节点识别区域（有媒体时被完全盖住）；不能再给节点加 `overflow:hidden`，
   `.node-delete` / `.node-resize` / `.node-panel` 都是它的绝对定位子元素，会被裁掉。
-- `#app .vue-flow__node.selected .demo-node` 与 `.is-connect-hot:hover`：用
-  `box-shadow:0 0 0 2px var(--c-accent)` 的发光环替代原来的 `border-color`。
+- `#app .vue-flow__node.selected .demo-node`：用 `box-shadow:0 0 0 1px var(--xcat-sel)`
+  的白色细环（宽度与 ComfyUI `strokeShape` 的 `lineWidth:1` 一致）；
+  `.is-connect-hot:hover` 仍用 `0 0 0 2px var(--c-accent)` 的黄色环 —— 那是「可连接」语义。
 - `.media-stack` 半径同步 12px，靠它自带的 `overflow:hidden` 统一裁切；`.media-stack-card`
   改 `width:100%` + 无边框 + 透明底 + 无阴影，图片 `object-fit:cover` 于是边缘到边缘铺满。
 - 空节点 `.node-upload` 去掉虚线框、拉到 `100%×100%`，整个节点都是拖入/点击上传命中区。
@@ -911,6 +953,45 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
 `cdp_wave_padding.js`，截图 `delbtn-dark.png` / `wave-pad-dark.png` /
 `wave-pad-light.png`。
 
+### 操作按钮按素材类型出现 / 无素材只留「预览」（2026-11-12 续 3）
+
+用户要求：**「单节点、无素材的时候，顶部功能只显示预览和删除节点；加载不同素材
+显示不同功能，裁切、扩图、宫格只适合图片，其他素材不需要显示」**。上游的做法是
+6 枚按钮恒定渲染、不适用的置灰（`isDisabled`），所以空节点上也挂着裁切 / 扩图 /
+宫格 / 下载 / 全部下载五枚灰按钮。现在改成**按类型过滤，不适用的直接不渲染**。
+
+- 改动只有一处：bundle 里 `NodeActions` 的渲染 `st(L, …)` 换成
+  `st(xcatFanActions(), …)`（**两处**：节点上方按钮行 + 面板左侧工具列，共用同一份
+  结果），另外新增 `xcatFanActions()` 过滤动作表 `L`。补丁脚本
+  `.workbuddy/tmp/patch_fan_by_kind.py`（幂等，备份 `index-BXU58XDe.js.fanfilter.bak.js`）。
+- 规则（`xcatFanActions()` 内，`kind` 取当前素材 `media[index].kind`）：
+
+  | 按钮 | 出现条件 |
+  | --- | --- |
+  | 预览 | 恒在；**无素材时它就是唯一一枚** |
+  | 裁切 / 扩图 / 宫格 | `kind === "image"` |
+  | 下载 | 有当前素材（图片 / 视频 / 音频及其它类型都给，`/view` 能取二进制） |
+  | 全部下载 | `media.length >= 2`（本包已限「一个节点一个素材」，实际基本不出现） |
+
+- 「删除节点」不在这张表里：它仍由 `xcat-node-actionbar.js` 注入在按钮行末尾，
+  所以空节点的行 = `预览 ▸ 删除节点` 两枚，正好是用户要的样子。
+- 按钮行本身是通宽 flex 居中（见上节），数量变了自动重新居中；
+  **不用重排坐标** —— 上游 inline 的扇形 `left/top/width` 已被 `!important` 压掉。
+
+**验证**（8198 隔离实例，测试画布手工造了「空 / 图片 / 视频 / 音频」四个节点，
+真实 `mouseMoved` 悬停后读 DOM）：
+
+| 节点 | 素材 | 按钮行 |
+| --- | --- | --- |
+| 92 | 无 | 预览 / 删除节点（2 枚，`cx` 371·421，`y` 同高） |
+| 93 | image | 裁切 / 扩图 / 预览 / 宫格 / 下载 / 删除节点（6 枚） |
+| 94 | video | 预览 / 下载 / 删除节点（3 枚） |
+| 95 | audio | 预览 / 下载 / 删除节点（3 枚） |
+
+面板左侧工具列同步过滤：视频节点打开预览 → `预览 / 下载`；空节点 → 只有 `预览`，
+预览区显示上游的「暂无素材」。截图 `.workbuddy/tmp/fan-92.png` / `fan-93.png` /
+`fan-94.png`，脚本 `verify-fan.js` / `verify-fan-panel.js`。
+
 ### 音频播放头改成可拖动的滑块（2026-11-12 续 2）
 
 用户要求：**「不能鼠标点哪里，滑块到哪里，而是鼠标移动到滑块上，出现左右箭头，
@@ -1025,60 +1106,505 @@ currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
 `xcat-media-controls.js?v=20261112g`（改这两份文件后必须同时改版本号，
 否则浏览器会拿旧缓存）。
 
-### 连线：实线 + ComfyUI 配色；选中节点改白色描边（2026-11-12 续 12）
+### 连线与连接点：全部照 ComfyUI litegraph 源码取值（2026-11-12 续 12 / 14 / 15）
 
-用户要求：**「接线的虚线实在看不清，参考 comfyui 的接线；节点选中时不要黄色，用白色」**。
+用户要求：**「接线的虚线实在看不清，参考 comfyui 的接线；节点选中时不要黄色，用白色」**
+→ **「参考 comfyui 的连线方式，你参考了吗？接头颜色与线的颜色也要一致」**
+→ **「我让你去 comfyui 看源代码，不要给我看着截图抄」**。
 
-取值来源 = ComfyUI 前端包 `assets/colorPaletteTheme-*.js` 的 dark 调色板 +
-`treeUtil-*.js` 里的 litegraph 常量：
+> **取值方式（这条是硬规矩）**：不看截图目测，从前端包
+> `python_embeded/Lib/site-packages/comfyui_frontend_package/static/assets/*.js.map`
+> 的 `sourcesContent` 里解出 litegraph 原始 TS，再照抄。
+> 导出脚本 `.workbuddy/tmp/extract_litegraph.py`，解出的源码落在
+> `.workbuddy/tmp/comfy-src/`（`LGraphCanvas.ts`、`NodeSlot.ts`、`SlotBase.ts`、
+> `linkSnapGeometry.ts`、`pathRenderer.ts`、`litegraphLinkAdapter.ts`）。
 
-| 项 | ComfyUI 值 | 本包实现 |
+#### 源码依据（文件 : 行）
+
+| 规范 | 源码出处 | 原文 |
 |---|---|---|
-| 已存在连线 `LINK_COLOR` | `#9A9`（153,170,153 灰绿） | `--xcat-link`，2.5px，**实线** |
-| 拖拽中的线 `CONNECTING_LINK_COLOR` | `#AFA`（170,255,170） | `--xcat-link-connecting`，2.5px 实线 |
-| 线宽 `connections_width` | 3 | 2.5px（缩放 1 时观感接近，不压节点） |
-| 线帽 | `lineCap: round` | `stroke-linecap: round` |
-| hover / 选中连线 | 白色高亮 | `--xcat-link-hot` + 4px |
-| 选中节点 | 白色描边 | `box-shadow: 0 0 0 2px var(--xcat-sel)` |
+| 贝塞尔控制点 | `canvas/linkSnapGeometry.ts:6,92-101` | `SPLINE_CONTROL_RATIO = 0.25`；`distance = Math.hypot(dx,dy) * 0.25`，两端各按方向偏移 |
+| 渲染模式 | `LGraphCanvas.ts:1394` | `links_render_mode = LinkRenderType.SPLINE_LINK` |
+| 线宽 | `LGraphCanvas.ts:1400` | `connections_width = 3` |
+| 外描边开关 | `LGraphCanvas.ts:1387` | `render_connections_border = true` |
+| 外描边宽度 | `litegraphLinkAdapter.ts:100` | `borderWidth: context.renderBorder ? 4 : undefined` |
+| 外描边颜色 / 画法 | `pathRenderer.ts:185-203` | 先 `connectionWidth + borderWidth` 描 `rgba(0,0,0,0.5)`，再画 `connectionWidth` 本色 |
+| 线帽 / 拐角 | `LGraphCanvas.ts:6542`、`pathRenderer.ts:183` | `lineCap='round'`、`lineJoin='round'` |
+| 高亮色 | `litegraphLinkAdapter.ts:115` | `highlighted: '#FFF'`（**只换色，线宽不变**） |
+| slot 圆点半径 | `node/NodeSlot.ts:189` | `radius = highlight ? 5 : 4` ⇒ 直径 8px，hover 10px |
+| slot 圆点颜色 | `node/SlotBase.ts:44-48`、`NodeSlot.ts:190-196` | 已连接 `color_on \|\| getConnectedColor(type)`；未连接 `color_off \|\| getDisconnectedColor(type)` |
+| slot 默认色表 | `LGraphCanvas.ts:561` 附近 | `default_connection_color = { input_on:'#7F7', output_off:'#778', output_on:'#7F7' }` |
+| slot 描边 | `NodeSlot.ts:130,233` | `doStroke` 默认 **false**，圆点无描边 |
 
-- 上游画布原本是 `--c-edge`（#3c3c48）+ `stroke-dasharray: 6 5` 的虚线，
-  深底上几乎看不见 —— 全部由 `#app .flow-wrap .vue-flow__edge-path` 覆盖掉。
-- `is-snapped`（吸附到可连接目标）原来是 accent 黄，现改白色加粗，和 ComfyUI 一致；
-  `.demo-node.is-connect-hot:hover` 的黄色仍然保留 —— 那是「可连接」语义，不是选中。
-- 亮色主题按同色阶镜像：`--xcat-link: #6f7f6f`、`--xcat-sel: #111318`
-  （白环压在 #f4f4f7 上等于看不见，故亮面用近黑）。
-- 实测（8199）：`.vue-flow__edge-path` → `rgb(153,170,153)` / 2.5px / `dash: none` /
-  `linecap: round`；拖拽中 `rgb(170,255,170)`；吸附 `rgb(255,255,255)` 4px；
-  选中节点 `box-shadow: rgb(255,255,255) 0 0 0 2px`；两种主题令牌切换正确。
+#### 本包实现
 
-### 连接点：10px 圆点、圆心在框外 10px（2026-11-12 续 5 / 续 11 修正方向）
+| 项 | ComfyUI | 本包 |
+|---|---|---|
+| 连线颜色 | `LINK_COLOR #9A9` | `--xcat-link` = `#99aa99`，3px 实线，round |
+| 拖拽线 | `CONNECTING_LINK_COLOR #AFA` | `--xcat-link-connecting` = `#aaffaa`，3px |
+| 外描边 | 7px（3+4）`rgba(0,0,0,.5)` | **SVG filter `#xcat-link-halo`**：`feMorphology dilate radius=2` + `feFlood #000 / .5` + `feMerge`（3 + 2×2 = 7px，同宽） |
+| hover 连线 | `#FFF`，宽度不变 | `--xcat-link-hot`，**不再加粗**（原 4px 已删） |
+| 选中节点 | 白色描边 `#FFF`、`lineWidth:1`、`globalAlpha:.8`、外扩 `padding:6` | `box-shadow: 0 0 0 1px var(--xcat-sel)`（宽度照源码，不再是我拍的 2px；环紧贴节点边，未做 6px 外扩） |
+| **选中节点的连线** | `highlighted_links` → `#FFF`，宽度不变 | `.xcat-edge-hot` → `--xcat-link-hot`（见「选中节点时连线一起高亮」） |
 
-用户要求：**「两个接头，圆形小圆点（10），不紧贴侧面，圆心距离侧边 10 的距离」**，
-随后明确：**「接头在框里了，我要的是在框外」**。
+- 外描边用 SVG filter 是因为一条 `<path>` 只能一层 stroke，而 ComfyUI 是 canvas 画两遍；
+  filter 定义内联在 `index.html` 的 `<body>` 里（`#xcat-link-halo`），
+  `edge-path` 与 `connection-path` 都挂 `filter: url(#xcat-link-halo)`。
+- 上游画布原本是 `--c-edge`（#3c3c48）+ `stroke-dasharray: 6 5` 的虚线，深底上几乎看不见。
+- `.demo-node.is-connect-hot:hover` 的黄色仍然保留 —— 那是「可连接」语义，不是选中。
+- 亮色主题按同色阶镜像：`--xcat-link: #6f7f6f`、`--xcat-link-hot: #111318`
+  （白线/白环压在浅底上等于看不见）。接头颜色见下一节（`--xcat-slot`）。
 
-- 上游 `.node-port` 是 20×20 的透明定位盒，`left:0 / right:0` + `translate(∓50%)`，
-  圆心正好压在节点边缘；可见部分由 `::before` 画 20px 圆、再用
-  `clip-path: inset(0 50% 0 0 / 0 0 0 50%)` 切一半 —— 所以是「半个圆饼贴着侧边」。
-- **方向别搞反**：盒子被 `translate(-50%)` 左移半个宽度，所以
+**选中描边宽度为什么是 1px**（2026-11-12 续 18）
+- `src/lib/litegraph/src/LGraphNode.ts:1217` `_getSelectedStrokeStyle()` 只返回
+  `{ padding: has_errors ? 20 : undefined }`，**不传 lineWidth / color**；
+- 落到 `src/lib/litegraph/src/draw.ts:69` `strokeShape()` 的默认值：
+  `lineWidth: 1`、`color = NODE_BOX_OUTLINE_COLOR`（实为 `#FFF`）、`padding: 6`、
+  `ctx.globalAlpha = 0.8`；
+- 对照：`running`（`litegraphService.ts:268`）与 `executionError`（`:278`）才显式
+  `lineWidth: 3` —— 所以 3px 是「运行中 / 报错」，不是选中。
+- 结论：选中白环 = **1px**，且画在节点外 6px、80% 不透明。本包用
+  `box-shadow: 0 0 0 1px`（紧贴节点边、纯白），缩放时是固定 CSS px，
+  而 ComfyUI 是 canvas 图内尺寸、随缩放变粗。
+
+#### 选中节点时，相连的线一起变白（2026-11-12 续 17）
+
+ComfyUI 的语义在 `LGraphCanvas.selectionView`：
+
+```ts
+const keys  = selectionStore.selectedKeys(graphScopeOf(graph))
+const nodes = items.filter(item => item instanceof LGraphNode)
+const linkIds = nodes.flatMap(node => nodeLinkIds(graph, node))   // ← 选中节点的所有 link
+// renderLink: colors.highlighted = '#FFF'，线宽不变
+```
+
+Vue Flow 没有这个联动，边与节点又是两棵兄弟子树，CSS 选不到 ⇒ 加一层 DOM 桥接
+`xcat-edge-hot.js`（`defer` 引入，纯前端、不写盘）：
+
+1. `.vue-flow__node.selected` → 选中节点 id 集合；
+2. `window.__xcatFlow.getEdges.value` → `edge.id / source / target`；
+3. 命中的 `.vue-flow__edge[data-id]` 加 `.xcat-edge-hot`；
+4. `MutationObserver`（只看 `.vue-flow__nodes` / `.vue-flow__edges` 的 `class` 变化）
+   \+ `pointerup / keydown / keyup` 兜底，`requestAnimationFrame` 合并节流。
+
+样式只有一条：`#app .flow-wrap .vue-flow__edge.xcat-edge-hot .vue-flow__edge-path
+{ stroke: var(--xcat-link-hot) }` —— 只换色不加粗，与 ComfyUI 一致。
+
+实测（8199，fitView 后真实点击）：点节点 94 → `selected=[94]`、`e21 hot=true
+rgb(255,255,255)`、`e20 hot=false rgb(153,170,153)`；再点节点 92 → 两条都白；
+点空白 → 全部 `hot=false` 回到 `rgb(153,170,153)`，节点白环同时消失。
+
+
+#### 曲率：把 Vue Flow 的贝塞尔换成 litegraph 公式
+
+上游 edge 的 `type` 是 `"canvas"`，但 `edgeTypes:{}` 是空的 ⇒ Vue Flow 回退到默认
+bezier 曲线，控制点按 **`offset = 0.5 × dx`** 算，S 形比 ComfyUI 夸张得多。
+
+补丁 bundle 里的 `Ec`（Vue Flow `getControlWithCurvature`，
+`il` / `DefaultBezierEdge` 与 connection-line 预览共用它），
+`qs(dx, curvature)` → `D = 0.25 * Math.hypot(dx, dy)`，四个方向分别 ±D：
+
+```js
+function Ec({pos:e,x1:t,y1:n,x2:o,y2:i,c:s}){let r,l,D=.25*Math.hypot(o-t,i-n);
+  switch(e){case Ue.Left:r=t-D,l=n;break;case Ue.Right:r=t+D,l=n;break;
+  case Ue.Top:r=t,l=n-D;break;case Ue.Bottom:r=t,l=n+D;break}return[r,l]}
+```
+
+- 脚本：`.workbuddy/tmp/patch_edge_curvature.py`（幂等，首次自动备份
+  `index-BXU58XDe.js.edgecurr.bak.js`）。
+- 成品线和拖拽预览线共用同一个 `Ec`，曲率天然一致。
+- 注意：改 bundle 后文件名不变，必须同时改 `index.html` 里主 js 的 `?v=`
+  （已从无版本号改为 `?v=20261112n`），否则浏览器吃旧缓存。
+
+#### 实测（8199，缩放 2）
+
+```
+edge  : d="M754,133 C799.04,133 874.96,63 920,63"    // dx166 / dy-70 → D=45.05 ✓
+        stroke rgb(153,170,153) / 3px / linecap round / linejoin round
+        filter url("#xcat-link-halo")，filter 元素存在（4 个子节点）
+handle: 10px，`rgb(170,170,170)` + `inset rgb(178,178,178) 1px`（详见下一节）
+        hover → 12px，颜色不变（与 NodeSlot 的 r4→5 同比例）
+```
+
+放大 4 倍的截面截图确认：3px 灰绿芯线 + 两侧各 2px 半透明黑描边（`halo-crop.png`）。
+
+### 连接点：10px 灰圆点（#AAA + 亮边），圆心压在边框线上、线贴圆边（2026-11-12 续 5 / 11 / 13 / 16）
+
+需求演进：**「两个接头，圆形小圆点（10），不紧贴侧面」** → **「在框里了，我要在框外」**
+→ **「接头圆心给我在边框上，不偏移」** → 最终 **「接头是这样的，而且线和接头是连在一起的」**
+（附 ComfyUI 放大截图：灰圆盘 + 一圈更亮的细边，绿线从圆周长出、无缝）。
+
+#### 1. 几何：定位盒尺寸 = 圆点直径（这是「线连上圆点」的关键）
+
+上游 `.node-port` 是 **20×20** 的透明定位盒，`left:0/right:0` + `translate(∓50%)`，
+可见部分由 `::before` 画 20px 圆再 `clip-path` 切一半 —— 「半个圆饼贴着侧边」。
+
+- **方向**：盒子被 `translate(-50%)` 平移半个宽度，所以
   **「圆心相对边缘的偏移 = left / right 的值」**，正值向内、负值向外。
-  取 `left/right: -10px` → 盒子跨 `[-20, 0]`（整体在框外），圆心落在 `-10px`，
-  10px 圆点占 `[-15, -5]`，距边框留 5px 空隙。
-  （第一版写成 `10px` 是往框**内**挪了 10px，圆点整个落在节点里，已纠正。）
-- `::before` 收到 `10px` 并清掉 `clip-path`，纵向仍由 `top:50%` 居中。
-- **必须补 hover 来源**：上游圆点是「`.demo-node:hover` 才淡入」，圆点挪到框外后，
-  鼠标必须先进入节点才显示，可一移到框外圆点上就 `opacity:0`，等于点不到
-  （实测 `pointer-events:none` + `opacity:0`）。所以给
-  `.vue-flow__handle.node-port` 开 `pointer-events:all` + `:hover { opacity:1 }`
-  + `:hover .port-hit { pointer-events:all }`；不可见时也能命中，进出即显隐。
-- `z-index:15` 保留作保险（圆点在框外已不会被 `.media-stack-card` 的 10 压住），
-  仍低于删除（20）/ 缩放（21）/ 操作行（25）/ 名称（30）。
-- 连线端点跟着圆心走（Vue Flow 用 handle 矩形算 anchor），幽灵线与成线都从框外
-  圆点中心出发。
-- 实测（8199，节点 454×226，缩放 1）：handle 盒 `320~340` / 圆心 `330`，节点左边
-  `340`，右盒 `794~814` / 圆心 `804`，节点右边 `794` → 两侧圆心都在**框外 10px**；
-  `::before` = `10px × 10px / radius 50% / clip:none / #f2ff59`；
-  鼠标在框外圆点上 `opacity 1`、命中 `port-hit`、拖出幽灵线 1 条；
-  节点内部拖拽仍能移动节点；无 console 报错。
+  `10px` → 落进框内（错）；`-10px` → 整体框外（也不要）；**`0` → 圆心压在边框线**（最终）。
+- **端点由盒子矩形决定，不是圆心**：Vue Flow 的 `getHandleBounds` 给
+  `position:right` 取 `box.x + box.width`、`left` 取 `box.x`。盒子 20px 时端点落在
+  边框外 **10px**，而圆点半径只有 5px ⇒ **线和圆点之间空 5px 缝**（上一版就是这样，
+  用户直接指出「线没连上」）。
+  ⇒ 把盒子 `width/height` 设为 **10px（= 圆点直径）**，端点正好落在
+  「边框 ±5px」= **圆周上**，线从圆边长出。
+- 命中区不受影响：那是 `.port-hit`（72×72 独立子元素，`pointer-events` 由
+  hover / `.is-on` 控制），与盒子尺寸无关；实测 hover 仍命中 `port-hit`。
+- **必须补 hover 来源**：上游圆点「`.demo-node:hover` 才淡入」，圆点在边框上后鼠标
+  一移出去就 `opacity:0`，等于点不到。故 `.node-port` 常驻 `pointer-events:all` +
+  `:hover{opacity:1}` + `:hover .port-hit{pointer-events:all}`。
+- `z-index:15`：圆点一半在卡片内，必须压过 `.media-stack-card`(10)；
+  仍低于删除(20)/缩放(21)/操作行(25)/名称(30)。
+
+#### 2. 外观：`#AAAAAA` 圆盘 + `#B2B2B2` 亮边
+
+源码依据：`NodeSlot.draw` 里 `radius = highlight ? 5 : 4`、`doStroke` 默认 false；
+`SlotBase.renderingColor()` → comfy 的 `getSlotColor(type)` =
+`` `var(--color-datatype-${T}, #AAA)` `` —— 画布节点没有 datatype 变量，**落回 `#AAA`**，
+与是否已连接无关（`color_on/color_off` 为空）。
+
+用户截图实测（10 倍放大）：圆盘 `(170,170,170)` = `#AAA`，外圈 `(178,178,178)` ≈ `#B2B2B2`，
+边厚约为直径的 1/8；线芯 `(153,170,153)`，线宽/直径 = 3/8。
+
+- 圆点：`background: var(--xcat-slot)`（暗 `#aaaaaa` / 亮 `#8f8f8f`）
+  \+ `box-shadow: inset 0 0 0 1px var(--xcat-slot-rim)`（暗 `#b2b2b2` / 亮 `#a3a3a3`）。
+  **必须用 inset shadow 而不是 border**：border 会撑大外径、把圆心挤偏。
+- hover 只放大 10→12px、不改色（照 `NodeSlot` 的 4→5，`highlight` 不影响填充色）。
+- 上一版「已连接=线色 / 未连接=#778788」作废（用户明确接头就是 `#AAAAAA`）。
+
+#### 3. 实测（8199，缩放 1.149）
+
+| 项 | 值 |
+|---|---|
+| handle 盒 | `10 × 10`（CSS px），圆心与节点右边框偏移 **0px** |
+| 圆点 | `10px` / `rgb(170,170,170)` / `inset rgb(178,178,178) 0 0 0 1px` |
+| edge 起点 | 距边框 **5px**、距圆心 **5px** = 半径 ⇒ **正好在圆周上，无缝隙** |
+| `handleBounds` | `source {x:449,width:10}`、`target {x:-5,width:10}`（节点宽 454） |
+| hover | `opacity 1` / 12px / `port-hit` 命中 `pointer-events:all` |
+
+1:1 像素扫描（圆心横切）：`x34 卡片(51,51,51)` → `x35 亮边(176)` → `x36~43 圆盘(170)`
+→ `x44 亮边(177)` → `x45 起绿线(135,150,135)→(150,166,150)` —— **圆点直径 10px、
+亮边 1px、线紧接圆边无空隙**。8 倍放大图见 `.workbuddy/tmp/final-port-z1x8.png`。
+
+### 连线中点圆点：点一下断开这条线（2026-11-12 续 17）
+
+需求：**「线的中间要有（圆点），点击可以断开线」**（附 ComfyUI 10 倍放大截图：
+线色实心圆骑在线上，周围没有黑描边）。
+
+#### 源码真值（`renderer/core/canvas/pathRenderer.ts`）
+
+```ts
+calculateCenterPoint()
+  spline ⇒ findPointOnBezier(0.5, startPoint, cp[0], cp[1], endPoint)  // 曲线参数中点
+drawCenterMarker()
+  if (centerMarkerShape === 'arrow') … else ctx.arc(pos.x, pos.y, 5, 0, 2π)
+  ctx.fillStyle = color   // 就是这条线的颜色；disabled 时才用条纹图案
+```
+
+- 半径 **5**（画布图内单位 ⇒ 随缩放变），**填充线色**，无描边、不套那圈 7px 黑 halo
+  （直径 10 > 3 本色 + 4 外描边 = 7，正好把线盖干净，所以放大看边缘是干净的圆弧）。
+- 绘制条件：`showCenterMarker && scale >= 0.6 && highQuality`；
+  `linkMarkerShape` 默认 `Circle`。
+- 交互：画布上这是 link 的命中点，点它等于删掉该 link。
+
+#### 实现（`xcat-edge-mid.js` + `xcat-overrides.css`）
+
+- 往每条边的 `<g class="vue-flow__edge" data-id>` 里塞**两个** `<circle>`：
+  - `.xcat-edge-mid`（`r=5`）—— 显示的实心圆点，`fill: var(--xcat-link)`；
+  - `.xcat-edge-mid-hit`（`r=10`，`fill: transparent`、`pointer-events: all`）——
+    透明命中圆，**append 在圆点之后 = 叠在它上面**接鼠标（见踩坑第 3 条）。
+  - `cx/cy = path.getPointAtLength(len/2)`（任何 path 都成立，且与参数中点等价）。
+    circle 挂在 viewport 的 transform 里 ⇒ **平移/缩放自动跟随，半径天然是图内单位**。
+- 样式：选中节点相连 / 边选中时走 `--xcat-link-hot`（ComfyUI 同一套 `colors.highlighted`）；
+  `cursor: pointer`。
+  **不套 `filter: url(#xcat-link-halo)`** —— 套了圆点会被黑边包一圈。
+- `zoom < 0.6` 时两个 circle 一起 `display:none`（对齐源码的 scale 阈值）。
+- 点击：`window` 的 `pointerdown` 捕获阶段拦下（命中圆、圆点都认），
+  `flow.removeEdges([id])` —— 与 Delete 删边同一条 action，上游自动存盘链路直接生效。
+- hover 命中圆 ⇒ 圆点加 `.is-hot`：**实心圆镂空成圆环**（替掉上游的红色叉号按钮），
+  详见下节。
+
+#### hover 的圆环，替掉上游那个红色叉号
+
+用户：**「删除连线的时候（红色圆环 + 红叉）看着很不舒服，换成（空心圆环）」**。
+那张红的是上游 `index-*.css` 里的 `.edge-delete`：18px 圆 + 9px X 图标，
+`hover` 时 `color / border-color` 都变 `--c-danger`，**悬停到整条线上就浮出来**
+（`.edge-hit` 是 24px 宽的透明描边路径，一碰整条线 `is-on` 就亮）。
+
+- `.edge-tool` 整块 `display: none`（teleport 到 `.vue-flow__edge-labels`，
+  `#app .flow-wrap .edge-tool` 能命中，特异性 (1,2,0) > 上游 `[data-v-*]` (0,2,0)）。
+  删除只保留中点这一处，不再有红点闪现。
+- 圆环几何照用户给的参考图量：环外径 / 线宽 = **3.4**、环宽 / 线宽 = **0.7**、
+  孔径 / 外径 = **0.6**。线宽 3 ⇒ 外径 10、环宽 2、孔径 6 ⇒ `r: 4` + `stroke-width: 2`
+  （外沿 4+1=5，与实心时半径一致，所以 hover 时**外轮廓不跳**）。
+- `fill: var(--xcat-link-hole)`（暗 `#000`、亮 `#1b1d1f`）：纯黑孔盖住线，
+  线不往洞里穿，读起来像「线上开了一个可删的洞」。
+- 圆环颜色跟线：hover 圆环时给 `<g>` 加 `.xcat-edge-marker-hot`，
+  把 Vue Flow 那条 `.vue-flow__edge:hover .vue-flow__edge-path{stroke:white}`
+  压回 `--xcat-link`，环与线同色；选中节点相连的边（`.xcat-edge-hot`）仍保持白。
+- 实测（8198 隔离实例，真实鼠标）：静止 `r 5 / fill rgb(153,170,153)`；
+  hover 圆心 `r 4 / fill rgb(0,0,0) / stroke rgb(153,170,153) / stroke-width 2px`，
+  线仍是 `rgb(153,170,153)`；`.edge-tool` 全程 `display:none`；点一下 `edges 2 → 1`、
+  圆点与命中圆同步消失；亮色主题下 `fill rgb(27,29,31) / stroke rgb(111,127,111)`。
+
+#### 踩坑
+
+- **`.vue-flow__edges` 不是「一个」svg**：Vue Flow 给**每条边单独建一个**
+  `<svg class="vue-flow__edges">`。先取 `document.querySelector('.vue-flow__edges')`
+  再往里找，永远只能拿到第一条边 ⇒ 改成全局
+  `document.querySelectorAll('.vue-flow__edge[data-id]')`，observer 挂到公共父级
+  `.vue-flow__transformationpane`。
+- 首次渲染时序也对不上（`<g>` 先挂、`path` 后写 `d`），观察器容易漏一次，
+  另加 500ms 兜底轮询（边数量级小，开销可忽略）。
+- **命中圆必须叠在圆点上面**：先按「命中圆在下、圆点在上」写，实测 hover 圆心无效、
+  只有圆点边缘一圈能用 —— 指针落在圆心那 10px 里命中测试拿到的是圆点本身，
+  命中圆收不到 `pointerenter`。把 append 顺序换成 `dot` 后 `hit` 才对。
+  反过来（命中圆在下）还会抖：圆点被 hover 镂空变小后指针落到圆点上 ⇒ 命中圆
+  `pointerleave` ⇒ 圆点复原 ⇒ 指针又回到命中圆，来回闪。
+
+#### 实测（8198 隔离实例，缩放 1.2596 / 0.8 / 0.5）
+
+| 项 | 值 |
+|---|---|
+| 圆点屏幕直径 | `12.60px` @ zoom 1.2596、`8px` @ 0.8 ⇒ 严格 `10 × zoom` |
+| 位置 | `cx/cy` 与 `getPointAtLength(len/2)` 完全一致；拖节点后两者仍一致（各动一半） |
+| 填充 | `rgb(153,170,153)` = `--xcat-link` |
+| 缩放阈值 | `zoom 0.5 → display:none`，`0.8 → inline` |
+| 点击 | 点 e21 的圆点 ⇒ store/DOM 都只剩 e20，圆点同步消失，画布 json 的 `edges` 已写盘 |
+
+#### 剪线（Alt/Ctrl + 拖动划断）不用红色
+
+上游 `index-*.css` 里两处红：`.cut-line{stroke:#ff3b3b}`（跟随鼠标的轨迹，
+2.5px + 红发光）和 `... .vue-flow__edge.is-cutting .vue-flow__edge-path{stroke:#ff3b3b}`。
+本包整套只有「线 `#99AA99` / 高亮白」两个语义色，红是唯一跳出来的，统一收到
+`--xcat-link-hot`、线宽跟 `--xcat-link-w`（原来 2.5/3 混着）：
+
+```css
+#app .flow-wrap .vue-flow__edge.is-cutting .vue-flow__edge-path { stroke: var(--xcat-link-hot); }
+#app .cut-line { stroke: var(--xcat-link-hot); stroke-width: var(--xcat-link-w); }
+```
+
+特异性 `(1,n,0)` 高于上游 `(0,5,0)`，不需要 `!important`；`cut-line` 是纯
+`class="cut-line"` 无内联 `stroke`，CSS 能覆盖。
+实测（Alt + 拖动真实鼠标事件穿线）：`.cut-line` / `is-cutting` 边都是
+`rgb(255,255,255)` 3px。
+
+### 一个节点一个素材、一对节点一条线（2026-11-12 续 23）
+
+需求：**「每个节点只能对应一个素材」「两个节点只能连接一次」**。
+
+上游原本是「节点 = 素材堆叠卡片」（`data.media` 是数组，卡片右上角还能翻页），
+连线也完全不判重（`addEdge` 直接往后 push），所以同一对节点能连出无数条。
+
+改法全在 `useGraph` 那段压缩代码里（函数名没被 mangle，按签名定位；
+补丁脚本 `.workbuddy/tmp/patch_one_asset_one_link.py`，备份 `.oneasset.bak.js`）：
+
+| 函数 | 原 | 现 |
+|---|---|---|
+| `ke` addEdge | 直接 push | 先按**无序点对**判重：`A→B` 或 `B→A` 已存在就 return |
+| `V` appendMedia（拖素材到已有节点） | `media = [...old, ...new]` | `media = [new[0]]`，只上传/适配这一张 |
+| `O` appendItems（资产库拖入 / 执行产物） | `media = [...old, ...items]` | `media = [items[0]]` |
+| `g` addMediaNode | 收下整批文件 | `files.slice(0,1)` |
+| `$e` importMedia（空白处拖入） | 一批文件 → 一个节点 | 一个文件一个节点，横向按 `节点宽 + 48` 排开 |
+| `ue` / `ui` / `Os` / `Ot`（派生 / 旁挂 / 复制） | `media` 原样带过去 | 只带第一个 |
+
+细节：
+
+- **替换**语义是用户选的（不是「忽略」也不是「另建节点」）：`appendMedia` 里仍然
+  先 `captureUndo()`，所以替换可 `Ctrl+Z` 回退；换素材后重新 `fitNodeToFirstImage`，
+  节点尺寸跟着新图比例走。
+- `data.index` 一律归 0（单素材没有翻页状态）。
+- 执行产物也限 1 张（同样是用户定的）：`finishPrompt → appendItems` 只保留第一张，
+  旧图被顶掉；下游通过 `syncDownstream`（`oe`）自动换成新素材。
+- 多文件拖入的排布**必须先把基准点换算成画布坐标**，再在画布坐标里加偏移：
+  我第一版是在屏幕坐标上加 `i*(w+48)` 再换算，结果偏移被 zoom 除掉
+  （zoom 1.207 时间距 502 → 416 < 节点宽 454，节点重叠 38px）。
+- 连线判重放在 `ke` 这一个入口即可：`onConnect`（`Ge`）、拖到节点松手的两条兜底
+  （`ce`/`Ie`）、复制节点、粘贴都走它。被判重挡掉时，紧随其后的 `inheritMedia`
+  （`le`）仍会跑，但它按素材 id 去重，重复调用无副作用。
+- 方向不敏感：`92→93` 存在时，`93→92` 也建不出来（要反向先删原连线）。
+
+实测（8198 隔离实例，真实鼠标拖拽 + 合成 `DragEvent` 带 `DataTransfer` 文件）：
+
+| 场景 | 结果 |
+|---|---|
+| 已连的 `92→93` 再拖一次 | `edges` 数量不变，仍是 `e20/e21` |
+| 新的 `93→94` 连两次 | 第一次 `+e22`，第二次不再新增 |
+| `94→92`（`92→94` 已存在） | 不新增（反向也判重） |
+| 已有一张图的节点再拖 1 个文件 | `media` 1 → 1，素材 id 变了（替换） |
+| 空白处拖 3 个文件 | 建 3 个节点（95/96/97），各 `media:1` |
+| 空白处拖 2 个文件 | 节点宽 454、间距 502 ⇒ 间隙 48，不重叠 |
+
+### 素材节点 vs 生成节点：拖进来的素材不显示提示词 / 参数 / 运行（2026-11-12 续 25）
+
+需求：**「拖进来的素材不需要显示这些，需要生成图片、视频、音频的节点才需要显示这些」**
+（附的截图正是「提示词框 + 提示词优化 / 高宽比 / 百万像素 + 运行」这一整块）。
+
+根因不在模板，而在 `useGraph` 的 `baseData()`：
+
+```js
+function baseData(label) {
+  return { label, workflow: defaultWorkflow(), params: {}, randomFields: {}, inputMedia: [] };
+}
+```
+
+`defaultWorkflow()` 返回工作流列表第一条，所以**任何**新建节点（包括拖素材进来的）
+都自动绑上了工作流，面板自然把提示词、参数、运行全渲染出来。要区分「素材节点」和
+「生成节点」，就得让素材节点真的没有工作流。
+
+补丁 `.workbuddy/tmp/patch_asset_node_panel.py`（幂等，备份 `.assetpanel.bak.js`）：
+
+| 位置 | 原 | 现 |
+|---|---|---|
+| `g` addMediaNode（拖入素材 / 资产库拖入） | `{...baseData(), media, index:0}` | 多一个 `workflow:""` |
+| `Ot` duplicateNode | `workflow: source.workflow \|\| defaultWorkflow()` | `\|\| ""`（复制素材节点仍是素材节点） |
+| 拖素材卡片到空白处 | 同上 | `\|\| ""` |
+| 从节点输出口拖连线到空白处 | 同上 | **保持** `\|\| defaultWorkflow()`：这是「接上一个素材 → 建一个生成节点」 |
+| 面板提示词块 | 常渲染 | `xcatIsGen(data) ? … : 空` |
+| 面板参数网格 | `gridFields.length` 才渲染 | `xcatIsGen(data) && gridFields.length` |
+| 运行按钮行 | 常渲染 | `xcatIsGen(data) ? … : 空` |
+
+`xcatIsGen(d)` 加在 bundle 末尾（函数声明会提升，模块内哪儿都能引用）：
+`!!(d && typeof d.workflow === "string" && d.workflow.trim())`。
+
+样式（`xcat-overrides.css` 末尾）：
+
+```css
+/* 只剩素材条：宽度跟内容收缩，水平居中（用 translate 独立属性，
+   不跟 panel-fade 的 transform 打架） */
+#app .flow-wrap .node-panel:not(:has(.panel-prompt)) {
+    width: auto; max-width: 700px; left: 50%; right: auto; translate: -50% 0;
+}
+/* 空素材节点：面板里什么也没有，直接不显示 */
+#app .flow-wrap .node-panel:not(:has(.panel-prompt)):not(:has(.media-strip)) { display: none; }
+```
+
+顺带把「删除节点」按钮的 hover 从 `--c-danger` 改成 `--xcat-link-hot`
+（暗色白 / 亮色近黑）：用户明确讨厌删除相关的红色。
+
+实测（8198 隔离实例，手工造三种节点 + 合成 `DragEvent` 真拖一张图进来）：
+
+| 节点 | 工作流 | 面板 | 上方按钮 |
+|---|---|---|---|
+| 拖入图片 | `""` | 80×80，只有素材条，无提示词/参数/运行 | 裁切/扩图/预览/宫格/下载/删除 |
+| 绑定工作流 | `image_minimax_h3_image_t2i` | 663×310，提示词 + 3 个参数 + 运行 | 同上 |
+| 空节点 | `""` | `display:none` | 预览 / 删除 |
+
+注意：
+- 这套判定只认 `data.workflow`。**旧画布里已经带上默认工作流的素材节点不会被自动改**，
+  把图重新拖一次即可（或者删掉重建）。截图 `.workbuddy/tmp/panel-92/93/fresh.png`。
+- 素材节点面板里仍保留左侧的工作流胶囊列表（hover 才滑出），选中一个就能把素材节点
+  升级成生成节点——这是上游原本就有的入口，没有删。
+- `promptEl` 在素材节点上不存在（模板条件渲染），相关代码本来就判空
+  （`insertIntoPrompt` 里 `el?.selectionStart ?? …`、`if (!el) return`），不会报错。
+
+### 节点拆成六种类型：素材 / 生成 × 图片 / 视频 / 音频（2026-11-13，文本见下一节）
+
+上一节「靠 `workflow` 是否为空来猜」被推翻了：拖进来的素材仍会出现提示词/参数/运行，
+因为整个包里**新建节点有 7 条路径**（拖文件、资产库拖入、从节点拖出、复制、粘贴、点 + 新建、
+加载画布），上一版只堵了 3 条。用户给的方案是**做成六种明确类型**，不再猜。
+
+`data.role` 六值（**2026-11-13 02:30 追加**：后又加了 `asset-text` 与 `gen-text`，
+现在实际是八值，见文末「第八种节点：生成文本」）：
+
+| role | 含义 | 工作流 | 面板 |
+|---|---|---|---|
+| `asset-image` | 素材图片 | 恒为 `""` | **整个面板不显示** |
+| `asset-video` | 素材视频 | 恒为 `""` | **整个面板不显示** |
+| `asset-audio` | 素材音频 | 恒为 `""` | **整个面板不显示** |
+| `gen-image` | 生成图片 | 有 | 工作流列表 + 提示词 + 参数 + 运行 |
+| `gen-video` | 生成视频 | 有 | 同上 |
+| `gen-audio` | 生成音频 | 有 | 同上 |
+
+bundle 末尾的判定函数（`patch_node_roles.py`，幂等，备份 `.roles.bak.js`）：
+
+```js
+function xcatRole(d){
+  var R=['asset-image','asset-video','asset-audio','gen-image','gen-video','gen-audio'];
+  var r=d&&d.role; if(R.indexOf(r)>=0) return r;
+  // 没有 role 的旧节点：一律降为素材节点（用户明确「原来的节点不保留」）
+  var k=(d&&d.media&&d.media[0]&&d.media[0].kind)||'image';
+  if(k!=='image'&&k!=='video'&&k!=='audio') k='image';
+  return 'asset-'+k;
+}
+function xcatIsGen(d){ return xcatRole(d).indexOf('gen-')===0 }
+```
+
+创建路径全部补 `role`（素材类同时补 `workflow:""`）：
+
+| 路径 | 函数 | role |
+|---|---|---|
+| 拖文件到空白 | `g` / addMediaNode | `asset-` + `media[0].kind` |
+| 资产库 / 多文件拖入 | `ui` / spawnItemsNodeAt | 同上 |
+| 从节点拖出成新节点 | `spawnMediaNodeAt` 内联 | 同上 |
+| 派生 / 复制节点 | `ue` / spawnChildNode | 继承源节点 `role` |
+| 点 + 新建 | `_` / addNode | `gen-image` |
+| 加载画布 | 原样保留（`...tt` 覆盖） | 旧数据无 role → 走兜底 |
+
+面板四块全部改成 `xcatIsGen(e.data)` 条件：工作流胶囊列表、提示词、参数网格、运行按钮。
+上一版漏了**工作流列表**，素材节点上还挂着胶囊。
+
+左栏「新建节点」六选一（`assets/xcat-new-node.js`，新增；随后加了素材文本成七项、
+生成文本成八项）：
+- 注入位置在 `.library-tabs` 里「退出画布」之后；节点带 `data-v-1b766fe4`，直接命中上游
+  scoped 样式，不用重写 `.lib-tab`。
+- 菜单挂在 `#app` 内（`--cg-*` 令牌定义在 `#app` 上），六项分「素材节点」和「生成节点」两组。
+- 建节点走 `window.__xcatFlow.addNodes()`，id 取现有最大数字 id + 1，
+  位置 = 视口中心换算成画布坐标；生成类自动取工作流列表第一条。
+- 备份脚本 `.workbuddy/tmp/verify-newnode.js`（CDP 真点击）。
+
+**第二个入口：画布空白处双击（2026-11-13 02:20）**，同一个菜单、同一套 `role` 契约：
+
+- 上游 `zoomOnDoubleClick` 会放大，所以在 **document 捕获阶段**拦 `dblclick`
+  （`preventDefault` + `stopPropagation`），改成弹面板；这条也是文本节点双击编辑不冲突的前提——
+  处理器里先排除 `.vue-flow__node` 再放行，`xcat-text-edit.js` 才收得到。
+- 弹出位置贴鼠标（+8px），越界自动向左/上翻转，最后再 clamp 进视口；面板比左栏下拉更宽
+  （304px）、两列卡片（`.xcat-nodemenu.is-canvas`，底色比画布抬一层，暗色混白 12%、
+  亮色用 `--cg-input` 混 60% 出白卡片），头部右侧写「Esc 关闭」。
+- 落点：面板选项点击时用 `screenToFlowCoordinate({x: clientX, y: clientY})` 换算，
+  节点 **以双击点为中心**（`- NODE_W/2`, `- NODE_H/2`）；左栏入口仍用视口中心。
+- 关闭：点菜单外（`pointerdown` 捕获，立即收起）、滚轮、Esc、窗口 resize；
+  菜单开着时再双击空白 = 关闭。刚被点空白关掉的那一串双击用 `lastClosed`(350ms) 吞掉，
+  不会关了又开。
+- 不触发的区域：节点内部（交给文本编辑/拖拽）、`.vue-flow__panel`（右下浮动工具条）、
+  节点面板、左栏。实测 (1380,760) 落在工具条上不弹、(700,480) 落在节点上不弹。
+
+实测（8198 隔离实例，真实 `Input.dispatchMouseEvent` 双击）：
+
+| 动作 | 结果 |
+|---|---|
+| 空白 (700,480) 双击 | 面板出现在 (708,488)，7 项，`is-canvas` |
+| 点「素材图片」 | 节点 480×270（zoom 0.7 → 336×189），**中心正好 (700,480)**，`role=asset-image`、`workflow=""` |
+| 点「生成视频」 | `role=gen-video`，`workflow` 取列表第一条（隔离实例无工作流故为空串） |
+| 双击文本节点 | 进编辑（`.xcat-text-editing` + textarea 获焦），**不弹面板** |
+| 菜单开着再双击空白 | 关闭，不重开 |
+| 右边 (1400,200) 双击 | 面板向左翻，right=1392 < 视口 1424 |
+
+素材节点连面板一起不显示（2026-11-13 01:20 追加）：素材本身已经铺满节点，面板里再挂一条
+缩略图带纯属多余，用户要求去掉。CSS 从「宽度收缩居中」改成整块隐藏：
+
+```css
+#app .flow-wrap .node-panel:not(:has(.panel-prompt)) { display: none; }
+```
+
+素材节点 = 没有提示词块，所以这条选择器等价于「素材类面板全隐藏」；生成类恒有提示词块，不受影响。
+实测：素材节点 `display:none`（高度 0），生成节点 `display:flex`（高 145）。
+
+实测（8198 隔离实例，真实拖入 + 真实点击菜单）：
+
+| 来源 | role | 提示词 | 参数 | 运行 | 工作流列表 | 顶部按钮 |
+|---|---|---|---|---|---|---|
+| 拖入 png | asset-image | 无 | 0 | 无 | 无 | 裁切/扩图/预览/宫格/下载/删除 |
+| 拖入 mp4 | asset-video | 无 | 0 | 无 | 无 | 预览/下载/删除 |
+| 拖入 mp3 | asset-audio | 无 | 0 | 无 | 无 | 预览/下载/删除 |
+| 新建「生成视频」 | gen-video | 有 | 3 | 有 | 有 | 预览/删除 |
+| 旧节点（无 role） | 兜底 asset-* | **无** | 0 | 无 | 无 | 按素材 kind |
+
+注意：
+- 旧画布节点的 `data.workflow` 字段**不动**（只隐藏 UI），以后要恢复成生成节点只需补 `role`。
+- 素材节点目前没有「升级为生成节点」的入口，需要生成能力请用左栏「新建节点」。
+- 生成图片 / 视频 / 音频三种除了 `role` 目前行为一致：后端 `/api/workflows` 只返回
+  `name/nodes/updated`，没有产物类型字段，无法按类型过滤工作流列表。
 
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
@@ -1088,6 +1614,169 @@ currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
 
 ![画布总览](docs/images/canvas.jpg)
 
+### 节点尺寸 480×270 / 素材节点无输入口 / 水平连线不可见（2026-11-13 01:35）
+
+**1. 尺寸**：默认与下限都改成 480×270（原来 454×226，下限 400×225），只能放大不能缩小。
+
+```js
+const Pc=480,Ac=270,dk=480,fk=270;   // MIN_W, MIN_H, DEFAULT_W, DEFAULT_H
+const Ht=480,ln=270,Dc=72;           // 排布用宽高
+```
+
+`index-5rMw4exW.css` 的 `.demo-node{width:454px;height:226px}` 同步改成 480/270
+（实际宽高由 inline style 的 `nodeW/nodeH` 决定，CSS 只是兜底；**升级上游重建 dist 后要重做**）。
+
+> **只改常量还不够**：上游有 `fitNodeToFirstImage`（bundle 里是 `async function F(v,T)`），
+> 图片 onload 后按首图宽高比改写 `data.w/h`，所以拖进来永远不是 480×270。
+> 换算公式（`Zs=22` 内边距、`Bc=.84` 卡片占宽比、`Rc=900` 上限）：
+> `h = 22 + (w-22)*0.84*(imgH/imgW)`，高度不足 270 时封顶高度并反向补宽。
+> 16:9 → 547×270；1:1 → 480×407。2026-11-13 01:55 起在 `F` 开头加判定：
+> `xcatRole(node.data)` 前缀为 `asset-` 直接 `return false`，素材类固定 480×270，
+> 非 16:9 的图在框内 `object-fit:contain` 留黑边；生成类仍按产物比例自适应。
+
+**2. 素材节点只有右侧输出口**：不能把 target handle 从 DOM 里删掉——Vue Flow 靠 handle 的
+bounding box 算连线终点，删掉后原有连线的末端会退到节点左上角（实测截图确认悬空）。
+改成「幽灵端口」：handle 保留，加 `.xcat-port-hidden`：
+
+```css
+#app .flow-wrap .node-port.xcat-port-hidden { opacity: 0; pointer-events: none; }
+#app .flow-wrap .node-port.xcat-port-hidden .port-hit { pointer-events: none; }
+```
+
+bundle 里 target 的 class 加 `"xcat-port-hidden": !xcatIsGen(e.data)`。
+视觉不可见、拖线吸附不到，但几何位置照常参与计算。生成节点仍是左右双口。
+
+**3. 完全水平的连线不可见**：根因是 halo 描边用的 SVG 滤镜
+`filterUnits="objectBoundingBox"` —— 路径 bbox 高度为 0（完全水平）时，
+按 SVG 规范整个元素不渲染。两处 `filter: url(#xcat-link-halo)` 已删除，
+线回到单层 3px（浅色主题 `#6f7f6f` / 暗色 `#99aa99`）。
+实测：把某条边的 `d` 改成水平（bbox 高度 0），截图里线段正常显示。
+
+> 想恢复描边的话，必须换成 `userSpaceOnUse` + 绝对值区域，或者用 JS 插一条兄弟 path
+> 做双层描边；不能再回到 objectBoundingBox。
+
+### 第七种节点：素材文本（2026-11-13 01:50）
+
+左栏「新建节点」的素材组多了 **素材文本**，`data.role = 'asset-text'`。
+它不挂工作流、没有媒体卡片，节点内部就是一个铺满的 `<textarea>`。
+**默认不可编辑**（和图片/视频节点一样可拖动），**双击**才进入编辑（2026-11-13 02:05 改）。
+
+**数据契约**：文本存在 `data.text`（字符串），不放 `data.media`。
+放 media 会被上传/缩略图/删除按钮那一整套逻辑牵连（`kind` 只认 image/video/audio）。
+
+**渲染**：`Node` 组件 render 里在媒体分支**之前**插一个文本分支
+（`xcatIsText(e.data)` 为真就渲染 `.xcat-text-wrap > textarea`）：
+
+```js
+xcatIsText(e.data)?($(),P("div",{key:"xcat-text",class:"xcat-text-wrap"},[
+  f("textarea",{class:"xcat-text-area nodrag nowheel",placeholder:"输入文本…",
+    value:e.data.text||"",onInput:eo=>xcatTextInput(e,eo.target.value),...},null,8,["value"])
+])):!Mn.value&&H.value.length?( /* 原来的媒体分支 */ )
+```
+
+- `nodrag` / `nowheel` 让 Vue Flow 不管拖拽和缩放；编辑态里 `mousedown` / `dblclick`
+  一律 `stopPropagation`，否则点字就变成拖节点。
+- 写回走 `xcatTextInput(data, v)`：先直接写 `data.text`（不触发重渲染，光标不跳），
+  400ms 后 `updateNodeData` 同步给 store，自动保存/导出都能带上。
+- 顶部按钮：`xcatFanActions` 里 `if(xcatNodeRole(o.nodeId)==='asset-text')return!1;`
+  —— 六个扇形按钮全不渲染，只剩模板里那个独立的删除按钮。
+- 左上角名称胶囊会压住第一行字，所以 `:has(.xcat-text-wrap) > .xcat-node-name{display:none}`。
+- 拖文件到文本节点上：`xcat-new-node.js` 在 **捕获阶段** 拦 `drop` 并吞掉，
+  避免 media 里塞进看不见的数据。
+
+**双击进入编辑（`assets/xcat-text-edit.js`，2026-11-13 02:05）**
+
+textarea 默认 `pointer-events:none`，鼠标穿透到 `.demo-node`，于是 hover 是 `grab`、
+按住能拖、单击能选中——和图片节点完全一致。双击节点时给 `.demo-node` 加
+`.xcat-text-editing`，textarea 才接管鼠标：
+
+```css
+#app .flow-wrap .xcat-text-area { pointer-events: none; cursor: inherit; user-select: none; caret-color: transparent; }
+#app .flow-wrap .demo-node.xcat-text-editing .xcat-text-area { pointer-events: auto; cursor: text; user-select: text; caret-color: auto; }
+```
+
+脚本用 document 捕获阶段监听：`dblclick` 进入（`preventDefault` + `stopPropagation`，
+顺便挡掉 Vue Flow 的 `zoomOnDoubleClick`）、`pointerdown` 落在节点外退出、
+`Esc` 退出、`focusin` 跑到别处退出。退出时必须 `blur()`，否则 Delete / 方向键会被
+textarea 吃掉，节点删不掉。进入时光标放在文本末尾。
+
+实测（8198 隔离实例 + 真实鼠标）：hover `pointer-events:none` 且 `cursor:grab`、
+拖拽 position 从 (0,0) → (56,28)、双击后 `.xcat-text-editing` 出现且 textarea 获焦、
+画布 zoom 1.781 未变（没触发双击缩放）、键盘输入写回 `data.text`、
+点空白退出后 `pointer-events` 回到 none 且焦点释放、退出后仍可拖动。
+
+**样式**（`xcat-overrides.css`）：14px / 行高 1.65 / padding 8×10 / 无边框无背景，
+颜色 `var(--c-text)`（暗 `#e6e6ea`、亮 `#23232b`），滚动条按面板那套 6px 细条。
+
+实测（8198 隔离实例）：菜单七项、新建 role/`workflow:""`/`text:""` 正确、
+真实键盘输入写回 `data.text` 且焦点不丢、顶部只剩删除、面板 `display:none`、
+名称胶囊 `display:none`、拖入 `preventDefault` 且 media 仍为 0、
+刷新后 `text` 仍在（`toObject()` 的 data 含 `text` 键）。
+
+### 画布内 Ctrl+V 粘贴外部内容（2026-11-13 02:10）
+
+上游的粘贴只认它内存里的 clipboard（复制节点/连线），系统剪贴板里的图片、
+视频、音频、文字完全不处理。补一条 `paste` 监听（`assets/xcat-paste.js`）：
+
+| 剪贴板内容 | 结果 |
+|---|---|
+| 文件（image/*、video/*、audio/*） | 每个文件建一个素材节点，`role = asset-image/video/audio` |
+| 只有纯文本 | 建一个素材文本节点，内容写进 `data.text` |
+| 在输入框 / 文本节点里粘贴 | 完全不拦，正常粘文字 |
+| 画布内部复制的节点 | 上游在 keydown 里 `preventDefault`，浏览器不派发 paste，不会撞车 |
+
+要点：
+
+1. **上传复用上游链路**：`window.__xcatGraph.appendMedia(id, [file])`，
+   先本地占位、后台补传、失败可在卡片上重试。为此给 bundle 打了
+   `go("canvasGraph",{` → `go("canvasGraph",window.__xcatGraph={`（1 处），
+   把画布 store 挂到 window 上。
+2. **必须延迟一拍再上传**：`flow.addNodes` 立刻进 `getNodes`，但 canvasGraph 的
+   `nodes` 要等 watch 同步，立刻 `appendMedia` 会找不到节点、静默返回 false。
+   用 `setTimeout(…, 80)`。
+3. **落点**：鼠标最后在 `.vue-flow` 内的位置，没有记录就用视口中心。
+   多个文件按 `480 + 48`（flow 坐标）横向排开；落点已被占用（±80px 内有节点）
+   就继续右移，避免连续粘贴完全叠在一起（`placeClear`）。
+4. 文件类型判定：mime 前缀优先，扩展名兜底（webm/mkv/m4a/opus 这些都有）。
+
+实测（新用户目录的干净实例）：一次粘两个 PNG → 两个 `asset-image` 节点
+x=777/1305（差 528）、上传完成后 `pending:false` 且 `ref` 有文件名；
+再粘 mp4 → `asset-video` 自动挪到 x=1833；粘纯文本 → `asset-text`，`data.text` 为粘贴内容；
+在文本节点的 textarea 里粘文本 → `prevented:false`，节点数不变。
+
+### 第八种节点：生成文本 `gen-text`（2026-11-13 02:30）
+
+用户要求补上与「生成图片 / 视频 / 音频」并列的文本类型，并确认外观 = **文本区 + 生成面板**
+（不是只多一个 role）。也就是：节点主体是双击可编辑的文本区，同时又保留生成类的工作流列表、
+提示词、参数、运行按钮和**左侧输入端口**。
+
+四处改动：
+
+| 位置 | 改动 |
+|---|---|
+| `index-BXU58XDe.js` `xcatRole` 白名单 `R` | 加 `'gen-text'`，否则会兜底成 `asset-image`；`xcatIsGen` 靠 `gen-` 前缀自动成立 |
+| `xcatIsText(d)` | `xcatRole(d)==='asset-text'` → 同时认 `gen-text`，两种文本节点共用同一块 textarea |
+| `xcatFanActions` | 过滤条件加 `gen-text`，文本节点顶部只留「删除节点」，不显示预览/下载等媒体按钮 |
+| `fitNodeToFirstImage` (`F`) | 早退条件加 `gen-text`，往节点里塞图也不会按比例把 480×270 撑开 |
+
+补丁脚本 `.workbuddy/tmp/patch_gentext.py`（幂等），备份
+`index-BXU58XDe.js.gentext.bak.js`。`xcat-new-node.js` 生成组加第 4 项（两列正好 2×2），
+`createNode` 的 `text:''` 条件扩到 `gen-text`；`xcat-text-edit.js` 按 `.xcat-text-area`
+判定，不需要改就自动支持双击编辑。
+
+面板显示条件沿用上游：`panelOpen = selected && !boxSelectedIds.has(id)`，所以**选中节点时
+生成面板才展开**（生成图片/视频/音频也是这个行为），新建节点会自动选中。
+
+实测（8198 干净实例 + CDP 真双击）：菜单 8 项；`window.__xcatRole({role:'gen-text'})` =
+`'gen-text'`、`__xcatIsText` = true；新建节点 480×270（zoom .7 → 336×189）、
+`data.text=""`、文本区存在；选中态面板 490×132 且含 `.panel-prompt` / `.panel-run`；
+左侧 target 端口无 `xcat-port-hidden`；顶部只剩「删除节点」；双击进编辑、输入写回
+`data.text`、点外部退出后 `pointer-events:none`；往节点 appendMedia 一张 800×800 PNG 后
+`data.w/h` 仍未写、尺寸依旧 336×189。
+
+限制：后端 `/api/execute` 只回传媒体文件，没有文本产物通道，所以工作流运行出来的文字
+**不会自动写进文本区**；这里的文本区目前由用户手动填写 / 编辑。
+
 ## 功能
 
 **画布**
@@ -1096,7 +1785,7 @@ currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
 
 - 多画布管理：顶部条只显示已打开的画布（可逐个 × 关闭，全关后退化为 Unsaved Canvas）；画布管理面板是卡片网格，卡片右上角内联「复制 / 编辑名称 / 删除」（无右击菜单；批量删除仍用列表头的选择 + 「删除所选」）；新建、切换、改动自动保存；Ctrl/Cmd+S 可保存（无当前画布时自动新建并保存）
 
-- 节点素材可以拖出画布空白处新建节点，拖到别的节点上则作为素材追加
+- 节点素材可以拖出画布空白处新建节点，拖到别的节点上则替换该节点的素材（一个节点只保留一个素材；一次拖入多个文件会按「一个文件一个节点」排开）
 
 - 撤销：`Ctrl/Cmd + Z` 回退上一步（新建 / 删除节点、连线、拖动、改参数、粘贴等，最多 40 步，连续输入合并为一步）
 
@@ -1357,7 +2046,7 @@ ComfyUI 官方侧栏用的也是这一套（另有 `icon-[comfy--*]` 自绘集�
 
 | 图标 | 作用 |
 | --- | --- |
-| 指针 / 手 + 箭头 | 画布模式：`V` 选择（可编辑，左键拖空白平移、Shift+拖框选、Ctrl/Alt+拖剪线）或 `H` 拖拽（只读，左键任意位置平移、节点不可选/拖/连）；空格按住临时进入拖拽。菜单里显示 V / H |
+| 指针 / 手 + 箭头 | 画布模式：`V` 选择（可编辑，左键拖空白平移、Ctrl+拖框选、Alt+拖剪线、点连线中点断开）或 `H` 拖拽（只读，左键任意位置平移、节点不可选/拖/连）；空格按住临时进入拖拽。菜单里显示 V / H |
 | 取景框 | 适应视图：缩放到能看到整块画布 |
 | `70%` + 箭头 | 缩放控制：放大 / 缩小 / 适应视图 / 直接输入百分比 |
 | 断链 | 隐藏或显示节点之间的连接线 |

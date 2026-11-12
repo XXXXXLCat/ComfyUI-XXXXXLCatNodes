@@ -3087,9 +3087,14 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     box-shadow: 0 6px 18px var(--c-shadow);
 }
 
-/* 选中：白色描边环（对齐 ComfyUI 的选中白框），不再是 accent 黄 */
+/* 选中：白色描边环（对齐 ComfyUI 的选中白框），不再是 accent 黄。
+   宽度 = --xcat-link-w（= 3px = ComfyUI connections_width），
+   用户要求「高亮边框与线一样粗」，所以两者共用同一个令牌，改一处就同步。
+   颜色 `NODE_BOX_OUTLINE_COLOR = #FFF`（`draw.ts::strokeShape` 的默认值）。
+   注：ComfyUI 画布上实测选中白框约 1 图内 px、连线 3，本身是 1:3；
+   这里按用户要求统一成与线同粗。 */
 #app .vue-flow__node.selected .demo-node {
-    box-shadow: 0 0 0 2px var(--xcat-sel), 0 6px 18px var(--c-shadow) !important;
+    box-shadow: 0 0 0 var(--xcat-link-w) var(--xcat-sel), 0 6px 18px var(--c-shadow) !important;
 }
 
 /* 「可连接」提示仍保留 accent 黄 —— 那是连接语义，不是选中语义 */
@@ -3172,81 +3177,225 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     --xcat-link: #99aa99;
     --xcat-link-connecting: #aaffaa;
     --xcat-link-hot: #ffffff;
+    /* 线宽：ComfyUI LGraphCanvas.connections_width = 3。
+       选中环、接头都共用这个令牌，保证「边框与线同粗」永远同步。 */
+    --xcat-link-w: 3px;
+    --xcat-slot: #aaaaaa;
+    --xcat-slot-rim: #b2b2b2;
     --xcat-sel: #ffffff;
+    /* 中点圆点被 hover（= 可点断开）时的「挖孔」色：纯黑，比画布底 #222 还深，
+       读起来才像线上开了一个可以删掉的洞（见「连线中点圆点」节）。 */
+    --xcat-link-hole: #000000;
 }
 
 html[data-theme="light"] {
     --xcat-link: #6f7f6f;
     --xcat-link-connecting: #2f7a2f;
     --xcat-link-hot: #111318;
+    --xcat-slot: #8f8f8f;
+    --xcat-slot-rim: #a3a3a3;
     --xcat-sel: #111318;
+    --xcat-link-hole: #1b1d1f;
 }
 
 #app .flow-wrap .vue-flow__edge-path {
     stroke: var(--xcat-link);
-    stroke-width: 2.5px;
+    stroke-width: var(--xcat-link-w);
     stroke-dasharray: none;
     stroke-linecap: round;
+    stroke-linejoin: round;
+    /* 不再用 #xcat-link-halo 描边：该滤镜是 objectBoundingBox 单位，
+       完全水平的连线 bbox 高度为 0，按 SVG 规范整条路径不渲染 —— 表现为线消失。*/
     transition: stroke .12s ease, stroke-width .12s ease;
 }
 
+/* hover / 选中连线：ComfyUI 的 `colors.highlighted = '#FFF'`，
+   只换颜色、**线宽不变**（drawLink 始终用 connectionWidth，加粗是我们自己加的，已去掉）。 */
 #app .flow-wrap .vue-flow__edge:hover .vue-flow__edge-path,
 #app .flow-wrap .vue-flow__edge.selected .vue-flow__edge-path,
 #app .flow-wrap .vue-flow__edge:focus .vue-flow__edge-path,
 #app .flow-wrap .vue-flow__edge:focus-visible .vue-flow__edge-path {
     stroke: var(--xcat-link-hot);
-    stroke-width: 4px;
 }
 
-/* 拖拽新连线时跟随鼠标的那条（上游是 1.5px 虚线，这里改实线并加宽） */
+/* 选中节点 ⇒ 与它相连的线一起变白。
+   ComfyUI：selectionView.highlightedLinks = 选中节点的全部 linkId，
+   renderLink 用 colors.highlighted('#FFF')，**线宽不变**。
+   Vue Flow 没有这个联动，class 由 xcat-edge-hot.js 桥接加在 .vue-flow__edge 上。 */
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+}
+
+/* ==================================================================
+   连线中点圆点（点击断开这条线）
+   ------------------------------------------------------------------
+   ComfyUI renderer/core/canvas/pathRenderer.ts：
+     calculateCenterPoint()  ⇒ findPointOnBezier(0.5, …)，取曲线参数中点
+     drawCenterMarker()      ⇒ arc(centerPos, 5) + fill()，半径 5，
+                               填充色 = 该线颜色，无描边、不画 7px 黑 halo
+                               只在 scale >= 0.6 且 highQuality 时绘制
+   ⇒ 圆点直径 10 > 线 7px（3 本色 + 4 外描边），正好把线盖干净；
+     半径 5 是**图内单位**，随缩放一起变大变小（circle 在 viewport transform 里，
+     这一点自动满足）。缩放到 0.6 以下由 xcat-edge-mid.js 隐藏。
+   点击由 xcat-edge-mid.js 走 flow.removeEdges([id])，与 Delete 删边同一 action。
+   hover 时镂空成圆环（外径不变、中心挖黑孔），替换掉上游那个红色叉号按钮 ——
+   后者是 `.edge-delete`（18px 圆 + X，hover 用 --c-danger），本文件末尾已隐藏。
+   ================================================================== */
+#app .flow-wrap .xcat-edge-mid {
+    fill: var(--xcat-link);
+    stroke: none;
+    pointer-events: all;
+    cursor: pointer;
+    transition: fill .12s ease, stroke .12s ease, stroke-width .12s ease, r .12s ease;
+}
+
+/* 悬停命中区：比圆点大一圈的透明圆，append 在圆点之后（= 盖在它上面）。
+   鼠标落在半径 10 个图内单位内就算「对准了这个可断开的点」，比 10px 的圆点好点中。
+   pointer-events:all 必须显式写：上游 `.vue-flow__edge{pointer-events:visibleStroke}`，
+   fill:transparent 的圆默认不参与命中测试。 */
+#app .flow-wrap .xcat-edge-mid-hit {
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
+    cursor: pointer;
+}
+
+/* hover ⇒ 实心圆镂空成圆环：外沿不动（r 4 + stroke 2 = 5，与实心时的半径相同），
+   中间挖成 --xcat-link-hole，线从洞里穿过去也看不见 —— 就是「线上开了一个洞」。
+   r / stroke-width / 半径 全部是图内单位，跟着缩放一起变。 */
+#app .flow-wrap .xcat-edge-mid.is-hot {
+    r: 4px;
+    fill: var(--xcat-link-hole);
+    stroke: var(--xcat-link);
+    stroke-width: 2px;
+}
+
+/* 选中节点 ⇒ 相连的线、中点、圆环一起走 highlight 色（ComfyUI 同一套 colors.highlighted） */
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .xcat-edge-mid,
+#app .flow-wrap .vue-flow__edge.selected .xcat-edge-mid {
+    fill: var(--xcat-link-hot);
+}
+
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .xcat-edge-mid.is-hot,
+#app .flow-wrap .vue-flow__edge.selected .xcat-edge-mid.is-hot {
+    fill: var(--xcat-link-hole);
+    stroke: var(--xcat-link-hot);
+}
+
+/* hover 中点圆环时，这条线不再走上面的 hover 白 —— 圆环与线同色、孔是黑的，
+   才是参考图那副样子。选中节点的连线（.xcat-edge-hot）仍然保持白色。 */
+#app .flow-wrap .vue-flow__edge.xcat-edge-marker-hot:not(.xcat-edge-hot):not(.selected) .vue-flow__edge-path {
+    stroke: var(--xcat-link);
+}
+
+/* 上游自带的「删除连线」按钮（18px 圆 + 9px 叉号，悬停整条线就浮出来，
+   hover 时变红色 --c-danger）：它正好压在中点圆点上，一圈红叉就是它。
+   整个隐藏，删除只保留中点圆环这一处，安静得多。 */
+#app .flow-wrap .edge-tool {
+    display: none;
+}
+
+/* ==================================================================
+   剪线（上游 Alt/Ctrl + 拖动划过连线 = 划断）：红色 → 白色
+   ------------------------------------------------------------------
+   上游 index-*.css 两条红：`.cut-line{stroke:#ff3b3b}`（跟随鼠标的轨迹）
+   与 `.vue-flow__edge.is-cutting .vue-flow__edge-path{stroke:#ff3b3b}`。
+   本包整个画布只有一套语义色（线 #99AA99 / 高亮白），红色是唯一跳出的，
+   统一收到 --xcat-link-hot，线宽也跟 --xcat-link-w 走（原来 2.5 / 3 混着）。
+   特异性 (1,n,0) > 上游 (0,5,0)，不需要 !important。
+   ================================================================== */
+#app .flow-wrap .vue-flow__edge.is-cutting .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+    stroke-width: var(--xcat-link-w);
+    stroke-dasharray: none;
+}
+
+#app .cut-line {
+    stroke: var(--xcat-link-hot);
+    stroke-width: var(--xcat-link-w);
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--xcat-link-hot) 45%, transparent));
+}
+
+/* 拖拽新连线时跟随鼠标的那条（上游是 1.5px 虚线，这里改实线并加宽）
+   ComfyUI 的拖拽线同样走 renderLinkDirect ⇒ 一样带 7px 黑描边（skip_border=false） */
 #app .flow-wrap .vue-flow__connection-path {
     stroke: var(--xcat-link-connecting);
-    stroke-width: 2.5px;
+    stroke-width: var(--xcat-link-w);
     stroke-dasharray: none;
     stroke-linecap: round;
+    stroke-linejoin: round;
+    /* 不再用 #xcat-link-halo 描边：该滤镜是 objectBoundingBox 单位，
+       完全水平的连线 bbox 高度为 0，按 SVG 规范整条路径不渲染 —— 表现为线消失。*/
 }
 
-/* 吸附到可连接目标时：白线加粗（原来用 accent 黄） */
+/* 吸附到可连接目标：ComfyUI 拖拽线的颜色恒为 resolveConnectingLinkColor(type)
+   （默认 CONNECTING_LINK_COLOR #AFA），吸附与否都不换色；吸附反馈只体现在
+   目标 slot 上（NodeSlot 的 highlight → 半径 4→5）。这里保持同色。 */
 #app .flow-wrap .vue-flow__connection-path.is-snapped {
-    stroke: var(--xcat-link-hot);
-    stroke-width: 4px;
+    stroke: var(--xcat-link-connecting);
     stroke-dasharray: none;
 }
 
 /* ==================================================================
-   节点连接点：10px 圆点，圆心在节点框**外**、距侧边 10px
+   节点连接点：10px 灰圆点，圆心压在节点边框线上，**连线端点贴圆边**
    ------------------------------------------------------------------
-   上游 .node-port 是 20×20 的透明定位盒（left:0 / right:0 + translate(∓50%)，
-   圆心正好压在节点边缘），可见部分由 ::before 画 20px 圆再用 clip-path 切掉
-   一半 —— 所以是「半个圆饼贴着侧边」。
-   这里定位盒尺寸不动（Vue Flow 拿它量连线端点，改尺寸会影响吸附与命中）。
-   注意 left/right 与圆心的关系：盒子被 translate(-50%) 左移半个宽度，所以
-   「圆心距边缘的偏移量 = left/right 的值」，正值向内、负值向外。
-   取 -10px → 盒子跨 [-20, 0]（整体在框外），圆心落在 -10px，10px 圆点占
-   [-15, -5]，离边框留 5px 空隙，完全在框外。
-   ::before 缩到 10px 并清掉 clip-path，变成完整小圆点。
-   Vue Flow 用 handle 的 DOM 矩形算 edge 端点，连线端点会跟着圆心走。
+   上游 .node-port 是 20×20 的透明定位盒（left:0/right:0 + translate(∓50%)，
+   圆心压在节点边缘），可见部分由 ::before 画 20px 圆再 clip-path 切一半
+   —— 所以是「半个圆饼贴着侧边」。
+   注意 left/right 与圆心的关系：盒子被 translate(-50%) 平移半个宽度，所以
+   「圆心距边缘的偏移量 = left/right 的值」，正值向内、负值向外；取 0 →
+   圆心正好落在边框线（x=0），圆点一半框内一半框外。
+   **定位盒尺寸必须 = 圆点直径（10px）**：Vue Flow 算 edge 端点用的是 handle
+   的 DOM 矩形（左 handle 取 box.left、右 handle 取 box.right），盒子 20px 时
+   端点落在边框外 10px（圆点半径只有 5px）⇒ 线和圆点之间空 5px 缝。
+   缩到 10px 后端点正好落在「边框 ±5px」= 圆点边缘，线就贴在圆点上（ComfyUI
+   里 link 也是从 slot 圆周出发的）。命中区不受影响：那是 .port-hit
+   （72×72 的独立子元素，不受盒子尺寸约束）。
    ================================================================== */
+#app .vue-flow__handle.node-port {
+    width: 10px;
+    height: 10px;
+}
+
 #app .vue-flow__handle.node-port.vue-flow__handle-left {
-    left: -10px;
+    left: 0;
 }
 
 #app .vue-flow__handle.node-port.vue-flow__handle-right {
-    right: -10px;
+    right: 0;
 }
 
+/* 圆点配色（用户指定 #AAAAAA）：
+     半径 radius = highlight ? 5 : 4（NodeSlot.draw），即 8px、hover 10px；
+     颜色 = renderingColor() → comfy 的 getSlotColor(type) =
+            `var(--color-datatype-${T}, #AAA)`，画布节点没有 datatype 变量
+            ⇒ 落回 **#AAA**，与是否已连接无关（color_on/color_off 为空）。
+   实测 ComfyUI 截图：圆盘 #AAAAAA（170），外圈一圈更亮的细边（178 ≈ #B2B2B2，
+   约直径的 1/8）—— 用 inset box-shadow 复刻，别用 border（会撑大外径、
+   把圆心挤偏）。hover 只放大、不改色。
+   用户要求圆点 10px，故基础值取 10（ComfyUI 是 8），hover 按 4→5 同比例到 12。 */
 #app .vue-flow__handle.node-port::before {
     width: 10px;
     height: 10px;
     clip-path: none;
+    background: var(--xcat-slot);
+    box-shadow: inset 0 0 0 1px var(--xcat-slot-rim);
+    transition: width .12s ease, height .12s ease, background .12s ease;
 }
 
-/* 圆点在框外时不会被 .media-stack-card（z-index:10）遮住，层级只作保险，
-   避免与相邻节点/连线叠序打架；仍低于删除（20）/ 缩放（21）/ 操作行（25）。
-   —— 关键：上游圆点是「hover 到 .demo-node 才淡入」，圆点整体挪到框外之后，
-   鼠标必须先在节点内才会显示，可这时圆点在外面、鼠标一移出去就 opacity:0，
-   等于点不到。所以给接头自己开 pointer-events 常驻 + :hover 显示，
-   让框外 20×20 那块也能直接触发（不可见时也能命中，进出即显隐）。 */
+/* ComfyUI 的 highlight 只把半径 4→5（label 才变白），填充色不变；
+   这里同理，hover 仅放大 10→12（另有 :hover 规则在下面统一处理）。 */
+
+#app .vue-flow__handle.node-port:hover::before {
+    width: 12px;
+    height: 12px;
+}
+
+/* 圆点跨在边框上，有一半落在卡片内部，需要压过 .media-stack-card（z-index:10）
+   才不会被卡面盖住；层级仍低于删除（20）/ 缩放（21）/ 操作行（25）。
+   —— 关键：上游圆点是「hover 到 .demo-node 才淡入」，鼠标一移出节点就
+   opacity:0，等于点不到。所以给接头自己开 pointer-events 常驻 + :hover 显示，
+   让 20×20 那块（含框外一半）也能直接触发（不可见时也能命中，进出即显隐）。 */
 #app .vue-flow__handle.node-port {
     z-index: 15;
     pointer-events: all;
@@ -3640,8 +3789,250 @@ html[data-theme=light] {
     display: none !important;
 }
 
+/* 删除按钮不跟着上游用红色：hover 只提亮到高亮色（暗色白 / 亮色近黑） */
 #app .demo-node .node-actions .xcat-act-delete:hover {
-    border-color: var(--c-danger);
-    background: color-mix(in srgb, var(--c-danger) 16%, transparent);
-    color: var(--c-danger);
+    border-color: var(--xcat-link-hot);
+    background: color-mix(in srgb, var(--xcat-link-hot) 12%, transparent);
+    color: var(--xcat-link-hot);
+}
+
+/* ==================================================================
+   素材节点 vs 生成节点（2026-11-12）
+   拖入文件建出来的节点不再挂默认工作流，面板里也就没有提示词 /
+   参数 / 运行；此时面板只剩那条素材条，宽度必须跟着内容收缩，
+   否则会留一条 700px 宽的空壳。
+   ------------------------------------------------------------------ */
+/* 素材节点（面板里没有提示词块）：整个面板不显示。
+   素材本身已经铺在节点上了，下面再挂一条缩略图带是多余的（用户明确要求去掉）。 */
+#app .flow-wrap .node-panel:not(:has(.panel-prompt)) {
+    display: none;
+}
+
+
+/* ------------------------------------------------------------------------
+ * 左栏「新建节点」六选一菜单（xcat-new-node.js）
+ * 挂在 #app 内以继承 --cg-* 令牌；层级高于左栏与工具条。
+ * ------------------------------------------------------------------------ */
+.xcat-nodemenu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 172px;
+    padding: 6px;
+    border: 1px solid var(--cg-line);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.xcat-nodemenu-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 8px 3px;
+}
+
+.xcat-nodemenu-title {
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.xcat-nodemenu-hint {
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+
+.xcat-nodemenu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.xcat-nodemenu-item:hover {
+    background: var(--cg-accent);
+}
+
+.xcat-nodemenu-item svg {
+    flex: 0 0 auto;
+    opacity: 0.85;
+}
+
+.xcat-nodemenu-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--cg-line);
+}
+
+.xcat-new-tab.is-open .xcat-tab-label {
+    color: var(--cg-fg);
+}
+
+
+/* ------------------------------------------------------------------------
+ * 画布空白处双击 → 节点类型面板（xcat-new-node.js 的 .is-canvas 变体）
+ * 贴鼠标弹出，两列卡片；比左栏下拉更宽、底色抬一层（--cg-secondary）。
+ * ------------------------------------------------------------------------ */
+.xcat-nodemenu.is-canvas {
+    min-width: 304px;
+    padding: 8px;
+    border-color: var(--cg-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--cg-secondary) 88%, #ffffff 12%);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%);
+    animation: xcat-nodemenu-in 120ms ease-out;
+}
+
+/* 亮色下 --cg-secondary 比画布更深，混黑会显得凹陷；改成混白抬成白卡片 */
+html[data-theme="light"] .xcat-nodemenu.is-canvas {
+    background: color-mix(in srgb, var(--cg-secondary) 40%, var(--cg-input) 60%);
+}
+
+@keyframes xcat-nodemenu-in {
+    from { opacity: 0; transform: translateY(-2px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+.xcat-nodemenu-cap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 6px 7px;
+}
+
+.xcat-nodemenu-caption {
+    color: var(--cg-fg);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.xcat-nodemenu-key {
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-head {
+    padding: 4px 6px 6px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-title {
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-hint {
+    color: var(--cg-muted-fg);
+    opacity: 0.75;
+}
+
+.xcat-nodemenu-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-item {
+    padding: 9px 8px;
+    border-radius: 8px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-item:hover {
+    background: var(--cg-accent);
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-sep {
+    margin: 6px 4px;
+}
+
+
+/* ------------------------------------------------------------------------
+ * 素材节点没有左侧输入端口（2026-11-13 01:30）
+ * 不能把 handle 从 DOM 里删掉：Vue Flow 靠 handle 的 bounding box 算连线终点，
+ * 删了之后原有连线的末端会退到节点左上角（悬空）。这里保留 DOM，
+ * 只做视觉隐藏 + 禁止拖入（pointer-events），几何计算不受影响。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .node-port.xcat-port-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#app .flow-wrap .node-port.xcat-port-hidden .port-hit {
+    pointer-events: none;
+}
+
+/* ------------------------------------------------------------------------
+ * 素材文本节点（asset-text，2026-11-13）
+ * 默认状态：textarea 不接收鼠标（pointer-events:none），所以整块节点的行为
+ * 和图片/视频节点一致——hover 是 grab，按住可以拖动，单击选中。
+ * 双击节点 .demo-node.xcat-text-editing 后 textarea 才接管鼠标，进入编辑。
+ * 编辑态的进入/退出由 assets/xcat-text-edit.js 负责。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .xcat-text-wrap {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#app .flow-wrap .xcat-text-area {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 12px;
+    outline: none;
+    background: transparent;
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.65;
+    resize: none;
+    scrollbar-width: auto;
+    pointer-events: none;
+    cursor: inherit;
+    user-select: none;
+    caret-color: transparent;
+}
+
+/* 编辑态：接管鼠标，恢复文本光标与选区 */
+#app .flow-wrap .demo-node.xcat-text-editing .xcat-text-area {
+    pointer-events: auto;
+    cursor: text;
+    user-select: text;
+    caret-color: auto;
+}
+
+#app .flow-wrap .xcat-text-area::placeholder {
+    color: color-mix(in srgb, var(--c-text) 38%, transparent);
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar-button {
+    display: none;
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--cg-scroll, var(--cg-line));
+    background-clip: padding-box;
+}
+
+/* 文本节点不显示左上角名称胶囊：文本本身就是内容，胶囊会压住第一行字。 */
+#app .demo-node:has(.xcat-text-wrap) > .xcat-node-name {
+    display: none;
 }
