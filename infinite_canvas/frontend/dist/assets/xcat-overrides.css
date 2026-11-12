@@ -2242,6 +2242,7 @@ html[data-theme="light"] #app .float-window .am-preview-body {
    那是在 bg-background 上，而这里块本身是 bg-card）。 */
 #app .float-window .wf-primary,
 #app .float-window .wf-upload,
+#app .float-window .wf-rename,
 #app .float-window .wf-save,
 #app .float-window .wf-danger {
     height: 32px;
@@ -2258,6 +2259,7 @@ html[data-theme="light"] #app .float-window .am-preview-body {
 
 #app .float-window .wf-primary:hover,
 #app .float-window .wf-upload:hover,
+#app .float-window .wf-rename:hover,
 #app .float-window .wf-save:hover:not(:disabled),
 #app .float-window .wf-danger:hover {
     border: 0;
@@ -2309,11 +2311,17 @@ html[data-theme="light"] #app .float-window .am-preview-body {
 
 #app .float-window .wf-item-name {
     font-size: 14px;
+    /* 名称占满整行：右侧的「N 个节点」已隐藏（见下条），别让 ellipsis 提前收口 */
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
+/* 左栏列表项不再显示「N 个节点」—— 名字一条到底 */
 #app .float-window .wf-item-meta {
-    font-size: 12px;
-    color: var(--cg-muted-fg);
+    display: none;
 }
 
 #app .float-window .wf-empty-list {
@@ -2329,6 +2337,90 @@ html[data-theme="light"] #app .float-window .am-preview-body {
     border-radius: 6px;
     background: var(--cg-muted);
     font-size: 12px;
+}
+
+/* 重命名弹层：bundle 里用原生 DOM 注入（不经过 Vue 的 vnode），
+   所以选择器不带 .wf- 前缀，直接挂在 #app 下、以 .float-window 为包含块。
+   尺寸 / 圆角 / 按钮照 ComfyUI 的 dialog：320 宽、12 圆角、输入 36 高、
+   按钮 32 高、确定走 inverted（前景色底 + 反色字）。 */
+#app .xcat-rn-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: inherit;
+    background: color-mix(in srgb, #000 42%, transparent);
+}
+
+#app .xcat-rn {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 320px;
+    padding: 16px;
+    border: 1px solid var(--cg-line);
+    border-radius: 12px;
+    background: var(--cg-secondary);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 45%);
+    color: var(--cg-fg);
+}
+
+#app .xcat-rn-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#app .xcat-rn-input {
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 12px;
+    outline: none;
+}
+
+#app .xcat-rn-input:focus {
+    border-color: var(--cg-border);
+}
+
+#app .xcat-rn-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+#app .xcat-rn-actions button {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+#app .xcat-rn-cancel {
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+#app .xcat-rn-cancel:hover {
+    background: var(--cg-accent);
+}
+
+#app .xcat-rn-ok {
+    background: var(--cg-fg);
+    color: var(--cg-bg);
+}
+
+#app .xcat-rn-ok:hover {
+    background: color-mix(in srgb, var(--cg-fg) 84%, var(--cg-bg));
 }
 
 /* 右侧头卡 / 预览 */
