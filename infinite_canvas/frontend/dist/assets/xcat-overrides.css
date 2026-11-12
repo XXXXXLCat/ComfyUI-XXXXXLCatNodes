@@ -3107,7 +3107,17 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     box-shadow: none !important;
 }
 
-#app .demo-node .media-stack-card img,
+/* 图片照视频播放器 .vp-video 的写法：等比 contain + 黑底。
+   上游是 object-fit:cover，节点一改尺寸就把图片裁掉；视频组件自己用的是
+   object-fit:contain;background:#000，所以视频有黑边而图片没有。
+   img 元素本身是 100%×100%，背景色正好填满 contain 留出的上下/左右空白，
+   不需要给卡片或节点加黑底（那样空节点、音频节点也会变黑）。 */
+#app .demo-node .media-stack-card img {
+    border-radius: 0;
+    object-fit: contain;
+    background: #000;
+}
+
 #app .demo-node .media-stack-card video {
     border-radius: 0;
 }
