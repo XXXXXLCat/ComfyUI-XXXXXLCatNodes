@@ -228,7 +228,9 @@
       绝对定位以它的 padding box 为参照，所以 `top:24` 与 32px 关闭按钮同高、
       `right:60` = 关闭 32 + 右 16 + 间距 12。头卡 `.wf-head` 里因此只剩工作流名与副标题。
     - **左栏列表项不再显示「N 个节点」**：`.wf-item-meta{display:none}`，
-      `.wf-item-name` 补 `flex:1 1 auto; min-width:0` + 单行 ellipsis（名字占满整行）。
+      `.wf-item-name` 补 `flex:1 1 auto; min-width:0` + 单行 ellipsis（名字占满整行）；
+      名字节点同时带上 `title`（`f("span",{class:"wf-item-name",title:ze.name},…)`），
+      截断时 hover 能看到全名。
     - **右侧新增「重命名」**（这条动了后端）：`infinite_canvas/__init__.py` 加
       `POST /infinite_canvas/api/workflows/{name}/rename`，body `{"name": 新名}` ——
       `os.replace` 改 json、同名的 `.fields.json` 跟着改名、`canvas_settings.json` 的
