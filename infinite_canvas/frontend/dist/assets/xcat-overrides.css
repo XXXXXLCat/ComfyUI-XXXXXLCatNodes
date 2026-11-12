@@ -3172,15 +3172,17 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
    音频波形：替代原生 <audio controls> 进度条
    ------------------------------------------------------------------
    bundle 把两处 <audio controls> 换成空的 .xcat-audio-wave 容器，
-   xcat-audio-wave.js 负责解码峰值、canvas 绘制、点击/拖动 seek 与播放。
-   颜色走 --xw-* 令牌，主题切换时 JS 会重绘；暗色底/灰竖条/蓝播放头
-   照参考图，亮色主题按同一色阶镜像。
+   xcat-audio-wave.js 负责解码峰值、canvas 绘制、拖动播放头 seek 与播放。
+   点波形其它位置不会跳进度；只有 hover 到播放头才出左右箭头 + ew-resize
+   光标，按住左右拉才能改进度。颜色走 --xw-* 令牌，主题切换时 JS 会重绘；
+   暗色底/灰竖条/蓝播放头照参考图，亮色主题按同一色阶镜像。
    ================================================================== */
 :root {
     --xw-bg: #232428;
     --xw-bar: #8b929e;
     --xw-played: #4a9eff;
     --xw-head: #3d9cff;
+    --xw-head-fg: #ffffff;
     --xw-btn-bg: rgba(18, 20, 24, .74);
     --xw-btn-fg: #f2f4f8;
 }
@@ -3190,6 +3192,7 @@ html[data-theme=light] {
     --xw-bar: #6f7684;
     --xw-played: #2f7fe0;
     --xw-head: #2f8fff;
+    --xw-head-fg: #ffffff;
     --xw-btn-bg: rgba(255, 255, 255, .86);
     --xw-btn-fg: #23232b;
 }
@@ -3204,6 +3207,8 @@ html[data-theme=light] {
     background: var(--xw-bg);
     touch-action: none;
     user-select: none;
+    /* 默认光标：只有命中播放头时 JS 才 inline 覆盖成 ew-resize */
+    cursor: default;
 }
 
 .xcat-audio-wave .xcat-wave-canvas {
@@ -3270,7 +3275,8 @@ html[data-theme=light] {
    scoped 规则原样命中（不会再出现 18px vs 14px 图标这类偏差）。
    音频进度由波形上的蓝色播放头表示，控制条中间不再画细进度线，改用一个
    透明的 flex 占位占掉原来 .vp-seek 的宽度，右端静音 / 音量位置不变。
-   波形本体、点击拖动 seek 全部保留。右侧 36px 留白让开 .node-resize。
+   波形本体保留，seek 只由 hover 播放头出左右箭头后拖动完成。右侧 36px
+   留白让开 .node-resize。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {

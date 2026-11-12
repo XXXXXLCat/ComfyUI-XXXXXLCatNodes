@@ -749,8 +749,8 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
 
 上游把活动音频卡渲染成 `<audio class="media-audio" controls>`，双击打开的大预览也是
 `<audio controls>`，都是浏览器原生条。现在改成参考图那种「深灰圆角卡片 + 灰色圆头竖条
-波形 + 蓝色播放头（贯穿全高、顶部带圆点）」：**波形本身就是进度条**，已播放的竖条变蓝，
-点击 / 拖动任意位置 seek，hover 时左下角出现播放 / 暂停按钮。
+波形 + 蓝色播放头」：已播放的竖条变蓝。**进度只能拖播放头**（后来的改动，见
+「播放头改成可拖动的滑块」小节），点波形其它位置不跳。
 
 **架构：不动 Vue 组件，用独立扩展接管 DOM**
 
@@ -818,7 +818,8 @@ resize 到 544×286 后 canvas 同步重绘，已播放竖条变蓝；大预览�
   右侧 36px 给 `.node-resize` 让位），数值与 `.vp-bar` 一致；大预览没有 resize
   手柄，`.is-preview` 下右内边距回到 10px。
 - 波形左下角原来的 `.xcat-wave-play` 小按钮由 CSS 隐藏，避免两个播放入口；
-  **canvas、蓝色播放头、已播变色、点击 / 拖动 seek 全部原样保留**。
+  **canvas、蓝色播放头、已播变色全部原样保留**（当时的「点击任意位置
+  seek」后来已改成「只能拖播放头」，见最后一节）。
 - 音量滑块与 `.vp-seek` 同一套视觉（`--accent-yellow` 填充 + 9px 圆点），填充走
   `--vol`。静音时滑块归零、取消静音恢复原值，拖到 >0 自动解除静音。视频静音按钮
   仍归 Vue 管（靠 `volumechange` 同步滑块），音频静音按钮由本脚本切换，不会双重 toggle。
@@ -843,8 +844,8 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
 三处小改造，**压缩 bundle 仍未改**，只动 `xcat-media-controls.js`、
 `xcat-overrides.css`、新增 `assets/xcat-node-names.js` 与 `index.html` 一行 script。
 
-- **音频控制条中间的细进度线去掉**：波形本身已有蓝色播放头与点击 / 拖动 seek，
-  控制条里那条 `.vp-seek` 是重复信息。删掉 `xcat-media-controls.js` 里创建
+- **音频控制条中间的细进度线去掉**：波形本身已有蓝色播放头（当时还是
+  点哪跳哪，后来改成只拖播放头），控制条里那条 `.vp-seek` 是重复信息。删掉 `xcat-media-controls.js` 里创建
   `<input class="vp-seek xcat-aw-seek">` 的代码与细线 seek / 手动派发
   `timeupdate` 逻辑，改成透明的 `<span class="xcat-aw-spacer">`（`flex:1`，
   实测仍占 222.7px）。播放 / 时间 / 静音 / 音量的 x 与尺寸逐项不变；
@@ -908,6 +909,39 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
 控制台无报错。脚本 `cdp_delete_btn.js` / `cdp_del_hover.js` /
 `cdp_wave_padding.js`，截图 `delbtn-dark.png` / `wave-pad-dark.png` /
 `wave-pad-light.png`。
+
+### 音频播放头改成可拖动的滑块（2026-11-12 续 2）
+
+用户要求：**「不能鼠标点哪里，滑块到哪里，而是鼠标移动到滑块上，出现左右箭头，
+然后拉动」**。只改 `assets/xcat-audio-wave.js` + `xcat-overrides.css` /
+`xcat-media-controls.js` 的注释与令牌，压缩 bundle 与 index.html 未动。
+
+- **命中判定**：新增 `headX(inst)` / `hitHead(inst, clientX, clientY)`。
+  只有指针落在蓝色播放线水平 `±9px`、且纵向在绘图区（上下各外扩 12px）
+  内才算「在滑块上」。`pointerdown` 不命中就直接 return —— 点竖条 / 留白 /
+  控制条都不再跳进度；`el` 原有的冒泡拦截保留，节点也不会被误拖。
+- **视觉反馈**：平时只画半径 5px 的蓝色小圆点；`hoverHead || dragging` 时
+  圆点换成 **32×18 蓝色圆角胶囊 + 白色左右 chevron 箭头**，播放线加粗到
+  3px，容器光标 `ew-resize`（基线 `cursor:default`）。新增 `--xw-head-fg`
+  令牌控制箭头颜色（亮暗主题都是白）。胶囊 x 被 `clamp(hx-16, 1, w-33)`
+  夹在容器内，拖到 0% / 100% 也不会被 `overflow:hidden` 切掉半边。
+- **拖动**：按下时记 `dragDX = clientX - (rect.left + headX)`，避免起手瞬间
+  跳到指针位置；`setPointerCapture` 后 `pointermove` 用 `clientX - dragDX`
+  调 `seekAt`。`timeupdate` / rAF `loop` 在拖动中跳过 `sync()`，否则音频
+  当前时间会把播放头拽回去。松手后按当前位置重算 hover。
+- **播放时自动收起**：新增 `lastX/lastY` + `refreshHover()`，每次 `sync()`
+  后按最后鼠标位置重算命中。播放头自己往前跑、鼠标不动时，跑出 9px 命中区
+  箭头就消失并复位光标，不会留下一个跟着蓝线漂走的假手柄。
+- 控制条时间文本仍由 `timeupdate` 独立刷新，不受上面 guard 影响；已播放
+  竖条变蓝、点击 / 拖动波形 seek 的旧语义全部**作废**。
+
+**验证**（8199 + CDP 真实鼠标，本地 4s WAV，脚本 `cdp_wave_grab.js`）：
+点波形空白 `currentTime 0→0 / progress 0→0`、节点坐标 `60,80` 不变；
+hover 播放头 `hoverHead:true / cursor:ew-resize`，截图确认圆点→箭头胶囊
+（暗色、亮色、最左端夹边都完整）；从播放头拖到 75% → `progress 0.75 /
+currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
+`hoverHead:false / cursor:default`；0.1 倍速播放时鼠标不动、播放头走远后
+`hoverHead` 自动 false；控制台无报错。截图 `wave-grab-*.png`。
 
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
