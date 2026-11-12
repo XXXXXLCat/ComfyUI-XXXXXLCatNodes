@@ -3260,3 +3260,107 @@ html[data-theme=light] {
     transform: translateY(-50%);
     box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
 }
+
+
+/* ==================================================================
+   媒体控制条补强：音频波形底部 + 音量滑块
+   ------------------------------------------------------------------
+   xcat-media-controls.js 注入 DOM，这里只给样式。音频控制条外观照抄
+   .vp-bar（黑渐变 / 20px 图标 / 10px 时间 / 8px gap），浮在波形之上，
+   波形本体、蓝色播放头、点击拖动 seek 全部保留不变。
+   右侧 36px 留白让开 .node-resize。
+   ================================================================== */
+/* 原来的左下角小播放按钮由控制条里的按钮取代 */
+.xcat-audio-wave .xcat-wave-play {
+    display: none;
+}
+
+.xcat-aw-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 36px 8px 10px;
+    background: linear-gradient(transparent, #000000c7 45%);
+    color: #f2f2f2;
+    touch-action: none;
+    user-select: none;
+}
+
+.xcat-aw-bar .xcat-mc-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #f2f2f2;
+    cursor: pointer;
+}
+
+.xcat-aw-bar .xcat-mc-btn:hover {
+    color: var(--accent-yellow);
+}
+
+.xcat-aw-bar .xcat-aw-time {
+    flex: 0 0 auto;
+    font-size: 10px;
+    line-height: 1;
+    color: #e6e6e6;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.xcat-aw-bar .xcat-aw-spacer {
+    flex: 1 1 auto;
+}
+
+/* 音量滑块：与 .vp-seek 同一套视觉，填充比例走 --vol */
+.xcat-vol {
+    flex: 0 0 auto;
+    width: 60px;
+    height: 3px;
+    margin: 0;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right,
+        var(--accent-yellow) 0,
+        var(--accent-yellow) var(--vol, 100%),
+        rgba(255, 255, 255, .32) var(--vol, 100%),
+        rgba(255, 255, 255, .32) 100%);
+}
+
+.xcat-vol::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 9px;
+    height: 9px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+}
+
+.xcat-vol::-moz-range-thumb {
+    width: 9px;
+    height: 9px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+}
+
+/* 大预览里没有 resize 手柄，右侧不用额外让位 */
+.xcat-audio-wave.is-preview .xcat-aw-bar {
+    padding-right: 10px;
+}
