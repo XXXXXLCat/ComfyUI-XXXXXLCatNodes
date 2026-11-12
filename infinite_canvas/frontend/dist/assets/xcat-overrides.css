@@ -1842,6 +1842,13 @@ html[data-theme="light"] #app .canvas-tabbar {
     gap: 4px;
 }
 
+/* 和工作流左栏同一个坑：末尾那条滚动容器规则写了 scrollbar-gutter:stable，
+   没溢出也留 10px，分类胶囊宽 190 而容器 200 → 左 12 / 右 22，看着歪。
+   这里改 auto（真溢出时才占宽），并用 :has() 压过文件末尾那条规则。 */
+#app .float-window:has(.am) .am-side-inner {
+    scrollbar-gutter: auto;
+}
+
 /* 「文件类型」小标题不显示：参考图只有分类列表，标题已在顶栏 */
 #app .float-window .am-side-title {
     display: none;
