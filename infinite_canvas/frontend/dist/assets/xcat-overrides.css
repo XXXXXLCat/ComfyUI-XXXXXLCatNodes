@@ -3270,14 +3270,19 @@ html[data-theme=light] {
 
 
 /* ==================================================================
-   媒体控制条补强：音频波形底部 + 音量滑块
+   音频节点控制条（自绘，零上游依赖）
    ------------------------------------------------------------------
-   .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
-   内部按钮与时间直接复用 .vp-btn / .vp-time + data-v-5b5d8e84，让上游
-   scoped 规则原样命中（不会再出现 18px vs 14px 图标这类偏差）。
-   音频进度条与视频条完全一致：中间保留 .vp-seek 细进度线（可拖动 seek，
-   与波形播放头双向同步）。波形本体的播放头也能拖。右侧 36px 留白让开
-   .node-resize。
+   上一版直接复用上游 .vp-bar / .vp-btn / .vp-time / .vp-seek + scoped 属性，
+   排查「时间右侧三个蓝点 / 每秒抖一下」时一直被那套东西干扰：
+     · 原生 input[type=range] 的 thumb 内缩 4.5px、位置按整像素吸附；
+     · 进度是 background 渐变百分比，222px 的条上每秒只走 1.55px，
+       只能整像素跳；时间串宽度随数字变化还会挤动右边元素。
+   这一版全部自有 class + 自绘进度条：
+     · 进度用 transform: scaleX / translate3d 驱动（亚像素、走合成层，
+       不触发布局）；
+     · 时间拆成「当前 / 分隔 / 总长」三段固定宽度，秒数进位不改变总宽；
+     · 不用任何原生表单控件，没有 ::-webkit-slider-thumb 的内缩与吸整像素。
+   几何仍与视频 .vp-bar 对齐：gap 8 / padding 7 8 8 10 / 按钮 20 / 时间 10px。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
@@ -3300,7 +3305,131 @@ html[data-theme=light] {
     user-select: none;
 }
 
-/* 音量滑块：与 .vp-seek 同一套视觉，填充比例走 --vol */
+/* 按钮：与上游 .vp-btn 同尺寸同色 */
+.xaw-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #f2f2f2;
+    cursor: pointer;
+}
+
+.xaw-btn:hover {
+    color: var(--accent-yellow);
+}
+
+.xaw-btn svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+}
+
+/* 时间：三段各自定宽，进位时总宽不变。overflow 必须 visible，
+   否则一旦被压窄浏览器就会画省略号（就是那三个点）。 */
+.xaw-time {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    line-height: 1;
+    color: #e6e6e6;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: visible;
+}
+
+.xaw-time b {
+    display: inline-block;
+    min-width: 22px;
+    font-weight: 400;
+    text-align: right;
+}
+
+.xaw-time b:last-child {
+    text-align: left;
+}
+
+.xaw-time i {
+    width: 9px;
+    font-style: normal;
+    text-align: center;
+    opacity: .7;
+}
+
+/* 自绘滑块：轨道左右各留 4.5px，让 9px 的圆点在 0% / 100% 时不越界 */
+.xaw-seek,
+.xaw-vol {
+    position: relative;
+    flex: 0 0 auto;
+    height: 14px;
+    cursor: pointer;
+    outline: none;
+}
+
+.xaw-seek {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.xaw-vol {
+    width: 60px;
+}
+
+.xaw-seek-track,
+.xaw-vol-track,
+.xaw-seek-fill,
+.xaw-vol-fill {
+    position: absolute;
+    top: 50%;
+    left: 4.5px;
+    right: 4.5px;
+    height: 3px;
+    margin-top: -1.5px;
+    border-radius: 2px;
+    pointer-events: none;
+}
+
+.xaw-seek-track,
+.xaw-vol-track {
+    background: rgba(255, 255, 255, .32);
+}
+
+.xaw-seek-fill,
+.xaw-vol-fill {
+    background: var(--accent-yellow);
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+    will-change: transform;
+}
+
+.xaw-seek-thumb,
+.xaw-vol-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 9px;
+    height: 9px;
+    margin-top: -4.5px;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+    transform: translate3d(0, 0, 0);
+    pointer-events: none;
+    will-change: transform;
+}
+
+.xaw-seek:focus-visible .xaw-seek-thumb,
+.xaw-vol:focus-visible .xaw-vol-thumb {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, .28);
+}
+
+/* 视频控制条末尾那个原生音量滑块（上游没有，由本包追加） */
 .xcat-vol {
     flex: 0 0 auto;
     width: 60px;
@@ -3343,7 +3472,6 @@ html[data-theme=light] {
     padding-right: 10px;
 }
 
-/* 细进度条已恢复，中段占位不再使用；保留这条空规则仅为兼容旧截图对比可删 */
 
 
 
