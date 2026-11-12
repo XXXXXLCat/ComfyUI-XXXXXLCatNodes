@@ -1477,6 +1477,38 @@ def register_routes(app):
         _delete_fields(name)
         return web.json_response({"ok": True})
 
+    async def rename_workflow(request):
+        """重命名工作流：json 文件、字段配置、排序列表三处一起改
+
+        只改文件名不动内容，所以 mtime 保留、列表里的「更新时间」不变；
+        排序表里若已有旧名，就地换成新名（重命名不该把它踢到末尾）。
+        """
+        old = _safe_name(request.match_info.get("name", ""))
+        if _read_workflow(old) is None:
+            return web.json_response({"error": "工作流不存在"}, status=404)
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+        new = _safe_name(str(payload.get("name", "") or ""))
+        if not new:
+            return web.json_response({"error": "缺少新名称"}, status=400)
+        if new != old:
+            if _read_workflow(new) is not None:
+                return web.json_response(
+                    {"error": f"已有同名工作流「{new}」"}, status=409
+                )
+            os.replace(_workflow_path(old), _workflow_path(new))
+            old_fields = _fields_path(old)
+            if os.path.isfile(old_fields):
+                os.replace(old_fields, _fields_path(new))
+            order = _load_settings().get("workflow_order") or []
+            if old in order:
+                _save_settings(
+                    workflow_order=[new if name == old else name for name in order]
+                )
+        return web.json_response({"name": new, "workflows": _list_workflows()})
+
     async def get_fields(request):
         """某个工作流暴露给画布的字段配置"""
         name = _safe_name(request.match_info.get("name", ""))
@@ -1867,6 +1899,7 @@ def register_routes(app):
             web.delete(f"{API_PREFIX}/library/prompts/{{entry_id}}", delete_prompt),
             web.get(f"{API_PREFIX}/workflows/{{name}}", get_workflow),
             web.delete(f"{API_PREFIX}/workflows/{{name}}", delete_workflow),
+            web.post(f"{API_PREFIX}/workflows/{{name}}/rename", rename_workflow),
             web.get(f"{API_PREFIX}/workflows/{{name}}/fields", get_fields),
             web.put(f"{API_PREFIX}/workflows/{{name}}/fields", save_fields),
             web.post(f"{API_PREFIX}/media", upload_media),

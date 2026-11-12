@@ -71,18 +71,21 @@
     `grid-template-columns: 224px / 1fr / 288px`，`.am-body` 用 `display:contents`
     把三栏提成网格项，`.am-bar` 只占中列第一行；`.float-window` 改 flex 列让内容区
     吃满「弹窗高 − 72px」（原来 `.am` 只有 330px，可用 448px）；搜索框用 `order`
-    从动作组末尾提到最左。详见下节「三个弹窗的内容区」。
-18. **input / output 换成切换按钮、移到弹窗标题栏（「资产管理」右侧）、去掉左栏折叠按钮**：
-    分段本来挤在中列工具条最左，后来挪进左栏，最终按需求放回**标题栏**，紧跟
-    「资产管理」之后。样式三次迭代：官方 `Tabs`（两个透明底文字，暗面 active 的
+    从动作组末尾提到最左。**2026-11-12 又按用户给的参考图把整条工具带搬成通栏顶栏
+    （左栏色块满铺、标题压在上面），搜索 / 刷新 / 批量管理全部上顶栏，详见第 26 条。**
+18. **input / output 换成切换按钮、去掉左栏折叠按钮**：
+    分段本来挤在中列工具条最左，后来挪进左栏，最终按需求放**标题栏**（第 26 条改成
+    顶栏里、左栏色块外的网格左缘）。
+    样式三次迭代：官方 `Tabs`（两个透明底文字，暗面 active 的
     `bg-secondary` 压在 `--background` 上几乎同色，看上去就是标题右边多了两个灰字）
     → 官方 ToggleGroup 方角货 → **胶囊切换按钮**（用户给参考图定稿）：一条
     `--cg-input`(#313235) 全圆角槽（`padding:2px / gap:2px`，28px 高），槽内
     选中的那块是 `--cg-bg`(#171718) 胶囊 + 前景字，未选中只有 `--cg-muted-fg`
     灰字；亮面槽 `--cg-muted`(#d9d9d9)、选中块回到 `--cg-bg`(#f3f3f3)。
     DOM 上它仍挂在 `.am-side` 里（vnode 不再动），靠
-    `.am-side{position:static}` + `position:absolute; top:-50px; left:100px`
-    浮回标题栏，因此 `.float-body` 与 `.am-side` 都要放开 `overflow`。
+    `.am-side{position:static}` + `position:absolute; top:26px; left:248px`
+    （= (80−28)/2 与 224+24）浮在顶栏、网格左缘对齐处，因此 `.float-body`
+    与 `.am-side` 都要放开 `overflow`。
     折叠按钮 `.am-side-toggle` 整段删除，随之清掉 `.am:has(.am-side.is-collapsed)`
     与 `.am-side.is-collapsed` 三条样式。vnode 结构那一轮改过（`bde91b6e` →
     `f914d6cf`），此后的位置 / 样式调整都是纯 CSS。
@@ -162,14 +165,101 @@
     327×112 @ (73,703)，只是整体下移 9px；对比图
     `.workbuddy/tmp/patch/compose_line_compare.png`（暗/亮 × 前/后）。
 
-改动集中在三个文件：
+26. **资产管理改成参考图的「满铺左栏 + 通栏顶栏」**（纯 CSS，用户给参考图）：
+
+    - **左栏色块满铺**：`.float-window:has(.am) .float-body{position:absolute;inset:0}`
+      把内容区顶到窗口顶边（原来排在 72px 高的标题栏下面，左栏色块上沿露出一条
+      `--background`）；`.am` 行改 `80px minmax(0,1fr)`，`.am-side` 仍跨
+      `1/1/3/2` → 色块从窗口顶铺到底。左栏 `padding-top:92`（= 顶栏 80 + 12），
+      分类列表与网格第一行卡片同基线（实测都在 y=188）。
+    - **标题压到色块上**：`.float-head` 改绝对定位浮层（`inset:0 0 auto 0`、
+      高 80、`pointer-events:none`、`z-index:4`），`.float-title` 左 24 / 垂直居中，
+      `.float-close` 右 16 / top 24 / 32×32。
+    - **刷新 / 批量管理 / 搜索上顶栏**：`.am-bar` 从「中列第一行」改成
+      `grid-area:1/2/2/4`（跨中栏+右栏，因为搜索框要伸到右栏上方），
+      `padding:0 64px 0 24px`、`gap:8`；`.am-search` 改用 `margin-left:auto`
+      靠右 + `flex:0 1 464px`，`.am-btn` 跟在后面，关闭按钮在最右。
+    - **删掉「N / N 个素材」计数**：`.am-bar .am-total{display:none}`。
+    - **删掉「文件类型」小标题**：`.am-side-title{display:none}`。
+    - **input / output 移出色块**：`.am-side > .am-tabs` 从 `top:-50/left:100`
+      改 `top:26px / left:248px` —— 槽左缘正好压在网格第一张卡的左缘上
+      （实测槽 x=324、卡片 x=324）。
+    - **右栏让出顶栏**：`.am-right` 由 `1/3/3/4` 改 `2/3/3/4`，否则它把顶栏
+      右半条整个盖住（现象很坑：「刷新 / 批量管理」`getBoundingClientRect` 明明
+      有值、`visibility:visible`，截图里就是不显示）；底色同时改 `transparent`，
+      与中栏同底（参考图右栏没有独立色块）。
+    - 列表项 `.am-cat` 行高 1.2 → 1.4（项高 41 → 44）、圆角 6 → 8；网格
+      `padding:12px 24px 24px`（顶部 12 与左栏分类同一基线，底部 40 → 24）。
+    - 实测（1500×950）：`side[76,96,224,758]`（窗口 95→855，满铺）、
+      `bar[300,96,1124,80]`、`search[760,118,464,36]`、
+      刷新 `[1232,120,48,32]`、批量管理 `[1288,120,72,32]`、关闭 `[1376,120,32,32]`；
+      批量管理模式下 5 个按钮（全选 / 删除 / 下载 / 刷新 / 退出管理）也放得下，
+      搜索框自动收缩；1280×800 窗口不换行、不重叠。
+
+27. **工作流配置用同一套「满铺左栏 + 通栏顶栏」**（纯 CSS）：
+
+    - **左栏色块通高**：`.wf-left` 从「0 内边距的 flex 项 + 里面一张 `.wf-block`
+      卡片」改成**整栏色块** —— `padding:92px 12px 12px`（顶部 92 = 顶栏 80 + 12）、
+      `background:var(--cg-secondary)`、`gap:12`，窗口顶边一路铺到底
+      （`[76,96,224,758]`，与资产管理的 `.am-side` 完全同一档）。
+    - **`.wf-block` 不再是卡片**：底色已由整栏承担，块本身 `padding/border/
+      border-radius` 全部归零、`background:transparent`，只留分组语义；
+      `.wf-left .wf-label` 补 `padding:0 12px 8px`，小标题与列表项文字同一左缘
+      （x=100，标题 `float-title` 也是 100）。
+    - **内容区顶到窗口顶边**：`.float-window:has(.wf-config) .float-body`
+      `position:absolute;inset:0`；`.float-head` 改绝对定位浮层（`inset:0 0 auto 0`、
+      高 80、`pointer-events:none`、`z-index:4`），`.float-title` 左 24 / 垂直居中，
+      `.float-close` 右 16 / top 24 / 32×32。`.wf-config` 的 `padding` 由
+      `0 24px 40px` 改 `0`、`gap` 16 → **0**（栏间距离交给右栏的 padding-left），
+      右栏自己 `padding:92px 24px 24px`。
+    - **四边对齐**（相对窗口内边，单位 px）：内容左 **248**（= 左栏 224 + 24）、
+      右 **24**、顶 **92**（= 顶栏 80 + 12）、底 **24**，与资产管理的网格
+      （`248 / 24 / 92 / 24`）逐个相同；左栏色块内 `padding:92px 12px 12px`，
+      列表项左右各 12（宽 200，原来只有 180 —— 见下条 gutter）。
+    - **`.wf-left` / `.wf-list` 的 `scrollbar-gutter` 要改回 `auto`**：文件末尾
+      「弹窗滚动容器」那段给它们统一写了 `stable`，没溢出时也各留 10px，
+      两层叠起来右侧就比左侧多 20px，左栏看着「左窄右宽」。那条规则在文件末尾、
+      特异性相同，所以用 `#app .float-window:has(.wf-config) .wf-left/.wf-list`
+      抬一层覆盖（`auto` 只在真溢出时才占宽）。资产管理的 `.am-side-inner`
+      同一个坑（胶囊 190 / 容器 200，左 12 右 22），一并改成 `auto` ——
+      现在两栏的导航项都是 `l=12 / w=200`，左右各 12。
+    - **「保存配置 / 重命名 / 删除」上提到顶栏**、排在关闭按钮左侧 —— 与资产管理的
+      「刷新 / 批量管理」同一个位置。`.wf-right` 上游就是 `position:relative`，
+      绝对定位以它的 padding box 为参照，所以 `top:24` 与 32px 关闭按钮同高、
+      `right:60` = 关闭 32 + 右 16 + 间距 12。头卡 `.wf-head` 里因此只剩工作流名与副标题。
+    - **左栏列表项不再显示「N 个节点」**：`.wf-item-meta{display:none}`，
+      `.wf-item-name` 补 `flex:1 1 auto; min-width:0` + 单行 ellipsis（名字占满整行）；
+      名字节点同时带上 `title`（`f("span",{class:"wf-item-name",title:ze.name},…)`），
+      截断时 hover 能看到全名。
+    - **右侧新增「重命名」**（这条动了后端）：`infinite_canvas/__init__.py` 加
+      `POST /infinite_canvas/api/workflows/{name}/rename`，body `{"name": 新名}` ——
+      `os.replace` 改 json、同名的 `.fields.json` 跟着改名、`canvas_settings.json` 的
+      `workflow_order` 就地换名（不把工作流踢到末尾）；重名 409、空名 400、源不存在 404、
+      新名与旧名相同直接成功。只改文件名不动内容，所以列表里的「更新时间」不变。
+      前端由 `.workbuddy/tmp/patch/patch_wf_rename.py` 注入（幂等，备份
+      `index-BXU58XDe.wfrename.bak.js`，`delta=+1672 bytes`）：setup 里加
+      `xcatRenameWorkflow()`，模板 `.wf-actions` 里插一枚 `class="wf-rename"` 按钮
+      （`key:2`，排在「保存配置」与「删除」之间）。弹层是**原生 DOM**（不经过 Vue）：
+      320 宽卡片 + 标题 + 输入框（预填当前名、自动聚焦全选）+ 取消 / 确定，
+      Enter 提交、Esc 关闭、点遮罩关闭；成功后 `V(新名)` 再 `B()` 刷新列表。
+      样式在 CSS 里用 `.xcat-rn-*`（不带 `.wf-` 前缀，因为它不在组件模板里）。
+    - 实测（1500×950，窗口 `[75,95,1350,760]`）：`left[76,96,224,758]`、
+      `right[300,96,1124,758]`、`wf-head[340,188,1060,62]`、
+      `preview[340,262,1060,568]`、列表项 `[88,221,200,33]`（左右各 12）；
+      左栏小标题与右栏头卡同为 y=188 起。1200×760 / 1280×800 与亮面均正常，
+      切到资产库 / 资产管理再切回来布局不丢。改名链路实测：`xcat_rn_test` →
+      `xcat_rn_renamed` 后头卡与列表同步、弹层三种关闭方式都正常；
+      后端 curl 覆盖 200 / 400 / 404 / 409 与 `.fields.json`、`workflow_order` 迁移。
+
+改动集中在四个文件：
 
 | 文件 | 改动 |
 | --- | --- |
+| `__init__.py`（子包后端） | 新增 `POST /infinite_canvas/api/workflows/{name}/rename`：`os.replace` 改 json、`.fields.json` 跟着改名、`canvas_settings.json` 的 `workflow_order` 就地换名；重名 409 / 空名 400 / 源不存在 404 |
 | `frontend/dist/index.html` | 多引一个 `<link>` 指向 `assets/xcat-overrides.css` |
 | `frontend/dist/assets/xcat-overrides.css` | 新增文件：`--cg-*` 的 ComfyUI 语义色、侧栏尺度变量、`.library-dock` 左侧通高栏、`.canvas-menu` 沉到底部、栏底主题项的双图标 / 双文案按 `html[data-theme]` 显隐、分组细线、面板内 `--c-*` 令牌重映射、右下角工具条与两个弹层、`html.xcat-links-hidden`、`@font-face` 按官方同名注册 Inter（normal + italic，另留 `"XCat Inter"` 别名）+ `html,body` 全量 Inter 栈 + `#app textarea/select` 字体继承、资产管理右侧预览区等比完整显示（`.am-preview-body img/video` 绝对定位铺满 + `width/height:100%` + `object-fit:contain`，修上游 `max-height:100%` 在 grid auto 行里失效、竖向图片/视频只按宽度撑开被裁的问题；`.am-preview-tools` 补 `z-index:2`）、面板滚动条（`.lib-list` / `.asset-grid` / `.am-grid`，以及弹窗内的 `.cm-list` / `.am-side-inner` / `.am-prompt-body` / `.wf-left` / `.wf-list`：`scrollbar-width:auto` 复位全局 none + `::-webkit-scrollbar` 10px 轨道 / 6px 圆角滑块 / 隐藏 button / `background-clip:padding-box`，`--cg-scroll` 暗 `--muted` 亮 `--border`；配合 `overflow-x:hidden`、`scrollbar-gutter:stable`（**不含 `.float-body`**：它已不滚动，留着 gutter 会在弹窗右侧空出 10px））、画布底色 `--c-bg` 按 ComfyUI dark/light
    调色板改 `#222222` / `#dddddd`、主题项双图标显隐选择器泛化成 `#app .xcat-ico-*` / `#app .xcat-lbl-*`（按钮已从 `.lib-tab` 移到 `.cm-item`）、`xcat-canvas-hand` 只读模式（节点 / 边 / handle 的 `pointer-events:none` 与 grab/grabbing 光标）、非只读 pane 的 default / crosshair 光标、`.tb-mi:focus-visible`、`.xcat-exit-tab` 文字与 svg 按 `var(--cg-fg)` 取色（暗白亮黑，hover 不回落）、`--xcat-rail-icon: 19.2px`（官方 `1.2em`）、`.xcat-tab-label` 按官方 `side-bar-button-label` 的 10px / leading-none / text-center / w-max / max-width 52px / line-clamp-2 / whitespace-normal、`.library-tabs` padding 改 `4px 0`、`.lib-head` 改官方 `min-h-16` 64px 垂直居中 + `.library-panel > .lib-head + *` 补 `pt-2` 8px（三面板顶部留白）、`.lib-title` 16px/700、`.lib-cats` gap 8px + wrap、`.lib-cat` 按官方 Tab 改 14px / 32px / 10px / 8px / 无边框 / shrink-0、⑪ 六类内容块（`.lib-cats` / `.lib-list` / `.asset-grid` / `.lib-compose` / `.lib-foot` / `.lib-head`）水平边距统一 `px-4` 16px、header gap 与块间距统一 8px（4px 网格）、空态 16px / 更多 8px、`.asset-cell` 圆角 8px、三个弹窗的内容区按模板对话框 / 资产浏览器重排（容器 `px-6 pb-10`、按钮 `h-8 rounded-lg text-xs`、输入 `h-9`、左栏 224px + NavItem、右面板 352px、网格 `minmax(15rem)` / `minmax(min(240px,30vw))`、卡片 `rounded-lg p-2`、空态 40px mask 图标、弹窗 `max-width:1400px`、标题栏 `border-bottom:0`；亮面按钮 / 当前卡底改 `--muted` 并用 `:not()` 排除 `inverted` / `destructive`，详见下节）；画布管理贴栏侧滑面板（`.float-mask:has(+ .float-window .cm)` 隐藏遮罩、`.float-window:has(.cm)` 固定定位 57/38→底 + `min(360px,40vw)` + 64px 头 + 无圆角右边线、`.cm` 两行清单项 `.cm-card` 的 grid 重排与 `.cm-card-meta` 跨两列、`.cm-brand` 隐藏、栏内高亮 `#app:has(.float-window .cm) .lib-tab[title="画布管理"]`、亮面 `.cm-card.is-current` 用 `--cg-muted`、头部 `.cm-bar` 绝对定位浮到标题栏右侧 + `.cm-state` 与 `.float-close` 隐藏 + `.cm-btn:disabled` 弱化、`.float-body` 改 `overflow:visible`） |
-| `frontend/dist/assets/index-*.js` | 二十六处，注释 `xcat:` 可搜的几处：① `.cm-pop` 的渲染条件 `o.value?` 改成 `!0?`（菜单常驻）；② 菜单里「亮色模式」按钮改为放进 `.cm-pop`（2026-11-12 起是该菜单唯一一项）；③ 菜单里「释放显存」按钮置空；④「退出画布」去掉 `is-danger` 类，之后又整体移出 `.cm-pop`（见㉑）；⑤ `TM()` 里把 Vue Flow 实例挂到 `window.__xcatFlow`；⑥ 底栏组件 `bk` 整段重写（保留 `__name: "index"` 与 `emits`，图标 SVG 用 lucide 的 path；2026-11-12 又按 ComfyUI `read_only` 语义重写了选择 / 拖拽接线：V/H/空格、菜单 aria、只读光标类，详见「选择 / 拖拽 的功能语义」）；⑦ 底栏删掉「聚焦节点」「工作流配置」两个按钮。另十三处无注释：⑧ `LibraryDock` 的 setup 取 `close` 与 `qa().toggleTheme`，在 `.library-tabs` 末尾追加分组细线 + 画布管理 / 资产管理 / 工作流 / 亮色模式四个按钮；⑨⑩ 底栏删掉画布管理、资产管理、亮色模式三个按钮（连同末尾的分隔符）；⑪ 三处 `width:"92vw",height:"86vh"` → `90vw` / `80vh`；⑫ 浮窗组件 `WS` 的根改成 `[div.float-mask, div.float-window]` Fragment 并补 `aria-modal`（弹窗遮罩）；⑬ App 的 setup 里追加顶部画布切换条（`onMounted` 里插 DOM + `watch` 同步，见下节）；⑭ 在 ⑬ 基础上重做（详见下节「顶部画布切换条」）：store 注入 `saveAsNew` / `duplicate` / `resetToUnsaved` 三方法，并把 `open` / `create` / `remove` 接到 `window.__xcatOpenTabs`（**open-tabs 模型**）。**Unsaved Canvas 用 `id=""` 作为常驻标签始终排在首位**——打开 / 新建画布只会往后面追加，不会把它挤掉；关闭掉最后一个真实画布后它自动回到首位（保证至少 1 个标签）。顶部条**每个标签（含 Unsaved）都带 × 关闭按钮**：关闭图标严格照 ComfyUI `WorkflowTab.vue` 用 `lucide--x`（16px、`right-2`/`size-4`、`top-50%` 垂直居中、`text-muted-foreground`），可见性规则＝当前且无脏标记常显、其余（含当前脏）hover 显；末尾「＋」新建按钮 2026-11-12 起改用 ComfyUI 前端包的 `lucide--plus` 细线加号（原先照 `WorkflowTabs.vue` 用 PrimeIcons `pi-plus` 实心加号，为与侧栏 / 面板图标统一已换，见㉔）。画布管理面板恢复为上游**卡片网格**（`.cm-list` 仍是 `grid; minmax(214px,1fr)`），卡片右上角内联 **复制 / 编辑名称 / 删除** 三枚 `.cm-icon` 按钮（`duplicate` 从 `canvasStore` 注入 `CanvasManager` 的 setup）；头部「新建画布」按钮与自定义右击菜单（`.xcat-cm-menu`）已删除，新建只走顶部标签栏「+」（`bootstrap` 无画布时默认进 Unsaved Canvas；`window` 上挂 `keydown` 捕获 Ctrl/Cmd+S 保存，有 `currentId` 走 `saveNow`、否则 `saveAsNew`）。所有新代码集中在旧顶部条注入块 `const canvasTabBusy=te(!1);` 到 `canvasTabsSync()});` 这一段，store 注入在 `w.value=!0}}const q=F=>` 之前，可用注释 `xcat:` 检索；⑮-⑳ 画布背景与栏底主题：`qa()` 把 `canvasGridColor` 换成 ComfyUI 调色板线色并新增 `canvasGridMajorColor`，App setup 解构后者；主画布 `<Background>` 由 20px 点阵换成两层 `variant:"lines"`（`gap:10` / `gap:100`，强调层传 `id:"xcat-major"` 避免 pattern id 撞车），工作流预览小画布同样换 10px 线格；`.library-tabs` 里的主题按钮连同 分组细线删除，按钮移进 `CanvasMenu` 的 `.cm-pop`、排在「退出画布」之前（复用 setup 里已有的 `u()` → `toggleTheme`）；㉑ **退出画布挪到侧栏顶部**：`CanvasMenu` 的 `.cm-pop` 里删掉该 `cm-item` 及 setup 里的 `c()`，在 `LibraryDock` 的 `.library-tabs` 首位插入 `.lib-tab.xcat-exit-tab`（沿用原退出 svg；`onClick` 内联 `window.self!==window.top` → postMessage / `history.back()` / `/`），CSS 按 `var(--cg-fg)` 给文字与 svg 取色（暗白亮黑）；㉒ 侧栏 9 枚图标全换 lucide，由 `.workbuddy/tmp/patch_rail_lucide.py` 解 ComfyUI 前端包 CSS 的 `--svg` 后按按钮顺序替换（保留 `xcat-ico-sun` / `xcat-ico-moon` 的 class）；㉓ `.library-tabs` 的 7 个 `On(" 文字 ",-1)` 裸文本节点换成 `f("span",{class:"xcat-tab-label"},"文字",-1)`，让字号 / 行高 / 换行 / 居中能单独按官方设置；㉔ 面板内 12 枚 `f("svg")` 整体换成 lucide（保留 width/height/class/-1，`viewBox` 统一 24、`stroke` 由 data URI 的 black 改 `currentColor`），顶部标签栏 `innerHTML` 的实心「+」换 `lucide--plus`，由 `.workbuddy/tmp/patch_panel_lucide.py` 完成；㉕ `AssetManager` 的 input/output 分段 `f("div",GS,...)` 整体从 `.am-bar` 移到 `.am-side` 首子节点（「文件类型」上方）、左栏折叠按钮 `f("button",{class:"am-side-toggle"...})` 整段删除（`a` 仍是 `te(!0)`、`.am-side` 的 `is-collapsed` 判断保留但恒 false），并把手改过的 aside children patchFlag 由 `2`(CLASS) 降为 `0`(全量 diff) 防优化跳过，；㉖ 画布管理侧栏按钮的 onClick 由 `xcatCloseDock(),Ul("canvas")` 改成 `xcatCloseDock(),Ja("canvas")?Qa("canvas"):Ul("canvas")`（再点一次关闭，与其它 tab 一致），由 `.workbuddy/tmp/patch/patch_cm_toggle.py` 完成；㉗ `.library-tabs` 的分组细线 `f("span",{class:"xcat-rail-sep"},null,-1)` 从「画布管理」前移到「资产管理」前（画布管理归入上面那组贴栏面板），由 `.workbuddy/tmp/patch/patch_rail_sep.py` 完成；㉘ 侧栏那一项的 `title` 与 `.xcat-tab-label` 文字「画布管理」→「画布」，且「提示词 / 资产库 / 日志」三个 tab 的 onClick 改成切换前先 `Ja("canvas")&&Qa("canvas")`（画布面板开着时点面板 tab 会自动关掉），由 `.workbuddy/tmp/patch/patch_rail_name_close.py` 完成由 `.workbuddy/tmp/patch_tabs_to_rail.py` 完成 |
+| `frontend/dist/assets/index-*.js` | 二十七处，注释 `xcat:` 可搜的几处：① `.cm-pop` 的渲染条件 `o.value?` 改成 `!0?`（菜单常驻）；② 菜单里「亮色模式」按钮改为放进 `.cm-pop`（2026-11-12 起是该菜单唯一一项）；③ 菜单里「释放显存」按钮置空；④「退出画布」去掉 `is-danger` 类，之后又整体移出 `.cm-pop`（见㉑）；⑤ `TM()` 里把 Vue Flow 实例挂到 `window.__xcatFlow`；⑥ 底栏组件 `bk` 整段重写（保留 `__name: "index"` 与 `emits`，图标 SVG 用 lucide 的 path；2026-11-12 又按 ComfyUI `read_only` 语义重写了选择 / 拖拽接线：V/H/空格、菜单 aria、只读光标类，详见「选择 / 拖拽 的功能语义」）；⑦ 底栏删掉「聚焦节点」「工作流配置」两个按钮。另十三处无注释：⑧ `LibraryDock` 的 setup 取 `close` 与 `qa().toggleTheme`，在 `.library-tabs` 末尾追加分组细线 + 画布管理 / 资产管理 / 工作流 / 亮色模式四个按钮；⑨⑩ 底栏删掉画布管理、资产管理、亮色模式三个按钮（连同末尾的分隔符）；⑪ 三处 `width:"92vw",height:"86vh"` → `90vw` / `80vh`；⑫ 浮窗组件 `WS` 的根改成 `[div.float-mask, div.float-window]` Fragment 并补 `aria-modal`（弹窗遮罩）；⑬ App 的 setup 里追加顶部画布切换条（`onMounted` 里插 DOM + `watch` 同步，见下节）；⑭ 在 ⑬ 基础上重做（详见下节「顶部画布切换条」）：store 注入 `saveAsNew` / `duplicate` / `resetToUnsaved` 三方法，并把 `open` / `create` / `remove` 接到 `window.__xcatOpenTabs`（**open-tabs 模型**）。**Unsaved Canvas 用 `id=""` 作为常驻标签始终排在首位**——打开 / 新建画布只会往后面追加，不会把它挤掉；关闭掉最后一个真实画布后它自动回到首位（保证至少 1 个标签）。顶部条**每个标签（含 Unsaved）都带 × 关闭按钮**：关闭图标严格照 ComfyUI `WorkflowTab.vue` 用 `lucide--x`（16px、`right-2`/`size-4`、`top-50%` 垂直居中、`text-muted-foreground`），可见性规则＝当前且无脏标记常显、其余（含当前脏）hover 显；末尾「＋」新建按钮 2026-11-12 起改用 ComfyUI 前端包的 `lucide--plus` 细线加号（原先照 `WorkflowTabs.vue` 用 PrimeIcons `pi-plus` 实心加号，为与侧栏 / 面板图标统一已换，见㉔）。画布管理面板恢复为上游**卡片网格**（`.cm-list` 仍是 `grid; minmax(214px,1fr)`），卡片右上角内联 **复制 / 编辑名称 / 删除** 三枚 `.cm-icon` 按钮（`duplicate` 从 `canvasStore` 注入 `CanvasManager` 的 setup）；头部「新建画布」按钮与自定义右击菜单（`.xcat-cm-menu`）已删除，新建只走顶部标签栏「+」（`bootstrap` 无画布时默认进 Unsaved Canvas；`window` 上挂 `keydown` 捕获 Ctrl/Cmd+S 保存，有 `currentId` 走 `saveNow`、否则 `saveAsNew`）。所有新代码集中在旧顶部条注入块 `const canvasTabBusy=te(!1);` 到 `canvasTabsSync()});` 这一段，store 注入在 `w.value=!0}}const q=F=>` 之前，可用注释 `xcat:` 检索；⑮-⑳ 画布背景与栏底主题：`qa()` 把 `canvasGridColor` 换成 ComfyUI 调色板线色并新增 `canvasGridMajorColor`，App setup 解构后者；主画布 `<Background>` 由 20px 点阵换成两层 `variant:"lines"`（`gap:10` / `gap:100`，强调层传 `id:"xcat-major"` 避免 pattern id 撞车），工作流预览小画布同样换 10px 线格；`.library-tabs` 里的主题按钮连同 分组细线删除，按钮移进 `CanvasMenu` 的 `.cm-pop`、排在「退出画布」之前（复用 setup 里已有的 `u()` → `toggleTheme`）；㉑ **退出画布挪到侧栏顶部**：`CanvasMenu` 的 `.cm-pop` 里删掉该 `cm-item` 及 setup 里的 `c()`，在 `LibraryDock` 的 `.library-tabs` 首位插入 `.lib-tab.xcat-exit-tab`（沿用原退出 svg；`onClick` 内联 `window.self!==window.top` → postMessage / `history.back()` / `/`），CSS 按 `var(--cg-fg)` 给文字与 svg 取色（暗白亮黑）；㉒ 侧栏 9 枚图标全换 lucide，由 `.workbuddy/tmp/patch_rail_lucide.py` 解 ComfyUI 前端包 CSS 的 `--svg` 后按按钮顺序替换（保留 `xcat-ico-sun` / `xcat-ico-moon` 的 class）；㉓ `.library-tabs` 的 7 个 `On(" 文字 ",-1)` 裸文本节点换成 `f("span",{class:"xcat-tab-label"},"文字",-1)`，让字号 / 行高 / 换行 / 居中能单独按官方设置；㉔ 面板内 12 枚 `f("svg")` 整体换成 lucide（保留 width/height/class/-1，`viewBox` 统一 24、`stroke` 由 data URI 的 black 改 `currentColor`），顶部标签栏 `innerHTML` 的实心「+」换 `lucide--plus`，由 `.workbuddy/tmp/patch_panel_lucide.py` 完成；㉕ `AssetManager` 的 input/output 分段 `f("div",GS,...)` 整体从 `.am-bar` 移到 `.am-side` 首子节点（「文件类型」上方）、左栏折叠按钮 `f("button",{class:"am-side-toggle"...})` 整段删除（`a` 仍是 `te(!0)`、`.am-side` 的 `is-collapsed` 判断保留但恒 false），并把手改过的 aside children patchFlag 由 `2`(CLASS) 降为 `0`(全量 diff) 防优化跳过，；㉖ 画布管理侧栏按钮的 onClick 由 `xcatCloseDock(),Ul("canvas")` 改成 `xcatCloseDock(),Ja("canvas")?Qa("canvas"):Ul("canvas")`（再点一次关闭，与其它 tab 一致），由 `.workbuddy/tmp/patch/patch_cm_toggle.py` 完成；㉗ `.library-tabs` 的分组细线 `f("span",{class:"xcat-rail-sep"},null,-1)` 从「画布管理」前移到「资产管理」前（画布管理归入上面那组贴栏面板），由 `.workbuddy/tmp/patch/patch_rail_sep.py` 完成；㉘ 侧栏那一项的 `title` 与 `.xcat-tab-label` 文字「画布管理」→「画布」，且「提示词 / 资产库 / 日志」三个 tab 的 onClick 改成切换前先 `Ja("canvas")&&Qa("canvas")`（画布面板开着时点面板 tab 会自动关掉），由 `.workbuddy/tmp/patch/patch_rail_name_close.py` 完成由 `.workbuddy/tmp/patch_tabs_to_rail.py` 完成；㉙ `WorkflowConfig` 加重命名：setup 里注入 `xcatRenameWorkflow()`（原生 DOM 弹层 + `POST /workflows/{name}/rename`），`.wf-actions` 里插 `class="wf-rename"` 按钮（`key:2`，夹在「保存配置」与「删除」之间），由 `.workbuddy/tmp/patch/patch_wf_rename.py` 完成（备份 `index-BXU58XDe.wfrename.bak.js`） |
 
 ### 画布背景：抄 ComfyUI 调色板
 
@@ -497,18 +587,19 @@ ComfyUI 语义色。
 
 | 项 | ComfyUI 真值（出处） | 本包 |
 | --- | --- | --- |
-| 弹窗骨架 | `BaseModalLayout` 是三列 grid：`nav`（通高）/ 中列（header + contentFilter + content）/ 右栏 `#rightPanel`（通高） | `.am` 改 `grid-template-columns: 224px / 1fr / 352px`，`.am-body` 用 `display:contents` 把三块提成网格项；`.am-bar` 只占中列第一行 |
-| 内容区高度 | 弹窗 `h-[80vh]`，内容区吃满「减去 72px 标题栏」的剩余高度 | `.float-window` 改 flex 列、`.float-body` `flex:1 1 auto`；上游是 block，内层 `height:100%` 因此退化成内容高（实测弹窗 520 只用了 330，底部空一块） |
-| 内容容器 | `px-6 pb-10`，自身滚动（`BaseModalLayout.contentContainerClass`） | `.float-body` 改 `padding:0`、`overflow:visible`（内容区不滚，滚动下放到各面板；`visible` 是为了让标题栏里的分段浮出来不被裁），并显式 `scrollbar-gutter:auto` |
-| 过滤条 | 模板 `px-6 pb-4`；资产 `px-6 pt-2 pb-6`（`AssetFilterBar.vue`），**只在中列** | `.cm-bar` 高 32px、无内边距（由 `.cm` 的 24px 管）；`.am-bar` = `padding:8px 24px 16px`（顶部 8px 让搜索框与左栏分类标题同高） |
+| 弹窗骨架 | `BaseModalLayout` 是三列 grid：`nav`（通高）/ 中列（header + contentFilter + content）/ 右栏 `#rightPanel`（通高） | `.am` 改 `grid-template-columns: 224px / 1fr / 352px`，`.am-body` 用 `display:contents` 把三块提成网格项；第 26 条起：行改 `80px / 1fr`，`.am-bar` 跨 `1/2/2/4`（通栏顶栏），`.am-side` 跨两行满铺，`.am-right` 只占第 2 行 |
+| 内容区高度 | 弹窗 `h-[80vh]`，内容区吃满「减去 72px 标题栏」的剩余高度 | 第 26 条起 `.float-window:has(.am) .float-body` 改 `position:absolute; inset:0`（内容区顶到窗口顶边，标题栏变绝对定位浮层），`.am` 仍 `height:100%` |
+| 内容容器 | `px-6 pb-10`，自身滚动（`BaseModalLayout.contentContainerClass`） | `.float-body` 改 `padding:0`、`overflow:visible`（内容区不滚，滚动下放到各面板；`visible` 是为了让浮出的分段 / 标题栏不被裁），并显式 `scrollbar-gutter:auto` |
+| 过滤条 | 模板 `px-6 pb-4`；资产 `px-6 pt-2 pb-6`（`AssetFilterBar.vue`），**只在中列** | `.cm-bar` 高 32px、无内边距（由 `.cm` 的 24px 管）；`.am-bar` = `padding:0 64px 0 24px`、高 80（顶栏，右 64 给关闭按钮让位） |
 | 按钮 | `size="md"`：`h-8 rounded-lg text-xs`（`button.variants.ts`） | 32px / 8px / 12px；`secondary` 底 = `--secondary`，hover `--accent` |
 | 选中态 | `variant="inverted"`：`bg-foreground text-background` | 前景色实底 + 反色字（亮面即黑底白字） |
 | 危险动作 | `destructive-textonly`：透明底 + `--destructive`（coral-700 `#b33a3a`） | 同 |
-| 输入 / 搜索 | `SearchInput` `h-9` + `border-border/50` + 透明底，在 header **最左**、`flex-1 max-w-lg` | 36px / 8px 圆角 / `--cg-line`；用 `order` 从动作组提到最左 |
-| 左栏 | `LeftSidePanel`：`w=14rem(224px)`、`bg-card`、`px-3`，**通高** | `.am-side` 190 → 224px、`--secondary` 底、无右边框、`grid-area: 1/1/3/2`；只剩「文件类型 + 分类列表」，列表自滚 |
-| 切换按钮（input / output） | 官方 `ToggleGroup`（`toggleGroup.variants.ts` + `WidgetToggleSwitch.vue`，带标签布尔控件）的内核，圆角改胶囊 | 胶囊槽 `--cg-input`(#313235) + `padding/gap:2px`、28px 高；选中块 `--cg-bg`(#171718) 圆角 999px + 前景字（12px）、未选中透明 + `--cg-muted-fg`；亮面槽 `--cg-muted`(#d9d9d9)、选中块 `--cg-bg`(#f3f3f3)。放在**弹窗标题栏**「资产管理」右侧（`.am-side > .am-tabs` 绝对定位 `top:-50px / left:100px`，与标题间距 12px、与 header 垂直居中） |
-| 导航项 | `NavItem.vue`：`px-4 py-3 text-sm rounded-md`，active `bg-muted` / hover `bg-accent` | 12/16 / 14px / 6px |
-| 右面板 | `BaseModalLayout` `w-72`(288px)，**通高** | `.am-right` 340 → **352px**（放大预览）、`grid-area: 1/3/3/4`、无左边框 |
+| 输入 / 搜索 | `SearchInput` `h-9` + `border-border/50` + 透明底，在 header **最左**、`flex-1 max-w-lg` | 36px / 8px 圆角 / `--cg-line`；第 26 条起 `margin-left:auto` 靠右、`flex:0 1 464px`，右侧接刷新 / 批量管理 / 关闭 |
+| 左栏 | `LeftSidePanel`：`w=14rem(224px)`、`bg-card`、`px-3`，**通高** | `.am-side` 190 → 224px、`--secondary` 底、无右边框、`grid-area: 1/1/3/2`（从窗口顶铺到底）；「文件类型」小标题已隐藏（`.am-side-title{display:none}`），只剩分类列表，`padding-top:92` 与网格第一行同基线 |
+| 切换按钮（input / output） | 官方 `ToggleGroup`（`toggleGroup.variants.ts` + `WidgetToggleSwitch.vue`，带标签布尔控件）的内核，圆角改胶囊 | 胶囊槽 `--cg-input`(#313235) + `padding/gap:2px`、28px 高；选中块 `--cg-bg`(#171718) 圆角 999px + 前景字（12px）、未选中透明 + `--cg-muted-fg`；亮面槽 `--cg-muted`(#d9d9d9)、选中块 `--cg-bg`(#f3f3f3)。第 26 条起在**顶栏、左栏色块的右外侧**（`.am-side > .am-tabs` 绝对定位 `top:26px / left:248px`），左缘与网格第一张卡对齐 |
+| 导航项 | `NavItem.vue`：`px-4 py-3 text-sm rounded-md`，active `bg-muted` / hover `bg-accent` | 12/16 / 14px / 行高 1.4（项高 44）/ 圆角 8px |
+| 右面板 | `BaseModalLayout` `w-72`(288px)，**通高** | `.am-right` 340 → **352px**、`grid-area: 2/3/3/4`（让出顶栏）、无左边框、底色 `transparent`（与中栏同底） |
+| 工作流配置 | 与资产同源的「通高左栏 + 右栏」骨架（`LeftSidePanel` + `#rightPanel`） | `.wf-left` 通高色块 224px、`--secondary` 底、`padding:92px 12px 12px`；`.wf-block` 去卡片（透明 / 无圆角 / 无内边距）；右栏 `padding:92px 24px 40px`；「保存配置 / 删除」绝对定位到顶栏 `top:24 / right:60`（关闭按钮左侧） |
 | 卡片网格 | `AssetGrid`：`minmax(15rem,1fr)` + `gap-4`；媒体网格 `minmax(min(240px,30vw),1fr)` + `gap-2` | `.cm-list` 15rem/16px；`.am-grid` `min(160px,25vw)`/8px（官方 240 → 收到 160，中列 4 列、每格约 185px，缩略图更小） |
 | 预览区 | `AssetPreview`：媒体按容器等比、可长可方 | `.am-preview-body` 锁 `aspect-ratio:1/1`，`width:min(100%,46vh)` → 352 栏宽下 **328×328**（原 256），高度不再跟 58% 分比走，剩余高度给提示词区；亮面补 1px `--cg-line` 勾边 |
 | 卡片 | 模板卡 `rounded-lg p-2` + hover `bg-secondary/50`；`AssetCard` `rounded-2xl p-2`；`MediaAssetCard` `rounded-lg p-2` | `.cm-card` 8px/8px；`.am-cell` 8px |
