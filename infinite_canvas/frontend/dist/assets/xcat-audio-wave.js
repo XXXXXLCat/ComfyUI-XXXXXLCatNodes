@@ -13,9 +13,10 @@
      · 播放头才是滑块：只有鼠标移到播放头上（水平 ±9px），圆点才变成
        带左右箭头的蓝色胶囊、光标变 ew-resize；按住它左右拖动才能 seek。
        点波形任意其它位置不会跳进度，避免误触。已播放的竖条变蓝
-     · 原生 <audio>（隐藏）负责播放，hover 时左上角出现播放 / 暂停按钮
-     · 阻止 mousedown / pointerdown / click 冒泡到 Vue Flow，避免拖节点、
-       误切素材、误触发画布缩放平移；dblclick 不拦，仍可打开大预览
+     · 原生 <audio>（隐藏）负责播放
+     · 节点行为与视频 / 图片节点一致：空白处按下拖节点（grab 光标）、
+       滚轮缩放画布、双击开大预览都照常冒泡；只有按住播放头时才拦截，
+       避免拖进度同时拖动节点
 
    Vue 对 children=null 的 element vnode 不管理 innerHTML，所以注入的 DOM
    在节点数据更新时不会被清掉；data-src 变化由实例自己的 observer 处理。
@@ -323,14 +324,15 @@
     el.appendChild(audio);
     inst.canvas = canvas; inst.btn = btn; inst.audio = audio;
 
-    /* 冒泡阶段拦截：btn / canvas 上的业务监听器先跑，再阻止继续冒泡到
-       Vue Flow 节点包装器（拖节点）、卡片（切素材、拖素材）与预览舞台（平移）。
-       dblclick 不拦，保留双击打开大预览。 */
-    ['mousedown', 'mouseup', 'click', 'pointerdown', 'touchstart', 'wheel']
-      .forEach(function (type) {
-        el.addEventListener(type, function (e) { e.stopPropagation(); });
-      });
+    /* 上游给 <audio> 的 class 是 "media-audio nodrag"：nodrag 是 Vue Flow 的
+       「不许拖节点」标记，整个波形容器因此拖不动。摘掉它，波形才和视频 /
+       图片节点一样能拖节点（光标也继承 .media-stack-card 的 pointer）。 */
+    el.classList.remove('nodrag');
 
+    /* 和视频 / 图片节点一致：波形空白处按下就是拖节点（一只手光标），
+       滚轮缩放画布、双击开大预览都照常冒泡。只有真的按住播放头时才拦
+       冒泡，否则拖进度会把节点一起拖走（d3-drag 走 mousedown）。
+       控制条自己带 nodrag，条内按钮 / 滑块不会拖节点。 */
     btn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
     btn.addEventListener('mousedown', function (e) { e.stopPropagation(); });
     btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(inst); });
@@ -340,6 +342,8 @@
     el.addEventListener('pointerdown', function (e) {
       if (btn === e.target || btn.contains(e.target)) return;
       if (!hitHead(inst, e.clientX, e.clientY)) return;
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
       var r = el.getBoundingClientRect();
       inst.dragDX = e.clientX - (r.left + headX(inst));
       inst.dragging = true;
@@ -347,6 +351,12 @@
       el.style.cursor = 'ew-resize';
       try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
       draw(inst);
+    });
+    el.addEventListener('mousedown', function (e) {
+      if (btn === e.target || btn.contains(e.target)) return;
+      if (!hitHead(inst, e.clientX, e.clientY)) return;
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
     });
     el.addEventListener('pointermove', function (e) {
       inst.lastX = e.clientX; inst.lastY = e.clientY;
@@ -414,6 +424,12 @@
     });
     inst.ao.observe(el, { attributes: true, attributeFilter: ['data-src'] });
 
+    /* Vue patch 可能把 class 重新写成 "... nodrag"，持续摘掉，否则节点又拖不动 */
+    inst.co = new MutationObserver(function () {
+      if (el.classList.contains('nodrag')) el.classList.remove('nodrag');
+    });
+    inst.co.observe(el, { attributes: true, attributeFilter: ['class'] });
+
     measure(inst);
     draw(inst);
     getPeaks(src).then(function (p) {
@@ -429,6 +445,7 @@
     try { inst.audio.pause(); inst.audio.removeAttribute('src'); inst.audio.load(); } catch (_) { /* ignore */ }
     if (inst.ro) inst.ro.disconnect();
     if (inst.ao) inst.ao.disconnect();
+    if (inst.co) inst.co.disconnect();
     if (inst.onResize) window.removeEventListener('resize', inst.onResize);
     instances.delete(el);
     all.delete(inst);

@@ -749,8 +749,9 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
 
 上游把活动音频卡渲染成 `<audio class="media-audio" controls>`，双击打开的大预览也是
 `<audio controls>`，都是浏览器原生条。现在改成参考图那种「深灰圆角卡片 + 灰色圆头竖条
-波形 + 蓝色播放头」：已播放的竖条变蓝。**进度只能拖播放头**（后来的改动，见
-「播放头改成可拖动的滑块」小节），点波形其它位置不跳。
+波形 + 蓝色播放头」：已播放的竖条变蓝。波形上**只有播放头能拖**（后来的改动，
+见「播放头改成可拖动的滑块」小节），点波形其它位置不跳；控制条还有一条与视频
+相同的细进度线也能拖。
 
 **架构：不动 Vue 组件，用独立扩展接管 DOM**
 
@@ -933,7 +934,40 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
   后按最后鼠标位置重算命中。播放头自己往前跑、鼠标不动时，跑出 9px 命中区
   箭头就消失并复位光标，不会留下一个跟着蓝线漂走的假手柄。
 - 控制条时间文本仍由 `timeupdate` 独立刷新，不受上面 guard 影响；已播放
-  竖条变蓝、点击 / 拖动波形 seek 的旧语义全部**作废**。
+  竖条变蓝、点击 / 拖动波形 seek 的旧语义全部**作废**（控制条细线的拖拽
+  seek 在下一节又恢复了）。
+
+### 音频条恢复细进度线 / 节点恢复可拖（2026-11-12 续 3）
+
+用户两点反馈：**「音频节点底部细滑块恢复和视频节点一样」**、
+**「音频节点鼠标放上去为什么是箭头，视频图片都是一只手，并且可以拖动」**。
+
+- **细进度线恢复**：`xcat-media-controls.js` 的音频条把透明 `.xcat-aw-spacer`
+  换回 `.vp-seek xcat-aw-seek`（`type=range`、带 `data-v-5b5d8e84`），并恢复
+  `syncSeek()` / `input` 监听。实测两条条逐项同几何：bar `454×35`、
+  `pl10 pr36 pt7 pb8 gap8`；子元素 `播放 10/20×20`、`时间 38/53.3×10/10px`、
+  `进度 99.3/222.7×3`、`静音 330/20×20`、`音量 358/60×3`，即与视频条完全一致。
+  细线与波形播放头**双向同步**：拖细线改 `currentTime` 并派发 `timeupdate`，
+  波形立刻重绘；拖波形播放头改 `currentTime`，`seeked` 让细线跟上。
+- **节点能拖了**：根因是上游把 `<audio>` 渲染成
+  `class="media-audio xcat-audio-wave nodrag"`，`nodrag` 是 Vue Flow 的
+  「不许拖节点」标记，`event.target.closest('.nodrag')` 命中后整块区域都不拖。
+  `xcat-audio-wave.js` 在 init 里 `el.classList.remove('nodrag')`，并用
+  `attributeFilter:['class']` 的 MutationObserver 持续摘掉（Vue patch 会写回）。
+  控制条 `bar` 与内部按钮 / 滑块自己带 `nodrag`，所以条内操作不会拖节点；
+  只有按住播放头时才 `stopPropagation + preventDefault`（pointerdown 与
+  mousedown 各拦一次，d3-drag 走 mousedown）。
+- **光标对齐**：上一版给 `.xcat-audio-wave` 写了 `cursor: default`（箭头），
+  视频 / 图片节点继承 `.media-stack-card` 的 `pointer`（一只手），所以不一致。
+  改成 `cursor: inherit`，音频节点与视频 / 图片一样是手型、一样的拖拽手感；
+  hover 播放头时 JS 仍 inline 覆盖成 `ew-resize`，移开清掉 inline 回到手型。
+
+**验证**（8199 + CDP 真实鼠标，4s WAV，脚本 `cdp_audio_parity2.js` /
+`cdp_drag_diag.js` / `cdp_bar_parity.js`）：音频 `cursor:pointer`、节点
+`cursor:grab`；波形空白按下拖动节点 `60,80 → 120,110` 且进度保持 0；
+hover 播放头 `ew-resize`；拖播放头到 50% → `currentTime 2.0 / seek.value 2 /
+progress 0.5`；点细线 75% → `3.04s / progress 0.76`、节点不动；
+两条控制条子元素几何全等；暗 / 亮主题、控制台无报错。
 
 **验证**（8199 + CDP 真实鼠标，本地 4s WAV，脚本 `cdp_wave_grab.js`）：
 点波形空白 `currentTime 0→0 / progress 0→0`、节点坐标 `60,80` 不变；

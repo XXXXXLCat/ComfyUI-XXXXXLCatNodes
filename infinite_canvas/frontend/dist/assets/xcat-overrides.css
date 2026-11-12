@@ -3207,8 +3207,10 @@ html[data-theme=light] {
     background: var(--xw-bg);
     touch-action: none;
     user-select: none;
-    /* 默认光标：只有命中播放头时 JS 才 inline 覆盖成 ew-resize */
-    cursor: default;
+    /* 跟随节点：上游 .vue-flow__node.draggable 给的是 grab（一只手），
+       不要在这里写 default，否则音频节点的光标会和视频 / 图片不一致。
+       只有命中播放头时 JS 才 inline 覆盖成 ew-resize。 */
+    cursor: inherit;
 }
 
 .xcat-audio-wave .xcat-wave-canvas {
@@ -3273,10 +3275,9 @@ html[data-theme=light] {
    .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
    内部按钮与时间直接复用 .vp-btn / .vp-time + data-v-5b5d8e84，让上游
    scoped 规则原样命中（不会再出现 18px vs 14px 图标这类偏差）。
-   音频进度由波形上的蓝色播放头表示，控制条中间不再画细进度线，改用一个
-   透明的 flex 占位占掉原来 .vp-seek 的宽度，右端静音 / 音量位置不变。
-   波形本体保留，seek 只由 hover 播放头出左右箭头后拖动完成。右侧 36px
-   留白让开 .node-resize。
+   音频进度条与视频条完全一致：中间保留 .vp-seek 细进度线（可拖动 seek，
+   与波形播放头双向同步）。波形本体的播放头也能拖。右侧 36px 留白让开
+   .node-resize。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
@@ -3342,13 +3343,8 @@ html[data-theme=light] {
     padding-right: 10px;
 }
 
-/* 音频控制条的透明中段：占掉原 .vp-seek 的 222.7px，但不画任何线 */
-.xcat-aw-spacer {
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 0;
-    pointer-events: none;
-}
+/* 细进度条已恢复，中段占位不再使用；保留这条空规则仅为兼容旧截图对比可删 */
+
 
 
 /* ==================================================================
