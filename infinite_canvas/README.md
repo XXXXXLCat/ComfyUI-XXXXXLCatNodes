@@ -684,6 +684,43 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
   Unsaved 标签同理）。升级上游 dist 后 `TM()` / App setup 两处补丁都要重新对位重打，且新增的
   store 注入（`saveAsNew` / `duplicate` / `resetToUnsaved`）与 `bootstrap` 重写也要重新对位。
 
+### 节点外观：去灰框 / 内容铺满 / resize 吸附网格（2026-11-12）
+
+上游 `demo` 节点是一张「灰色卡片套卡片」：`.demo-node` 自带 `border:1px solid var(--c-line)`
+\+ `padding:10px` + `radius:20px`，内部 `.media-stack-card` 再缩到 `width:84%` 且自带
+1px 边框 / 深色底，于是图片四周留出一整圈灰框；空节点还有一圈虚线灰框。选中态只改
+`border-color`，边框一旦去掉就没有任何选中提示。
+
+**CSS（`assets/xcat-overrides.css` 末尾，幂等标记「节点改造：去掉灰色边框」）**
+
+- `#app .demo-node`：`border:0 / padding:0 / radius:12`，保留 `background:var(--c-panel-2)`
+  仅供空节点识别区域（有媒体时被完全盖住）；不能再给节点加 `overflow:hidden`，
+  `.node-delete` / `.node-resize` / `.node-panel` 都是它的绝对定位子元素，会被裁掉。
+- `#app .vue-flow__node.selected .demo-node` 与 `.is-connect-hot:hover`：用
+  `box-shadow:0 0 0 2px var(--c-accent)` 的发光环替代原来的 `border-color`。
+- `.media-stack` 半径同步 12px，靠它自带的 `overflow:hidden` 统一裁切；`.media-stack-card`
+  改 `width:100%` + 无边框 + 透明底 + 无阴影，图片 `object-fit:cover` 于是边缘到边缘铺满。
+- 空节点 `.node-upload` 去掉虚线框、拉到 `100%×100%`，整个节点都是拖入/点击上传命中区。
+- 音频没有画面可铺，`<audio>` 是替换元素，`left+right+width:auto` 会得到 **0 宽**，
+  必须写死 `width:calc(100% - 24px)` 才能垂直居中显示原生控件。
+- 副作用：卡片 100% 宽后，非活动素材卡完全被活动卡盖住，左右「露头」的堆叠效果消失，
+  多素材仍靠底部 `.media-dots` 与悬浮工具条切换。
+
+**JS（`assets/index-BXU58XDe.js` 两处）**
+
+- 默认 `snapGrid:[15,15]` → `[10,10]`：可见线格是 `Background gap:10`，
+  原来的 15 会让拖动吸附和网格线错位；改成 10 后拖动落点也是 10 的倍数。
+- 节点组件的 resize 处理器 `function w(S)`：原来只做
+  `t.data.w=Math.round(Math.max(Pc,Ee))`，现在读 `n.snapToGrid.value` / `n.snapGrid.value`，
+  开启吸附时宽高按网格取整，并用 `Math.ceil(min/g)*g` 兜住最小值（`Pc=400 / Ac=225`
+  → 吸附态下限 400 / 230），关闭时完全保持原来的自由尺寸。`n=mt("demo")` 与工具条
+  `window.__xcatFlow` 是同一个 store，所以底栏「网格吸附」开关直接生效。
+
+验证（8199 + CDP）：`border=0 / padding=0 / cardW=nodeW=454 / 留白=0`、图片盒子与节点
+盒子完全重合；开吸附 resize `+37/+23 → 490×250`、`-63/+41 → 400×270`（均 10 的倍数），
+关吸附 `+37/+23 → 491×249`（自由）；开吸附拖动落点 130,140，关吸附 158,163；
+暗/亮主题、多素材、音频节点、控制台无报错均通过。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。

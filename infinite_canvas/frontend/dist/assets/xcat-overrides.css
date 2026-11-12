@@ -3068,3 +3068,76 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     outline: none;
     background: var(--cg-accent);
 }
+
+
+/* ==================================================================
+   节点改造：去掉灰色边框 / 内容填满整个节点
+   ------------------------------------------------------------------
+   上游 .demo-node 是 border:1px + padding:10px + radius:20 的灰色卡片；
+   内部 .media-stack-card 再缩到 84% 且自带 1px 边框与深色底，于是图片
+   四周留出一整圈灰框。这里把外壳还原成纯容器：无边框、无内边距、媒体
+   卡片 100% 铺满；圆角由 .media-stack 的 overflow:hidden 统一裁切。
+   选中态原来只改 border-color，边框去掉后改用外发光环表示。
+   ================================================================== */
+#app .demo-node {
+    border: 0 !important;
+    padding: 0 !important;
+    border-radius: 12px;
+    background: var(--c-panel-2);
+    box-shadow: 0 6px 18px var(--c-shadow);
+}
+
+/* 选中 / 可连接高亮：border 已去掉，用 2px 环替代原来的 border-color */
+#app .vue-flow__node.selected .demo-node,
+#app .demo-node.is-connect-hot:hover {
+    box-shadow: 0 0 0 2px var(--c-accent), 0 6px 18px var(--c-shadow) !important;
+}
+
+/* 媒体层铺满节点；卡片不再留边、不再自带边框与底色 */
+#app .demo-node .media-stack {
+    border-radius: 12px;
+    background: transparent;
+}
+
+#app .demo-node .media-stack-card {
+    width: 100%;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+#app .demo-node .media-stack-card img,
+#app .demo-node .media-stack-card video {
+    border-radius: 0;
+}
+
+/* 音频没有可铺满的画面，把原生控件垂直居中，避免贴在顶边 */
+#app .demo-node .media-audio {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    width: calc(100% - 24px);
+    transform: translateY(-50%);
+}
+
+/* 空节点：去掉虚线灰框，整个节点都是拖入/点击上传的命中区 */
+#app .demo-node .node-empty {
+    padding: 0;
+}
+
+#app .demo-node .node-upload {
+    width: 100%;
+    height: 100%;
+    border: 0 !important;
+    border-radius: 12px;
+    background: transparent !important;
+    color: var(--c-muted);
+}
+
+#app .demo-node:hover .node-upload,
+#app .demo-node .node-upload:hover {
+    border-color: transparent;
+    background: transparent !important;
+    color: var(--c-text);
+}
