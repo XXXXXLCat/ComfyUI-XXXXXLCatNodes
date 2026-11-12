@@ -3265,10 +3265,12 @@ html[data-theme=light] {
 /* ==================================================================
    媒体控制条补强：音频波形底部 + 音量滑块
    ------------------------------------------------------------------
-   xcat-media-controls.js 注入 DOM，这里只给样式。音频控制条外观照抄
-   .vp-bar（黑渐变 / 20px 图标 / 10px 时间 / 8px gap），浮在波形之上，
-   波形本体、蓝色播放头、点击拖动 seek 全部保留不变。
-   右侧 36px 留白让开 .node-resize。
+   .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
+   但内部按钮、时间、进度条不在这里抄样式：xcat-media-controls.js 直接给
+   它们 .vp-btn / .vp-time / .vp-seek + data-v-5b5d8e84，让上游 scoped
+   规则原样命中。这样音频条与视频条逐像素一致（不会再出现 18px vs 14px
+   图标、0px spacer vs 222.7px 进度线这类偏差）。波形本体、蓝色播放头、
+   点击拖动 seek 全部保留不变。右侧 36px 留白让开 .node-resize。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
@@ -3289,37 +3291,6 @@ html[data-theme=light] {
     color: #f2f2f2;
     touch-action: none;
     user-select: none;
-}
-
-.xcat-aw-bar .xcat-mc-btn {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: #f2f2f2;
-    cursor: pointer;
-}
-
-.xcat-aw-bar .xcat-mc-btn:hover {
-    color: var(--accent-yellow);
-}
-
-.xcat-aw-bar .xcat-aw-time {
-    flex: 0 0 auto;
-    font-size: 10px;
-    line-height: 1;
-    color: #e6e6e6;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-.xcat-aw-bar .xcat-aw-spacer {
-    flex: 1 1 auto;
 }
 
 /* 音量滑块：与 .vp-seek 同一套视觉，填充比例走 --vol */
