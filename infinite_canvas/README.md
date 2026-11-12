@@ -838,6 +838,45 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
 视频音量 30% → 0.26、静音/恢复 0.26；音频播放 0.85s / 暂停 / 音量 50% /
 静音归零；点时间文字 `currentTime` 变化 0；大预览、亮 / 暗主题、控制台无报错。
 
+### 节点名称 / 操作按钮一行 / 音频条去细线（2026-11-12）
+
+三处小改造，**压缩 bundle 仍未改**，只动 `xcat-media-controls.js`、
+`xcat-overrides.css`、新增 `assets/xcat-node-names.js` 与 `index.html` 一行 script。
+
+- **音频控制条中间的细进度线去掉**：波形本身已有蓝色播放头与点击 / 拖动 seek，
+  控制条里那条 `.vp-seek` 是重复信息。删掉 `xcat-media-controls.js` 里创建
+  `<input class="vp-seek xcat-aw-seek">` 的代码与细线 seek / 手动派发
+  `timeupdate` 逻辑，改成透明的 `<span class="xcat-aw-spacer">`（`flex:1`，
+  实测仍占 222.7px）。播放 / 时间 / 静音 / 音量的 x 与尺寸逐项不变；
+  时间文本改由 `loadedmetadata / durationchange / timeupdate / seeked / ended`
+  直接刷新。视频条的 `.vp-seek` **保留**，两条条从此中间不同：这是刻意的。
+- **节点顶部左侧名称**：新增 `xcat-node-names.js`，从
+  `window.__xcatFlow.getNodes.value` 按 `data-id` 取名称 —— 有素材显示当前
+  `media[index].name`（或 `ref.filename`），没素材显示 `data.label`（纯数字
+  序号补成「节点 N」）。注入 `.xcat-node-name` 到 `.demo-node` 末尾，
+  `pointer-events:none`，`MutationObserver(attributes:['title'])` + 1s 兜底
+  定时刷新，切素材 / 改名后自动跟上。左上角胶囊：8px 内缩、22px 高、
+  12px 白字、`rgba(12,14,18,.62)` 底，亮暗主题都可读。
+  ⚠️ **z-index 必须 ≥ 30**：上游 `.media-stack-card.is-active` 是
+  `z-index:10`，用 6 时只有空节点看得见名称（空节点没有媒体卡片层）；
+  `node-ring(12) / node-delete(20) / node-resize(21) / node-actions(25)`
+  也都在同一层叠上下文里。
+- **上方操作按钮改成一行**：上游 `.node-actions` 用 inline style 把 6 枚
+  `.fan-btn` 排成扇形（`left -120…120`、`top -28…-48`、尺寸 `30…38`，
+  中间高两边低）。`xcat-overrides.css` 把容器改成节点正上方通宽 flex 行
+  （`bottom:100%` / `gap:8px` / `padding-bottom:8px` / 居中），按钮统一
+  `32×32`、svg `16×16`。inline 的 `left / top / width / height / transform`
+  只能用 `!important` 压过；容器的 `width:0;height:0;left:50%` 同理。
+  `opacity` 淡入与 `is-open` 时 `pointer-events:auto` 沿用上游规则。
+
+**验证**（8199 + CDP 真实鼠标 / 截图，暗 + 亮主题）：6 枚按钮实测
+`y=78` 全部相同、各 `32×32`、间距 8、svg `16×16`，`elementFromPoint`
+命中自身且点「预览」能弹出 `.asset-mask`；名称 3 个节点分别为
+`风景图.png` / `配乐.wav` / `节点 9`，改名后 1.4s 内刷新，拖节点后标签跟随；
+音频条 `454×35`，子元素 x = `10 / 38 / 99.3(spacer) / 330 / 358`，
+`.vp-seek` 0 个、spacer 1 个；视频条 `.vp-seek` 与 `.xcat-vol` 各 1 个未受影响；
+波形点 72% → 1.84s、时间文本 `0:01 / 0:02`、节点不误拖；控制台无报错。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。

@@ -3266,11 +3266,11 @@ html[data-theme=light] {
    媒体控制条补强：音频波形底部 + 音量滑块
    ------------------------------------------------------------------
    .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
-   但内部按钮、时间、进度条不在这里抄样式：xcat-media-controls.js 直接给
-   它们 .vp-btn / .vp-time / .vp-seek + data-v-5b5d8e84，让上游 scoped
-   规则原样命中。这样音频条与视频条逐像素一致（不会再出现 18px vs 14px
-   图标、0px spacer vs 222.7px 进度线这类偏差）。波形本体、蓝色播放头、
-   点击拖动 seek 全部保留不变。右侧 36px 留白让开 .node-resize。
+   内部按钮与时间直接复用 .vp-btn / .vp-time + data-v-5b5d8e84，让上游
+   scoped 规则原样命中（不会再出现 18px vs 14px 图标这类偏差）。
+   音频进度由波形上的蓝色播放头表示，控制条中间不再画细进度线，改用一个
+   透明的 flex 占位占掉原来 .vp-seek 的宽度，右端静音 / 音量位置不变。
+   波形本体、点击拖动 seek 全部保留。右侧 36px 留白让开 .node-resize。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
@@ -3334,4 +3334,89 @@ html[data-theme=light] {
 /* 大预览里没有 resize 手柄，右侧不用额外让位 */
 .xcat-audio-wave.is-preview .xcat-aw-bar {
     padding-right: 10px;
+}
+
+/* 音频控制条的透明中段：占掉原 .vp-seek 的 222.7px，但不画任何线 */
+.xcat-aw-spacer {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+
+/* ==================================================================
+   节点名称（左上角）+ 上方操作按钮改成一行
+   ------------------------------------------------------------------
+   名称由 xcat-node-names.js 从 Vue Flow store 注入；标签 pointer-events:none，
+   叠在媒体上但不会拦拖拽 / 连线 / 卡片点击。深色半透明底在亮暗主题和
+   任意素材上都可读。z-index 必须 > 10：上游 .media-stack-card.is-active
+   是 z-index:10，空节点没有这层，所以低层级时「只有空节点看得到名称」。
+   这里取 30，同时高于 node-ring(12) / delete(20) / resize(21) / actions(25)，
+   但它们都在右上角或节点上方，与左上角标签不重叠。
+   上游 .node-actions 把 6 枚 .fan-btn 用 inline style 排成扇形
+   （left -120…120 / top -28…-48 / 尺寸 30…38，中间高两边低）。
+   改成节点正上方的一条水平工具行：容器通宽 flex 居中，按钮统一
+   32×32 / 图标 16px。inline 的 left / top / width / height / transform
+   只能用 !important 压过。
+   ================================================================== */
+#app .demo-node .xcat-node-name {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 30;
+    display: block;
+    box-sizing: border-box;
+    height: 22px;
+    max-width: calc(100% - 76px);
+    padding: 0 8px;
+    border-radius: 6px;
+    background: rgba(12, 14, 18, .62);
+    color: #fff;
+    font-size: 12px;
+    line-height: 22px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    user-select: none;
+    backdrop-filter: blur(4px);
+}
+
+#app .demo-node .node-actions {
+    left: 0 !important;
+    top: auto !important;
+    bottom: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-sizing: border-box;
+    padding: 0 0 8px;
+    pointer-events: none;
+    transform: translateY(4px);
+}
+
+#app .demo-node .node-actions.is-open {
+    opacity: 1;
+    transform: none;
+}
+
+#app .demo-node .node-actions .fan-btn {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    width: 32px !important;
+    height: 32px !important;
+    transform: none !important;
+    flex: 0 0 32px;
+    box-sizing: border-box;
+}
+
+#app .demo-node .node-actions .fan-btn svg {
+    width: 16px !important;
+    height: 16px !important;
+    flex: 0 0 16px;
 }

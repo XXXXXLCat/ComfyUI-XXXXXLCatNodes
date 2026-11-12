@@ -9,7 +9,8 @@
       .vp-btn / .vp-time / .vp-seek 三个 class 并补上 scoped 属性
       data-v-5b5d8e84，让上游 index-*.css 的规则原样命中，避免自己抄一份
       样式后尺寸慢慢跑偏（音频条曾用 18px 图标，视频条是 14px，肉眼可见）。
-      进度条与波形双向同步：播放在波形上看，也可拖控制条里的细线 seek。
+      音频条中间不再放细进度线（波形本身已有播放头与点击/拖动 seek），
+      改用一个透明的 flex 占位把静音 / 音量顶到右端，其余控件几何不变。
 
    为什么全用 DOM 注入而不是改 bundle：.vp-bar 是压缩产物里的 Vue 组件，
    改它要重写渲染函数与 patch flag；而 Vue 对 vnode 之外追加的 DOM 不会
@@ -136,20 +137,17 @@
     time.className = 'vp-time xcat-aw-time';
     time.textContent = '0:00 / 0:00';
     scoped(time);
-    /* 与视频 .vp-seek 同一个 class + 同一个 scoped id，样式由上游 CSS 提供 */
-    var seek = document.createElement('input');
-    seek.className = 'vp-seek xcat-aw-seek nodrag';
-    seek.type = 'range';
-    seek.min = '0'; seek.max = '0'; seek.step = '0.01'; seek.value = '0';
-    seek.title = '进度';
-    seek.setAttribute('aria-label', '进度');
-    scoped(seek);
+    /* 中间只留透明占位：进度由波形上的蓝色播放头表示，控制条不再画细线。
+       flex:1 占掉原来 .vp-seek 的 222.7px，右端静音 / 音量仍与视频条对齐。 */
+    var spacer = document.createElement('span');
+    spacer.className = 'xcat-aw-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
     var mute = mkButton('vp-btn xcat-aw-mute', '静音', ICON_VOL);
     var slider = mkVolume();
-    /* 顺序与视频 .vp-bar 完全一致：播放 / 时间 / 进度 / 静音 / 音量 */
+    /* 顺序与视频 .vp-bar 一致：播放 / 时间 / 占位 / 静音 / 音量 */
     bar.appendChild(play);
     bar.appendChild(time);
-    bar.appendChild(seek);
+    bar.appendChild(spacer);
     bar.appendChild(mute);
     bar.appendChild(slider);
     wave.appendChild(bar);
@@ -157,14 +155,6 @@
 
     function syncTime() {
       time.textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration);
-    }
-    function syncSeek() {
-      var d = (audio.duration && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 0;
-      var t = Math.max(0, Math.min(d, audio.currentTime || 0));
-      seek.max = String(d);
-      seek.value = String(t);
-      seek.style.setProperty('--progress', d ? (t / d * 100) + '%' : '0%');
-      syncTime();
     }
     function syncPlay() {
       play.innerHTML = audio.paused ? ICON_PLAY : ICON_PAUSE;
@@ -178,23 +168,14 @@
         if (p && p.catch) p.catch(function () { /* 无手势 / 源不可播 */ });
       } else audio.pause();
     });
-    /* 控制条细线 seek：直接改 currentTime，并让波形立刻跟着重绘 */
-    seek.addEventListener('input', function () {
-      var d = Number(seek.max) || 0;
-      if (!d) return;
-      var t = Math.max(0, Math.min(d, Number(seek.value) || 0));
-      try { audio.currentTime = t; } catch (_) { /* ignore */ }
-      seek.style.setProperty('--progress', (t / d * 100) + '%');
-      try { audio.dispatchEvent(new Event('timeupdate')); } catch (_) { /* ignore */ }
-    });
     ['loadedmetadata', 'durationchange', 'timeupdate', 'seeked', 'ended'].forEach(function (t) {
-      audio.addEventListener(t, syncSeek);
+      audio.addEventListener(t, syncTime);
     });
     audio.addEventListener('play', syncPlay);
     audio.addEventListener('pause', syncPlay);
     audio.addEventListener('ended', syncPlay);
     bindVolume(audio, slider, mute, true);
-    syncSeek(); syncPlay();
+    syncTime(); syncPlay();
     installed.set(wave, true);
   }
 
@@ -225,7 +206,7 @@
       return {
         videoBars: document.querySelectorAll('.vp-bar .xcat-vol').length,
         audioBars: document.querySelectorAll('.xcat-aw-bar').length,
-        audioSeeks: document.querySelectorAll('.xcat-aw-bar .xcat-aw-seek').length,
+        audioSpacers: document.querySelectorAll('.xcat-aw-bar .xcat-aw-spacer').length,
         volumes: Array.from(document.querySelectorAll('.xcat-vol')).map(function (s) {
           return { value: +(+s.value).toFixed(2), fill: s.style.getPropertyValue('--vol') };
         })
