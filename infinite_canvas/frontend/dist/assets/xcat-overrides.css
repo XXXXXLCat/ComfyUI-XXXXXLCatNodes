@@ -3087,8 +3087,12 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     box-shadow: 0 6px 18px var(--c-shadow);
 }
 
-/* 选中 / 可连接高亮：border 已去掉，用 2px 环替代原来的 border-color */
-#app .vue-flow__node.selected .demo-node,
+/* 选中：白色描边环（对齐 ComfyUI 的选中白框），不再是 accent 黄 */
+#app .vue-flow__node.selected .demo-node {
+    box-shadow: 0 0 0 2px var(--xcat-sel), 0 6px 18px var(--c-shadow) !important;
+}
+
+/* 「可连接」提示仍保留 accent 黄 —— 那是连接语义，不是选中语义 */
 #app .demo-node.is-connect-hot:hover {
     box-shadow: 0 0 0 2px var(--c-accent), 0 6px 18px var(--c-shadow) !important;
 }
@@ -3151,6 +3155,62 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     border-color: transparent;
     background: transparent !important;
     color: var(--c-text);
+}
+
+/* ==================================================================
+   画布连线：对齐 ComfyUI 原生接线
+   ------------------------------------------------------------------
+   ComfyUI litegraph 的取值（前端包 colorPaletteTheme-*.js 的 dark 调色板）：
+     LINK_COLOR            = #9A9  淡灰绿 (153,170,153)
+     CONNECTING_LINK_COLOR = #AFA  拖拽中的线 (170,255,170)
+     connections_width     = 3     实线，lineCap = round
+   上游画布原本是 --c-edge(#3c3c48) + dasharray 6 5 的虚线，深底上几乎看不见。
+   这里按 ComfyUI 改：实线、加宽、提亮；hover / 选中走白色。
+   亮色主题按同一色阶镜像，否则浅绿压浅底同样看不清。
+   ================================================================== */
+:root {
+    --xcat-link: #99aa99;
+    --xcat-link-connecting: #aaffaa;
+    --xcat-link-hot: #ffffff;
+    --xcat-sel: #ffffff;
+}
+
+html[data-theme="light"] {
+    --xcat-link: #6f7f6f;
+    --xcat-link-connecting: #2f7a2f;
+    --xcat-link-hot: #111318;
+    --xcat-sel: #111318;
+}
+
+#app .flow-wrap .vue-flow__edge-path {
+    stroke: var(--xcat-link);
+    stroke-width: 2.5px;
+    stroke-dasharray: none;
+    stroke-linecap: round;
+    transition: stroke .12s ease, stroke-width .12s ease;
+}
+
+#app .flow-wrap .vue-flow__edge:hover .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge.selected .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge:focus .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge:focus-visible .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+    stroke-width: 4px;
+}
+
+/* 拖拽新连线时跟随鼠标的那条（上游是 1.5px 虚线，这里改实线并加宽） */
+#app .flow-wrap .vue-flow__connection-path {
+    stroke: var(--xcat-link-connecting);
+    stroke-width: 2.5px;
+    stroke-dasharray: none;
+    stroke-linecap: round;
+}
+
+/* 吸附到可连接目标时：白线加粗（原来用 accent 黄） */
+#app .flow-wrap .vue-flow__connection-path.is-snapped {
+    stroke: var(--xcat-link-hot);
+    stroke-width: 4px;
+    stroke-dasharray: none;
 }
 
 /* ==================================================================

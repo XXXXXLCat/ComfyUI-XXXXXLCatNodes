@@ -1025,6 +1025,32 @@ currentTime 3.00s / duration 4s`，松手保持、节点不误拖；移开后
 `xcat-media-controls.js?v=20261112g`（改这两份文件后必须同时改版本号，
 否则浏览器会拿旧缓存）。
 
+### 连线：实线 + ComfyUI 配色；选中节点改白色描边（2026-11-12 续 12）
+
+用户要求：**「接线的虚线实在看不清，参考 comfyui 的接线；节点选中时不要黄色，用白色」**。
+
+取值来源 = ComfyUI 前端包 `assets/colorPaletteTheme-*.js` 的 dark 调色板 +
+`treeUtil-*.js` 里的 litegraph 常量：
+
+| 项 | ComfyUI 值 | 本包实现 |
+|---|---|---|
+| 已存在连线 `LINK_COLOR` | `#9A9`（153,170,153 灰绿） | `--xcat-link`，2.5px，**实线** |
+| 拖拽中的线 `CONNECTING_LINK_COLOR` | `#AFA`（170,255,170） | `--xcat-link-connecting`，2.5px 实线 |
+| 线宽 `connections_width` | 3 | 2.5px（缩放 1 时观感接近，不压节点） |
+| 线帽 | `lineCap: round` | `stroke-linecap: round` |
+| hover / 选中连线 | 白色高亮 | `--xcat-link-hot` + 4px |
+| 选中节点 | 白色描边 | `box-shadow: 0 0 0 2px var(--xcat-sel)` |
+
+- 上游画布原本是 `--c-edge`（#3c3c48）+ `stroke-dasharray: 6 5` 的虚线，
+  深底上几乎看不见 —— 全部由 `#app .flow-wrap .vue-flow__edge-path` 覆盖掉。
+- `is-snapped`（吸附到可连接目标）原来是 accent 黄，现改白色加粗，和 ComfyUI 一致；
+  `.demo-node.is-connect-hot:hover` 的黄色仍然保留 —— 那是「可连接」语义，不是选中。
+- 亮色主题按同色阶镜像：`--xcat-link: #6f7f6f`、`--xcat-sel: #111318`
+  （白环压在 #f4f4f7 上等于看不见，故亮面用近黑）。
+- 实测（8199）：`.vue-flow__edge-path` → `rgb(153,170,153)` / 2.5px / `dash: none` /
+  `linecap: round`；拖拽中 `rgb(170,255,170)`；吸附 `rgb(255,255,255)` 4px；
+  选中节点 `box-shadow: rgb(255,255,255) 0 0 0 2px`；两种主题令牌切换正确。
+
 ### 连接点：10px 圆点、圆心在框外 10px（2026-11-12 续 5 / 续 11 修正方向）
 
 用户要求：**「两个接头，圆形小圆点（10），不紧贴侧面，圆心距离侧边 10 的距离」**，
