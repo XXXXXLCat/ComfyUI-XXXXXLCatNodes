@@ -196,6 +196,42 @@
       批量管理模式下 5 个按钮（全选 / 删除 / 下载 / 刷新 / 退出管理）也放得下，
       搜索框自动收缩；1280×800 窗口不换行、不重叠。
 
+27. **工作流配置用同一套「满铺左栏 + 通栏顶栏」**（纯 CSS）：
+
+    - **左栏色块通高**：`.wf-left` 从「0 内边距的 flex 项 + 里面一张 `.wf-block`
+      卡片」改成**整栏色块** —— `padding:92px 12px 12px`（顶部 92 = 顶栏 80 + 12）、
+      `background:var(--cg-secondary)`、`gap:12`，窗口顶边一路铺到底
+      （`[76,96,224,758]`，与资产管理的 `.am-side` 完全同一档）。
+    - **`.wf-block` 不再是卡片**：底色已由整栏承担，块本身 `padding/border/
+      border-radius` 全部归零、`background:transparent`，只留分组语义；
+      `.wf-left .wf-label` 补 `padding:0 12px 8px`，小标题与列表项文字同一左缘
+      （x=100，标题 `float-title` 也是 100）。
+    - **内容区顶到窗口顶边**：`.float-window:has(.wf-config) .float-body`
+      `position:absolute;inset:0`；`.float-head` 改绝对定位浮层（`inset:0 0 auto 0`、
+      高 80、`pointer-events:none`、`z-index:4`），`.float-title` 左 24 / 垂直居中，
+      `.float-close` 右 16 / top 24 / 32×32。`.wf-config` 的 `padding` 由
+      `0 24px 40px` 改 `0`、`gap` 16 → **0**（栏间距离交给右栏的 padding-left），
+      右栏自己 `padding:92px 24px 24px`。
+    - **四边对齐**（相对窗口内边，单位 px）：内容左 **248**（= 左栏 224 + 24）、
+      右 **24**、顶 **92**（= 顶栏 80 + 12）、底 **24**，与资产管理的网格
+      （`248 / 24 / 92 / 24`）逐个相同；左栏色块内 `padding:92px 12px 12px`，
+      列表项左右各 12（宽 200，原来只有 180 —— 见下条 gutter）。
+    - **`.wf-left` / `.wf-list` 的 `scrollbar-gutter` 要改回 `auto`**：文件末尾
+      「弹窗滚动容器」那段给它们统一写了 `stable`，没溢出时也各留 10px，
+      两层叠起来右侧就比左侧多 20px，左栏看着「左窄右宽」。那条规则在文件末尾、
+      特异性相同，所以用 `#app .float-window:has(.wf-config) .wf-left/.wf-list`
+      抬一层覆盖（`auto` 只在真溢出时才占宽）。
+    - **「保存配置 / 删除」上提到顶栏**、排在关闭按钮左侧 —— 与资产管理的
+      「刷新 / 批量管理」同一个位置。`.wf-right` 上游就是 `position:relative`，
+      绝对定位以它的 padding box 为参照，所以 `top:24` 与 32px 关闭按钮同高、
+      `right:60` = 关闭 32 + 右 16 + 间距 12（实测 `actions[1238,120,126,32]`、
+      关闭 `[1376,120,32,32]`）。头卡 `.wf-head` 里因此只剩工作流名与副标题。
+    - 实测（1500×950，窗口 `[75,95,1350,760]`）：`left[76,96,224,758]`、
+      `right[300,96,1124,758]`、`wf-head[340,188,1060,62]`、
+      `preview[340,262,1060,568]`、列表项 `[88,221,200,33]`（左右各 12）；
+      左栏小标题与右栏头卡同为 y=188 起。1200×760 / 1280×800 与亮面均正常，
+      切到资产库 / 资产管理再切回来布局不丢。
+
 改动集中在三个文件：
 
 | 文件 | 改动 |
@@ -543,6 +579,7 @@ ComfyUI 语义色。
 | 切换按钮（input / output） | 官方 `ToggleGroup`（`toggleGroup.variants.ts` + `WidgetToggleSwitch.vue`，带标签布尔控件）的内核，圆角改胶囊 | 胶囊槽 `--cg-input`(#313235) + `padding/gap:2px`、28px 高；选中块 `--cg-bg`(#171718) 圆角 999px + 前景字（12px）、未选中透明 + `--cg-muted-fg`；亮面槽 `--cg-muted`(#d9d9d9)、选中块 `--cg-bg`(#f3f3f3)。第 26 条起在**顶栏、左栏色块的右外侧**（`.am-side > .am-tabs` 绝对定位 `top:26px / left:248px`），左缘与网格第一张卡对齐 |
 | 导航项 | `NavItem.vue`：`px-4 py-3 text-sm rounded-md`，active `bg-muted` / hover `bg-accent` | 12/16 / 14px / 行高 1.4（项高 44）/ 圆角 8px |
 | 右面板 | `BaseModalLayout` `w-72`(288px)，**通高** | `.am-right` 340 → **352px**、`grid-area: 2/3/3/4`（让出顶栏）、无左边框、底色 `transparent`（与中栏同底） |
+| 工作流配置 | 与资产同源的「通高左栏 + 右栏」骨架（`LeftSidePanel` + `#rightPanel`） | `.wf-left` 通高色块 224px、`--secondary` 底、`padding:92px 12px 12px`；`.wf-block` 去卡片（透明 / 无圆角 / 无内边距）；右栏 `padding:92px 24px 40px`；「保存配置 / 删除」绝对定位到顶栏 `top:24 / right:60`（关闭按钮左侧） |
 | 卡片网格 | `AssetGrid`：`minmax(15rem,1fr)` + `gap-4`；媒体网格 `minmax(min(240px,30vw),1fr)` + `gap-2` | `.cm-list` 15rem/16px；`.am-grid` `min(160px,25vw)`/8px（官方 240 → 收到 160，中列 4 列、每格约 185px，缩略图更小） |
 | 预览区 | `AssetPreview`：媒体按容器等比、可长可方 | `.am-preview-body` 锁 `aspect-ratio:1/1`，`width:min(100%,46vh)` → 352 栏宽下 **328×328**（原 256），高度不再跟 58% 分比走，剩余高度给提示词区；亮面补 1px `--cg-line` 勾边 |
 | 卡片 | 模板卡 `rounded-lg p-2` + hover `bg-secondary/50`；`AssetCard` `rounded-2xl p-2`；`MediaAssetCard` `rounded-lg p-2` | `.cm-card` 8px/8px；`.am-cell` 8px |

@@ -2103,25 +2103,107 @@ html[data-theme="light"] #app .float-window .am-preview-body {
 }
 
 /* --------------------------------------------------- 工作流配置（wf） */
+/* 与资产管理同一套骨架：左栏色块从窗口顶边一路铺到底（LeftSidePanel，
+   14rem / bg-card），标题压在色块上；右栏内容从顶栏下方 92 起。
+   内容区顶到窗口顶边 → 标题栏改成绝对定位浮层，不再占位。 */
+#app .float-window:has(.wf-config) .float-body {
+    position: absolute;
+    inset: 0;
+}
+
+#app .float-window:has(.wf-config) .float-head {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 80px;
+    padding: 0;
+    border-bottom: 0;
+    pointer-events: none;
+    z-index: 4;
+}
+
+/* 标题左缘 24 = 左栏内边距 12 + 列表项内边距 12（与列表文字同一基线） */
+#app .float-window:has(.wf-config) .float-title {
+    position: absolute;
+    left: 24px;
+    top: 0;
+    display: flex;
+    align-items: center;
+    height: 80px;
+    pointer-events: auto;
+}
+
+#app .float-window:has(.wf-config) .float-close {
+    position: absolute;
+    right: 16px;
+    top: 24px;
+    width: 32px;
+    height: 32px;
+    pointer-events: auto;
+}
+
+/* 整体不设内边距：左栏色块自己铺满，右栏自己管边距。
+   gap 归零：栏间距离由右栏的 padding-left(24) 承担，与资产管理
+   「左栏 224 + 网格 padding-left 24」同一档；原来 gap 16 + padding-left 24
+   = 40，比右侧的 24 宽了一档。 */
 #app .float-window .wf-config {
     box-sizing: border-box;
-    gap: 16px;
-    padding: 0 24px 40px;
+    gap: 0;
+    padding: 0;
 }
 
-/* 左栏宽度对齐官方面板 14rem(224px) */
+/* 左栏 = 通高色块。顶部 92 = 顶栏 80 + 间距 12，列表从这里开始。
+   底部 12 与左/右内边距一致，色块本身贴住窗口左右下三条边。
+   gutter 必须是 auto：下方「弹窗滚动容器」那段（文件末尾）给 .wf-left /
+   .wf-list 统一写了 `scrollbar-gutter:stable`，没溢出时也各留 10px，
+   两层叠起来右边的空白就比左边多 20px（列表项只有 180 宽、可用 200），
+   左栏看着就是「左窄右宽」。那条规则在文件末尾、特异性相同，所以这里
+   用 :has() 抬一层覆盖。 */
 #app .float-window .wf-left {
     flex: 0 0 224px;
-    gap: 16px;
+    gap: 12px;
+    padding: 92px 12px 12px;
+    background: var(--cg-secondary);
+    overflow-y: auto;
 }
 
-/* 分组块 = 官方 Card：bg-secondary + rounded-lg + p-4(16px) */
+#app .float-window:has(.wf-config) .wf-left,
+#app .float-window:has(.wf-config) .wf-list {
+    scrollbar-gutter: auto;
+}
+
+/* 右栏边距 = 资产管理网格那一套：左 / 右 / 底都是 24（相对窗口内边），
+   顶 92 = 顶栏 80 + 12，与左栏列表同基线（都在 y=188）。 */
+#app .float-window .wf-right {
+    box-sizing: border-box;
+    padding: 92px 24px 24px;
+}
+
+/* 「保存配置 / 删除」上提到顶栏、排在关闭按钮左侧 —— 与资产管理的
+   「刷新 / 批量管理」同一个位置。.wf-right 是 position:relative，
+   绝对定位以它的 padding box 为参照，所以 top:24 正好与 32px 的关闭按钮同高；
+   right:60 = 关闭按钮 32 + 右外边距 16 + 间距 12。
+   头卡里因此只剩工作流名与副标题。 */
+#app .float-window:has(.wf-config) .wf-actions {
+    position: absolute;
+    top: 24px;
+    right: 60px;
+    padding: 0;
+    z-index: 5;
+}
+
+/* 列表块本身不再是「块」：底色已由左栏整栏承担，这里只留分组语义，
+   去掉卡片底 / 圆角 / 内边距，让列表项直接落在色块上。 */
 #app .float-window .wf-block {
     gap: 8px;
-    padding: 16px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: var(--cg-secondary);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+/* 小标题与列表项文字左缘对齐（列表项 padding 0 12） */
+#app .float-window .wf-left .wf-label {
+    padding: 0 12px 8px;
 }
 
 #app .float-window .wf-label {
