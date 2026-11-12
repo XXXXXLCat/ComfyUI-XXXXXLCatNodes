@@ -3154,22 +3154,25 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
 }
 
 /* ==================================================================
-   节点连接点：10px 圆点，圆心距节点侧边 10px
+   节点连接点：10px 圆点，圆心在节点框**外**、距侧边 10px
    ------------------------------------------------------------------
-   上游 .node-port 是 20×20 的透明定位盒（left:0 / right:0 + translate(±50%)，
+   上游 .node-port 是 20×20 的透明定位盒（left:0 / right:0 + translate(∓50%)，
    圆心正好压在节点边缘），可见部分由 ::before 画 20px 圆再用 clip-path 切掉
    一半 —— 所以是「半个圆饼贴着侧边」。
-   这里定位盒尺寸不动（Vue Flow 拿它量连线端点，改尺寸会影响吸附与命中），
-   只把 left / right 从 0 挪到 10px：盒子仍在节点内 0~20px，圆心落在 10px 处；
-   ::before 缩到 10px 并清掉 clip-path，变成完整小圆点，横向占 5~15px。
-   Vue Flow 用 handle 的 DOM 矩形算 edge 端点，圆心内移后连线端点自动跟随。
+   这里定位盒尺寸不动（Vue Flow 拿它量连线端点，改尺寸会影响吸附与命中）。
+   注意 left/right 与圆心的关系：盒子被 translate(-50%) 左移半个宽度，所以
+   「圆心距边缘的偏移量 = left/right 的值」，正值向内、负值向外。
+   取 -10px → 盒子跨 [-20, 0]（整体在框外），圆心落在 -10px，10px 圆点占
+   [-15, -5]，离边框留 5px 空隙，完全在框外。
+   ::before 缩到 10px 并清掉 clip-path，变成完整小圆点。
+   Vue Flow 用 handle 的 DOM 矩形算 edge 端点，连线端点会跟着圆心走。
    ================================================================== */
 #app .vue-flow__handle.node-port.vue-flow__handle-left {
-    left: 10px;
+    left: -10px;
 }
 
 #app .vue-flow__handle.node-port.vue-flow__handle-right {
-    right: 10px;
+    right: -10px;
 }
 
 #app .vue-flow__handle.node-port::before {
@@ -3178,11 +3181,25 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     clip-path: none;
 }
 
-/* 圆心内移后圆点落在节点内部，会被 .media-stack-card（z-index:10）盖住 ——
-   上游的半个圆饼在节点外面，所以从来不需要层级。这里给接头 15：
-   高于媒体（10），低于删除按钮（20）/ 缩放（21）/ 操作行（25）/ 名称（30）。 */
+/* 圆点在框外时不会被 .media-stack-card（z-index:10）遮住，层级只作保险，
+   避免与相邻节点/连线叠序打架；仍低于删除（20）/ 缩放（21）/ 操作行（25）。
+   —— 关键：上游圆点是「hover 到 .demo-node 才淡入」，圆点整体挪到框外之后，
+   鼠标必须先在节点内才会显示，可这时圆点在外面、鼠标一移出去就 opacity:0，
+   等于点不到。所以给接头自己开 pointer-events 常驻 + :hover 显示，
+   让框外 20×20 那块也能直接触发（不可见时也能命中，进出即显隐）。 */
 #app .vue-flow__handle.node-port {
     z-index: 15;
+    pointer-events: all;
+    cursor: crosshair;
+}
+
+#app .vue-flow__handle.node-port:hover,
+#app .vue-flow__handle.node-port.is-on {
+    opacity: 1;
+}
+
+#app .vue-flow__handle.node-port:hover .port-hit {
+    pointer-events: all;
 }
 
 /* 上游左右各切一半，这里统一取消（上面已含，单独再写一条更稳） */
