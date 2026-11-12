@@ -8,7 +8,8 @@
 
      · fetch + AudioContext.decodeAudioData 解码真实音频 → 峰值包络；
        解码失败 / 无 src 时用按 src 生成的确定性伪波形占位（视觉不空）
-     · canvas 画圆头竖条，播放头是贯穿全高的蓝线 + 顶部圆点
+     · canvas 画圆头竖条，上下留白（底部还要让开 35px 控制条），
+       播放头是贯穿绘图区的蓝线 + 顶部圆点
      · 波形本身就是进度条：点击 / 拖动 seek，已播放的竖条变蓝
      · 原生 <audio>（隐藏）负责播放，hover 时左上角出现播放 / 暂停按钮
      · 阻止 mousedown / pointerdown / click 冒泡到 Vue Flow，避免拖节点、
@@ -28,7 +29,22 @@
   var all = new Set();             // 用于主题切换后统一重绘
   var PEAKS_RES = 1600;            // 缓存分辨率，绘制时按宽度降采样
   var BAR_UNIT = 5;                // 每根竖条占 5px（约 3px 线 + 2px 间隔）
-  var PAD_X = 14, PAD_Y = 12;      // 左右留白让播放头圆点不被裁掉
+  var PAD_X = 14;                  // 左右留白让播放头圆点不被裁掉
+  /* 上下留白：波形不顶节点边缘。底部至少 44px，因为 .xcat-aw-bar 控制条
+     高 35px 叠在波形上；顶部至少 34px，让左上角 8px/22px 的名称胶囊
+     （占 8~30px）与播放头圆点（半径 5）都完整落在留白里。
+     按容器高度取比例再夹到固定区间，节点 resize / 大预览(160px) 都适用。 */
+  var PAD_TOP_MIN = 34, PAD_TOP_MAX = 44;
+  var PAD_BOTTOM_MIN = 44, PAD_BOTTOM_MAX = 56;
+  function plotBox(h) {
+    var top = clamp(h * .16, PAD_TOP_MIN, PAD_TOP_MAX);
+    var bottom = clamp(h * .20, PAD_BOTTOM_MIN, PAD_BOTTOM_MAX);
+    if (h - top - bottom < 24) {
+      top = Math.max(8, (h - 24) * .4);
+      bottom = Math.max(8, h - 24 - top);
+    }
+    return { top: top, bottom: bottom, h: Math.max(8, h - top - bottom) };
+  }
 
   var ICON_PLAY = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
     '<path d="M8 5.5v13l10-6.5z" fill="currentColor"/></svg>';
@@ -136,10 +152,11 @@
     g.clearRect(0, 0, w, h);
 
     var plotW = Math.max(1, w - PAD_X * 2);
+    var box = plotBox(h);
     var n = Math.max(12, Math.min(260, Math.floor(plotW / BAR_UNIT)));
     var peaks = resample(inst.peaks, n);
     var col = colors(inst.el);
-    var maxH = Math.max(8, h - PAD_Y * 2), mid = h / 2;
+    var maxH = box.h, mid = box.top + box.h / 2;
     var step = plotW / n, lw = Math.max(1.5, Math.min(3, step * .58));
     var headX = PAD_X + clamp(inst.progress, 0, 1) * plotW;
 
@@ -154,16 +171,16 @@
       g.lineTo(x, mid + bh / 2);
       g.stroke();
     }
-    /* 播放头：贯穿全高的竖线 + 顶部圆点 */
+    /* 播放头：只贯穿绘图区（不再顶天立地）+ 绘图区顶部圆点 */
     g.strokeStyle = col.head;
     g.lineWidth = 2;
     g.beginPath();
-    g.moveTo(headX + .5, 0);
-    g.lineTo(headX + .5, h);
+    g.moveTo(headX + .5, box.top);
+    g.lineTo(headX + .5, box.top + box.h);
     g.stroke();
     g.fillStyle = col.head;
     g.beginPath();
-    g.arc(headX, 7, 5, 0, Math.PI * 2);
+    g.arc(headX, box.top, 5, 0, Math.PI * 2);
     g.fill();
   }
 

@@ -3358,7 +3358,9 @@ html[data-theme=light] {
    （left -120…120 / top -28…-48 / 尺寸 30…38，中间高两边低）。
    改成节点正上方的一条水平工具行：容器通宽 flex 居中，按钮统一
    32×32 / 图标 16px。inline 的 left / top / width / height / transform
-   只能用 !important 压过。
+   只能用 !important 压过。删除节点由 xcat-node-actionbar.js 注入成第
+   7 枚按钮，右上角原来那枚 .node-delete 隐藏但保留在 DOM（点击事件
+   仍转发给它，删除逻辑完全走上游）。
    ================================================================== */
 #app .demo-node .xcat-node-name {
     position: absolute;
@@ -3419,4 +3421,15 @@ html[data-theme=light] {
     width: 16px !important;
     height: 16px !important;
     flex: 0 0 16px;
+}
+
+/* 删除节点：并入上方操作行末尾，右上角那枚隐藏但保留 DOM（点击转发） */
+#app .demo-node > .node-delete {
+    display: none !important;
+}
+
+#app .demo-node .node-actions .xcat-act-delete:hover {
+    border-color: var(--c-danger);
+    background: color-mix(in srgb, var(--c-danger) 16%, transparent);
+    color: var(--c-danger);
 }

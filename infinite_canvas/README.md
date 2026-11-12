@@ -877,6 +877,38 @@ canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线�
 `.vp-seek` 0 个、spacer 1 个；视频条 `.vp-seek` 与 `.xcat-vol` 各 1 个未受影响；
 波形点 72% → 1.84s、时间文本 `0:01 / 0:02`、节点不误拖；控制台无报错。
 
+### 删除节点并入操作行末尾 / 波形上下留白（2026-11-12 续）
+
+- **删除节点成为第 7 枚操作按钮**。上游 `.node-delete` 是 `.demo-node` 的独立
+  子元素（右上 `top/right:-17px`、38×38、hover 才出现），直接把它的 DOM 挪进
+  `.node-actions` 不可行：它由 `v-if(hover)` 渲染，鼠标离开再回来 Vue 会重新
+  创建并插回原位。改为新增 `assets/xcat-node-actionbar.js`：
+  CSS 隐藏原 `.node-delete`（**保留在 DOM**，事件 handler 还在），往
+  `.node-actions` 末尾注入一枚 `.fan-btn.xcat-act-delete`（带 scoped id
+  `data-v-abbe9e2b` 命中上游样式），点击时调用原按钮的 `.click()`，删除逻辑
+  完全走上游（清进度 / 连线 / 素材引用）；原按钮缺失时兜底
+  `__xcatFlow.removeNodes([id])`。注入同样用 `MutationObserver` 幂等扫描 +
+  1s 兜底，hover 重建后会自动补上。按钮 hover 变 `--c-danger`，未 hover 时
+  整个 `.node-actions` 被 Vue 卸载，仍是「hover 才可用」。
+  ⚠️ 右上角那枚 **× 是 `.card-delete`「删除这张素材」（单张素材），不是删除
+  节点**，按用户要求保持原样，不要一起隐藏。
+- **音频波形上下留白**。原来 `PAD_Y=12` 上下各 12px，且播放头蓝线
+  `moveTo(x,0)→lineTo(x,h)` 贯穿全高，视觉上顶天立地；底部 12px 还被
+  35px 控制条盖住。`xcat-audio-wave.js` 改成 `plotBox(h)`：
+  顶部 `clamp(h*.16, 34, 44)`（让 8~30px 的名称胶囊与半径 5px 的播放头圆点
+  都落在留白里）、底部 `clamp(h*.20, 44, 56)`（控制条 35px + 9px 间隙），
+  竖条与播放头线都只画在绘图区内。226px 节点实测非透明像素
+  `y=31…182`：上留白 31px、下留白 44px，控制条高 35px；亮暗主题、
+  resize、大预览按同一比例自适应。
+
+**验证**：7 枚按钮 `y=78` 全对齐、各 `32×32` / svg `16×16`，最后一枚
+`title=删除节点`；hover 后 `color/border=rgb(255,107,107)`、命中自身，
+移开后 `actionsRemoved:true / deleteBtn:false`；hover 离开再进入按钮仍存在，
+点击后节点数 `2→1`（删的是目标节点）；canvas alpha 扫描确认上下留白；
+控制台无报错。脚本 `cdp_delete_btn.js` / `cdp_del_hover.js` /
+`cdp_wave_padding.js`，截图 `delbtn-dark.png` / `wave-pad-dark.png` /
+`wave-pad-light.png`。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。
