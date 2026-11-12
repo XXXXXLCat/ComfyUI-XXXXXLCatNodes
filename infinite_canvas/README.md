@@ -745,6 +745,54 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
 开吸附 → `550×290`（10 的倍数）；多素材 `.media-dots` 与 resize 同样不重叠；
 暗 / 亮主题、图片 `contain`、音频控件 430px 宽、空节点 100%×100%、控制台无报错均通过。
 
+### 音频波形节点：用波形代替原生进度条（2026-11-12）
+
+上游把活动音频卡渲染成 `<audio class="media-audio" controls>`，双击打开的大预览也是
+`<audio controls>`，都是浏览器原生条。现在改成参考图那种「深灰圆角卡片 + 灰色圆头竖条
+波形 + 蓝色播放头（贯穿全高、顶部带圆点）」：**波形本身就是进度条**，已播放的竖条变蓝，
+点击 / 拖动任意位置 seek，hover 时左下角出现播放 / 暂停按钮。
+
+**架构：不动 Vue 组件，用独立扩展接管 DOM**
+
+dist 只有压缩后的单行 ESM bundle，没有源码也没有 `node_modules`，重建代价大。所以：
+
+| 文件 | 改动 |
+| --- | --- |
+| `assets/index-BXU58XDe.js` | 两处 `<audio controls>` → 空 `<div class="xcat-audio-wave" data-src="...">`；动态 props 常量 `yx` / `Ub` 从 `["src"]` 改 `["data-src"]` |
+| `assets/xcat-audio-wave.js` | **新增**，普通脚本（无 import / 无 Vue 依赖），波形实现 |
+| `assets/xcat-overrides.css` | 新增 `--xw-*` 主题令牌与波形样式；`.media-audio` 从「居中 54px 原生条」改为 `inset:0` 铺满卡片 |
+| `dist/index.html` | 追加 `<script defer src=".../xcat-audio-wave.js">` |
+
+扩展用 `MutationObserver` 找容器并注入 `canvas + button + audio`。关键是 Vue 对
+**children=null 的 element vnode 不管理 innerHTML**，所以节点数据更新、翻页、缩放时
+注入的 DOM 不会被清掉；换素材（`data-src` 变化）由每个实例自己的 observer 处理。
+
+**波形数据**：`fetch(src)` → `AudioContext.decodeAudioData` → 按 1600 桶取峰值（按 src
+缓存），绘制时按当前宽度降采样到 `宽度/5` 根竖条。`Math.pow(x, 1.15)` 放大动态，
+否则恒定振幅的音频会被画成一整块规整椭圆。解码失败 / 无 src 时用按 src 哈希生成的
+确定性伪波形占位，视觉不空。颜色全部读 CSS 变量，`data-theme` 变化时统一重绘。
+
+**几个必须注意的坑**
+
+- `pointerdown / mousedown / click / wheel` 要在**冒泡阶段** `stopPropagation`：
+  写在捕获阶段会连播放按钮自己的 click 一起吃掉；冒泡阶段则按钮先执行、再阻止事件
+  传到 Vue Flow 节点包装器（拖节点）、卡片（切素材）和预览舞台（平移缩放）。
+- `dblclick` **不拦**，保留双击打开大预览。
+- 大预览弹窗 Teleport 到 `body`，不在 `#app` 内，`.is-preview` 的选择器**不能带
+  `#app` 前缀**，否则会退化成铺满整个预览舞台（实测变成 954×694）。
+- 播放按钮放**左下角**：右上是删除、右下是 resize、左上是播放头圆点，都会打架。
+
+**验证**（8199 + CDP 真实鼠标，测试音为本地生成的 2.5s 带节奏 WAV）：
+`decoded=true`（真实解码）、`duration=2.5s`、canvas 与节点同为 454×226；
+点击播放 0.7s 后 `progress=0.265`、暂停生效；点击 72% → `progress=0.734 /
+currentTime=1.836s`；在波形上拖动 seek 到 0.553 且**节点位置仍是 70,90**（没误拖节点）；
+resize 到 544×286 后 canvas 同步重绘，已播放竖条变蓝；大预览波形居中 922×160；
+亮色主题 `#eceef2` 底 / `#6f7684` 竖条 / `#2f8fff` 播放头对比清晰；
+图片 `contain`、空节点、节点边框 0 均未回退；控制台无报错。
+
+**未改**：资产库侧栏详情里的音频预览仍用原生 `<audio controls>`（不是画布节点）；
+非活动音频卡仍是「音频」文字占位。需要的话可以一并换成同一套波形。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。

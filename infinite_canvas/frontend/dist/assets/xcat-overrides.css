@@ -3122,13 +3122,14 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     border-radius: 0;
 }
 
-/* 音频没有可铺满的画面，把原生控件垂直居中，避免贴在顶边 */
-#app .demo-node .media-audio {
+/* 音频：原生 <audio controls> 已换成波形容器，改为铺满整张卡片 */
+#app .demo-node .media-audio.xcat-audio-wave {
     position: absolute;
-    top: 50%;
-    left: 12px;
-    width: calc(100% - 24px);
-    transform: translateY(-50%);
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: none;
+    border-radius: 0;
 }
 
 /* 空节点：去掉虚线灰框，整个节点都是拖入/点击上传的命中区 */
@@ -3165,4 +3166,97 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
    ================================================================== */
 #app .demo-node .vp-bar {
     padding-right: 36px;
+}
+
+/* ==================================================================
+   音频波形：替代原生 <audio controls> 进度条
+   ------------------------------------------------------------------
+   bundle 把两处 <audio controls> 换成空的 .xcat-audio-wave 容器，
+   xcat-audio-wave.js 负责解码峰值、canvas 绘制、点击/拖动 seek 与播放。
+   颜色走 --xw-* 令牌，主题切换时 JS 会重绘；暗色底/灰竖条/蓝播放头
+   照参考图，亮色主题按同一色阶镜像。
+   ================================================================== */
+:root {
+    --xw-bg: #232428;
+    --xw-bar: #8b929e;
+    --xw-played: #4a9eff;
+    --xw-head: #3d9cff;
+    --xw-btn-bg: rgba(18, 20, 24, .74);
+    --xw-btn-fg: #f2f4f8;
+}
+
+html[data-theme=light] {
+    --xw-bg: #eceef2;
+    --xw-bar: #6f7684;
+    --xw-played: #2f7fe0;
+    --xw-head: #2f8fff;
+    --xw-btn-bg: rgba(255, 255, 255, .86);
+    --xw-btn-fg: #23232b;
+}
+
+.xcat-audio-wave {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--xw-bg);
+    touch-action: none;
+    user-select: none;
+}
+
+.xcat-audio-wave .xcat-wave-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.xcat-audio-wave .xcat-wave-audio {
+    display: none;
+}
+
+/* 播放入口：放左下角（右上是删除、右下是 resize、左上是播放头圆点）。
+   默认淡显保证可发现，hover / 键盘聚焦时完全显现。 */
+.xcat-audio-wave .xcat-wave-play {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: var(--xw-btn-bg);
+    color: var(--xw-btn-fg);
+    opacity: .55;
+    cursor: pointer;
+    transition: opacity .12s ease, background .12s ease;
+}
+
+.xcat-audio-wave:hover .xcat-wave-play,
+.xcat-audio-wave .xcat-wave-play:focus-visible {
+    opacity: 1;
+}
+
+.xcat-audio-wave .xcat-wave-play:hover {
+    background: var(--xw-head);
+    color: #fff;
+}
+
+/* 双击打开的大预览：居中一条波形卡片，不铺满整个预览舞台。
+   预览弹窗 Teleport 到 body，不在 #app 内，选择器不能带 #app 前缀。 */
+.xcat-audio-wave.is-preview {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: 50%;
+    width: auto;
+    height: 160px;
+    transform: translateY(-50%);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
 }
