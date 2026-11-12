@@ -684,6 +684,160 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
   Unsaved 标签同理）。升级上游 dist 后 `TM()` / App setup 两处补丁都要重新对位重打，且新增的
   store 注入（`saveAsNew` / `duplicate` / `resetToUnsaved`）与 `bootstrap` 重写也要重新对位。
 
+### 节点外观：去灰框 / 内容铺满 / resize 吸附网格（2026-11-12）
+
+上游 `demo` 节点是一张「灰色卡片套卡片」：`.demo-node` 自带 `border:1px solid var(--c-line)`
+\+ `padding:10px` + `radius:20px`，内部 `.media-stack-card` 再缩到 `width:84%` 且自带
+1px 边框 / 深色底，于是图片四周留出一整圈灰框；空节点还有一圈虚线灰框。选中态只改
+`border-color`，边框一旦去掉就没有任何选中提示。
+
+**CSS（`assets/xcat-overrides.css` 末尾，幂等标记「节点改造：去掉灰色边框」）**
+
+- `#app .demo-node`：`border:0 / padding:0 / radius:12`，保留 `background:var(--c-panel-2)`
+  仅供空节点识别区域（有媒体时被完全盖住）；不能再给节点加 `overflow:hidden`，
+  `.node-delete` / `.node-resize` / `.node-panel` 都是它的绝对定位子元素，会被裁掉。
+- `#app .vue-flow__node.selected .demo-node` 与 `.is-connect-hot:hover`：用
+  `box-shadow:0 0 0 2px var(--c-accent)` 的发光环替代原来的 `border-color`。
+- `.media-stack` 半径同步 12px，靠它自带的 `overflow:hidden` 统一裁切；`.media-stack-card`
+  改 `width:100%` + 无边框 + 透明底 + 无阴影，图片 `object-fit:cover` 于是边缘到边缘铺满。
+- 空节点 `.node-upload` 去掉虚线框、拉到 `100%×100%`，整个节点都是拖入/点击上传命中区。
+- 音频没有画面可铺，`<audio>` 是替换元素，`left+right+width:auto` 会得到 **0 宽**，
+  必须写死 `width:calc(100% - 24px)` 才能垂直居中显示原生控件。
+- **图片等比 + 黑边（同视频）**：上游 `.media-stack-card img` 是 `object-fit:cover`，
+  节点一改尺寸就裁图；而活动视频走的是独立组件 `.vp-video`，它自己写了
+  `object-fit:contain;background:#000`，所以视频有黑边、图片没有。给卡片内的 `img`
+  补上同样的 `contain + #000` 即可——`img` 本身是 100%×100%，背景色正好填满 contain
+  留出的空白。**不要给卡片或节点加黑底**，否则空节点和音频节点也会整块变黑。
+  只改节点内的 `img`：素材条 `.strip-item img`、悬停预览 `.preview-bubble img`
+  仍按缩略图语义保留 `cover`。
+- **视频控制条避让 resize**：`.vp-bar` 通宽贴底（`padding:7px 10px 8px`），最右侧是
+  静音按钮；`.node-resize` 固定在 `right:4px / bottom:4px`、22×22、`z-index:21`。
+  内容铺满后两者压在同一个角上，实测重叠 **16×18px**，`elementFromPoint` 在音量按钮
+  中心命中的是 resize 的 svg，音量根本点不到。给 `.vp-bar` 加 `padding-right:36px`
+  （独立幂等标记「视频控制条避让 resize 手柄」）：静音按钮与 `.vp-seek` 右端一起左移，
+  右下角 26px 让给 resize，二者之间还留 10px 间隙。**没有移动 resize 的位置**（仍是
+  右下角、拖动语义不变），也没有改 JS；图片 / 音频 / 空节点不受影响。
+- 副作用：卡片 100% 宽后，非活动素材卡完全被活动卡盖住，左右「露头」的堆叠效果消失，
+  多素材仍靠底部 `.media-dots` 与悬浮工具条切换。
+
+**JS（`assets/index-BXU58XDe.js` 两处）**
+
+- 默认 `snapGrid:[15,15]` → `[10,10]`：可见线格是 `Background gap:10`，
+  原来的 15 会让拖动吸附和网格线错位；改成 10 后拖动落点也是 10 的倍数。
+- 节点组件的 resize 处理器 `function w(S)`：原来只做
+  `t.data.w=Math.round(Math.max(Pc,Ee))`，现在读 `n.snapToGrid.value` / `n.snapGrid.value`，
+  开启吸附时宽高按网格取整，并用 `Math.ceil(min/g)*g` 兜住最小值（`Pc=400 / Ac=225`
+  → 吸附态下限 400 / 230），关闭时完全保持原来的自由尺寸。`n=mt("demo")` 与工具条
+  `window.__xcatFlow` 是同一个 store，所以底栏「网格吸附」开关直接生效。
+
+验证（8199 + CDP）：`border=0 / padding=0 / cardW=nodeW=454 / 留白=0`、图片盒子与节点
+盒子完全重合；开吸附 resize `+37/+23 → 490×250`、`-63/+41 → 400×270`（均 10 的倍数），
+关吸附 `+37/+23 → 491×249`（自由）；开吸附拖动落点 130,140，关吸附 158,163；
+暗/亮主题、多素材、音频节点、控制台无报错均通过。
+图片黑边另测：3:1 图在 454×226 节点内显示 454×151（上下各 37px 黑边），
+在 454×400 内显示 454×151（上下各 124px）；2:3 竖图在 454×226 内显示 151×226
+（左右各 152px）；真实拖动 resize 到 574×316 后显示 574×191（上下各 62px），
+`object-fit=contain`、背景 `rgb(0,0,0)`，截图采样黑边像素为纯 `#000`，
+左右黄色/绿色边缘标记均完整可见（不再裁切）；亮色主题下空节点与音频节点仍是白底。
+音量 / resize 分离另测：修复前重叠 16×18px，修复后 `overlap=false`，
+`elementFromPoint` 命中 `.vp-btn` 内的 path；真实点击静音按钮 title 由「静音」变
+「取消静音」且 `video.muted=true`；resize 自由拖 `454×226 → 515×269`、
+开吸附 → `550×290`（10 的倍数）；多素材 `.media-dots` 与 resize 同样不重叠；
+暗 / 亮主题、图片 `contain`、音频控件 430px 宽、空节点 100%×100%、控制台无报错均通过。
+
+### 音频波形节点：用波形代替原生进度条（2026-11-12）
+
+上游把活动音频卡渲染成 `<audio class="media-audio" controls>`，双击打开的大预览也是
+`<audio controls>`，都是浏览器原生条。现在改成参考图那种「深灰圆角卡片 + 灰色圆头竖条
+波形 + 蓝色播放头（贯穿全高、顶部带圆点）」：**波形本身就是进度条**，已播放的竖条变蓝，
+点击 / 拖动任意位置 seek，hover 时左下角出现播放 / 暂停按钮。
+
+**架构：不动 Vue 组件，用独立扩展接管 DOM**
+
+dist 只有压缩后的单行 ESM bundle，没有源码也没有 `node_modules`，重建代价大。所以：
+
+| 文件 | 改动 |
+| --- | --- |
+| `assets/index-BXU58XDe.js` | 两处 `<audio controls>` → 空 `<div class="xcat-audio-wave" data-src="...">`；动态 props 常量 `yx` / `Ub` 从 `["src"]` 改 `["data-src"]` |
+| `assets/xcat-audio-wave.js` | **新增**，普通脚本（无 import / 无 Vue 依赖），波形实现 |
+| `assets/xcat-overrides.css` | 新增 `--xw-*` 主题令牌与波形样式；`.media-audio` 从「居中 54px 原生条」改为 `inset:0` 铺满卡片 |
+| `dist/index.html` | 追加 `<script defer src=".../xcat-audio-wave.js">` |
+
+扩展用 `MutationObserver` 找容器并注入 `canvas + button + audio`。关键是 Vue 对
+**children=null 的 element vnode 不管理 innerHTML**，所以节点数据更新、翻页、缩放时
+注入的 DOM 不会被清掉；换素材（`data-src` 变化）由每个实例自己的 observer 处理。
+
+**波形数据**：`fetch(src)` → `AudioContext.decodeAudioData` → 按 1600 桶取峰值（按 src
+缓存），绘制时按当前宽度降采样到 `宽度/5` 根竖条。`Math.pow(x, 1.15)` 放大动态，
+否则恒定振幅的音频会被画成一整块规整椭圆。解码失败 / 无 src 时用按 src 哈希生成的
+确定性伪波形占位，视觉不空。颜色全部读 CSS 变量，`data-theme` 变化时统一重绘。
+
+**几个必须注意的坑**
+
+- `pointerdown / mousedown / click / wheel` 要在**冒泡阶段** `stopPropagation`：
+  写在捕获阶段会连播放按钮自己的 click 一起吃掉；冒泡阶段则按钮先执行、再阻止事件
+  传到 Vue Flow 节点包装器（拖节点）、卡片（切素材）和预览舞台（平移缩放）。
+- `dblclick` **不拦**，保留双击打开大预览。
+- 大预览弹窗 Teleport 到 `body`，不在 `#app` 内，`.is-preview` 的选择器**不能带
+  `#app` 前缀**，否则会退化成铺满整个预览舞台（实测变成 954×694）。
+- 播放按钮放**左下角**：右上是删除、右下是 resize、左上是播放头圆点，都会打架。
+
+**验证**（8199 + CDP 真实鼠标，测试音为本地生成的 2.5s 带节奏 WAV）：
+`decoded=true`（真实解码）、`duration=2.5s`、canvas 与节点同为 454×226；
+点击播放 0.7s 后 `progress=0.265`、暂停生效；点击 72% → `progress=0.734 /
+currentTime=1.836s`；在波形上拖动 seek 到 0.553 且**节点位置仍是 70,90**（没误拖节点）；
+resize 到 544×286 后 canvas 同步重绘，已播放竖条变蓝；大预览波形居中 922×160；
+亮色主题 `#eceef2` 底 / `#6f7684` 竖条 / `#2f8fff` 播放头对比清晰；
+图片 `contain`、空节点、节点边框 0 均未回退；控制台无报错。
+
+**未改**：资产库侧栏详情里的音频预览仍用原生 `<audio controls>`（不是画布节点）；
+非活动音频卡仍是「音频」文字占位。需要的话可以一并换成同一套波形。
+
+### 音频波形底部控制条 + 音量调节（2026-11-12）
+
+口径：**只改音频节点底部，视频节点本身保持原样**；波形必须保留。另外视频节点的
+音量按钮原本只有「静音 / 取消静音」两个状态，要能调音量大小，音频节点同样。
+
+实现新增 `assets/xcat-media-controls.js`，**压缩 bundle 一行未改**：
+视频 `.vp-bar` 末尾追加 `.xcat-vol` 音量滑块（绑定同一个 `<video>.volume`）；
+音频 `.xcat-audio-wave` 底部追加 `.xcat-aw-bar`（播放/暂停、时间、静音、音量滑块）。
+
+- **v2：两条控制条逐像素一致**。用户对比截图后发现 v1 的音频条播放/喇叭图标是
+  18px（视频 14px），中间是 0px 的 `.xcat-aw-spacer`（视频是 222.7px `.vp-seek`
+  灰线 + 黄点）。改为音频条内部元素直接复用上游 `.vp-btn` / `.vp-time` /
+  `.vp-seek` 三个 class，并补上 `data-v-5b5d8e84`（VideoPlayer.vue 的 scoped id）
+  让 `index-*.css` 的规则原样命中；图标 path 也按上游 14×14 照抄。
+  `xcat-overrides.css` 里自抄的那几条 `.xcat-mc-btn` / `.xcat-aw-time` /
+  `.xcat-aw-spacer` 规则已删除，避免以后数值再跑偏。
+- 顺序与视频完全一致：「播放 / 时间 / 进度条 / 静音 / 音量」。波形仍在节点主体，
+  控制条里的细线只是同一个 `<audio>` 的 seek 入口，与波形**双向同步**：波形拖动
+  → 细线 `value` / `--progress` 更新；细线拖动 → 改 `audio.currentTime` 并派发
+  `timeupdate` 让波形立刻重绘（暂停时 `timeupdate` 不一定触发，必须手动派发）。
+  这样既保留「波形代替原生进度条」的初衷，两条控制条也长得一样。
+- `.xcat-aw-bar` 外壳仍用自写样式（黑渐变贴底、8px gap、`7px 36px 8px 10px`，
+  右侧 36px 给 `.node-resize` 让位），数值与 `.vp-bar` 一致；大预览没有 resize
+  手柄，`.is-preview` 下右内边距回到 10px。
+- 波形左下角原来的 `.xcat-wave-play` 小按钮由 CSS 隐藏，避免两个播放入口；
+  **canvas、蓝色播放头、已播变色、点击 / 拖动 seek 全部原样保留**。
+- 音量滑块与 `.vp-seek` 同一套视觉（`--accent-yellow` 填充 + 9px 圆点），填充走
+  `--vol`。静音时滑块归零、取消静音恢复原值，拖到 >0 自动解除静音。视频静音按钮
+  仍归 Vue 管（靠 `volumechange` 同步滑块），音频静音按钮由本脚本切换，不会双重 toggle。
+- Vue 的 `.vp-bar` 有真实 vnode children，滑块**追加到末尾**而不是插进中间；Vue 按
+  vnode 数组 patch，不会清理额外 DOM，播放 / 时间 / 进度更新照常。
+- 注入用 `MutationObserver` + `rAF` 全量幂等扫描：波形脚本会先清空容器再建
+  `<audio>`，扫描到 `.xcat-wave-audio` 存在才装控制条，执行顺序颠倒也能自愈。
+
+**验证**（8199 + CDP 真实鼠标，本地生成 2.5s WAV 与 MediaRecorder webm）：
+两条控制条实测同为 `454×35 / pl10 pr36 pt7 pb8 gap8 / 同款渐变`，子元素相对
+x 与尺寸逐个相等：按钮 `10, 20×20`（svg 14×14）、时间 `38, 53.3×10`（10px）、
+进度条 `99.3, 222.7×3`、静音 `330, 20×20`、音量 `358, 60×3`；
+`audioBtn/videoBtn`、`audioTime/videoTime`、`audioSeek/videoSeek` 计算样式全等。
+canvas 仍 454×226、蓝色播放头保留；波形点 72% → 1.84s 且细线同步 73.446%，
+细线点 30% → 0.73s 且波形重绘；真实拖细线到 80% → 2.03s，节点位置始终
+60,360（不误拖），音量滑块中心命中 `INPUT.xcat-vol`（不被 resize 抢走）。
+视频音量 30% → 0.26、静音/恢复 0.26；音频播放 0.85s / 暂停 / 音量 50% /
+静音归零；点时间文字 `currentTime` 变化 0；大预览、亮 / 暗主题、控制台无报错。
+
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
 前端是 Vue 3 + Vue Flow，后端是一个轻量 aiohttp 扩展，只负责托管页面、读写配置、代理执行与缩略图生成。

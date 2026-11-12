@@ -3068,3 +3068,270 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     outline: none;
     background: var(--cg-accent);
 }
+
+
+/* ==================================================================
+   节点改造：去掉灰色边框 / 内容填满整个节点
+   ------------------------------------------------------------------
+   上游 .demo-node 是 border:1px + padding:10px + radius:20 的灰色卡片；
+   内部 .media-stack-card 再缩到 84% 且自带 1px 边框与深色底，于是图片
+   四周留出一整圈灰框。这里把外壳还原成纯容器：无边框、无内边距、媒体
+   卡片 100% 铺满；圆角由 .media-stack 的 overflow:hidden 统一裁切。
+   选中态原来只改 border-color，边框去掉后改用外发光环表示。
+   ================================================================== */
+#app .demo-node {
+    border: 0 !important;
+    padding: 0 !important;
+    border-radius: 12px;
+    background: var(--c-panel-2);
+    box-shadow: 0 6px 18px var(--c-shadow);
+}
+
+/* 选中 / 可连接高亮：border 已去掉，用 2px 环替代原来的 border-color */
+#app .vue-flow__node.selected .demo-node,
+#app .demo-node.is-connect-hot:hover {
+    box-shadow: 0 0 0 2px var(--c-accent), 0 6px 18px var(--c-shadow) !important;
+}
+
+/* 媒体层铺满节点；卡片不再留边、不再自带边框与底色 */
+#app .demo-node .media-stack {
+    border-radius: 12px;
+    background: transparent;
+}
+
+#app .demo-node .media-stack-card {
+    width: 100%;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* 图片照视频播放器 .vp-video 的写法：等比 contain + 黑底。
+   上游是 object-fit:cover，节点一改尺寸就把图片裁掉；视频组件自己用的是
+   object-fit:contain;background:#000，所以视频有黑边而图片没有。
+   img 元素本身是 100%×100%，背景色正好填满 contain 留出的上下/左右空白，
+   不需要给卡片或节点加黑底（那样空节点、音频节点也会变黑）。 */
+#app .demo-node .media-stack-card img {
+    border-radius: 0;
+    object-fit: contain;
+    background: #000;
+}
+
+#app .demo-node .media-stack-card video {
+    border-radius: 0;
+}
+
+/* 音频：原生 <audio controls> 已换成波形容器，改为铺满整张卡片 */
+#app .demo-node .media-audio.xcat-audio-wave {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: none;
+    border-radius: 0;
+}
+
+/* 空节点：去掉虚线灰框，整个节点都是拖入/点击上传的命中区 */
+#app .demo-node .node-empty {
+    padding: 0;
+}
+
+#app .demo-node .node-upload {
+    width: 100%;
+    height: 100%;
+    border: 0 !important;
+    border-radius: 12px;
+    background: transparent !important;
+    color: var(--c-muted);
+}
+
+#app .demo-node:hover .node-upload,
+#app .demo-node .node-upload:hover {
+    border-color: transparent;
+    background: transparent !important;
+    color: var(--c-text);
+}
+
+/* ==================================================================
+   视频控制条避让 resize 手柄
+   ------------------------------------------------------------------
+   .vp-bar 是通宽的底部控制条（padding:7px 10px 8px），最右侧是静音按钮；
+   .node-resize 固定在 right:4px / bottom:4px、22×22、z-index:21。
+   内容铺满节点后两者压在同一个角上，实测重叠 16×18px，且 resize 盖在
+   静音按钮上（elementFromPoint 命中 resize 的 svg），音量根本点不到。
+   把控制条右内边距加到 36px：静音按钮与进度条右端一起左移，右下角
+   26px 让给 resize，二者之间还留 10px 间隙。只影响视频控制条，
+   图片 / 音频 / 空节点不受影响。
+   ================================================================== */
+#app .demo-node .vp-bar {
+    padding-right: 36px;
+}
+
+/* ==================================================================
+   音频波形：替代原生 <audio controls> 进度条
+   ------------------------------------------------------------------
+   bundle 把两处 <audio controls> 换成空的 .xcat-audio-wave 容器，
+   xcat-audio-wave.js 负责解码峰值、canvas 绘制、点击/拖动 seek 与播放。
+   颜色走 --xw-* 令牌，主题切换时 JS 会重绘；暗色底/灰竖条/蓝播放头
+   照参考图，亮色主题按同一色阶镜像。
+   ================================================================== */
+:root {
+    --xw-bg: #232428;
+    --xw-bar: #8b929e;
+    --xw-played: #4a9eff;
+    --xw-head: #3d9cff;
+    --xw-btn-bg: rgba(18, 20, 24, .74);
+    --xw-btn-fg: #f2f4f8;
+}
+
+html[data-theme=light] {
+    --xw-bg: #eceef2;
+    --xw-bar: #6f7684;
+    --xw-played: #2f7fe0;
+    --xw-head: #2f8fff;
+    --xw-btn-bg: rgba(255, 255, 255, .86);
+    --xw-btn-fg: #23232b;
+}
+
+.xcat-audio-wave {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--xw-bg);
+    touch-action: none;
+    user-select: none;
+}
+
+.xcat-audio-wave .xcat-wave-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.xcat-audio-wave .xcat-wave-audio {
+    display: none;
+}
+
+/* 播放入口：放左下角（右上是删除、右下是 resize、左上是播放头圆点）。
+   默认淡显保证可发现，hover / 键盘聚焦时完全显现。 */
+.xcat-audio-wave .xcat-wave-play {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: var(--xw-btn-bg);
+    color: var(--xw-btn-fg);
+    opacity: .55;
+    cursor: pointer;
+    transition: opacity .12s ease, background .12s ease;
+}
+
+.xcat-audio-wave:hover .xcat-wave-play,
+.xcat-audio-wave .xcat-wave-play:focus-visible {
+    opacity: 1;
+}
+
+.xcat-audio-wave .xcat-wave-play:hover {
+    background: var(--xw-head);
+    color: #fff;
+}
+
+/* 双击打开的大预览：居中一条波形卡片，不铺满整个预览舞台。
+   预览弹窗 Teleport 到 body，不在 #app 内，选择器不能带 #app 前缀。 */
+.xcat-audio-wave.is-preview {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: 50%;
+    width: auto;
+    height: 160px;
+    transform: translateY(-50%);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+
+
+/* ==================================================================
+   媒体控制条补强：音频波形底部 + 音量滑块
+   ------------------------------------------------------------------
+   .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
+   但内部按钮、时间、进度条不在这里抄样式：xcat-media-controls.js 直接给
+   它们 .vp-btn / .vp-time / .vp-seek + data-v-5b5d8e84，让上游 scoped
+   规则原样命中。这样音频条与视频条逐像素一致（不会再出现 18px vs 14px
+   图标、0px spacer vs 222.7px 进度线这类偏差）。波形本体、蓝色播放头、
+   点击拖动 seek 全部保留不变。右侧 36px 留白让开 .node-resize。
+   ================================================================== */
+/* 原来的左下角小播放按钮由控制条里的按钮取代 */
+.xcat-audio-wave .xcat-wave-play {
+    display: none;
+}
+
+.xcat-aw-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 36px 8px 10px;
+    background: linear-gradient(transparent, #000000c7 45%);
+    color: #f2f2f2;
+    touch-action: none;
+    user-select: none;
+}
+
+/* 音量滑块：与 .vp-seek 同一套视觉，填充比例走 --vol */
+.xcat-vol {
+    flex: 0 0 auto;
+    width: 60px;
+    height: 3px;
+    margin: 0;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right,
+        var(--accent-yellow) 0,
+        var(--accent-yellow) var(--vol, 100%),
+        rgba(255, 255, 255, .32) var(--vol, 100%),
+        rgba(255, 255, 255, .32) 100%);
+}
+
+.xcat-vol::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 9px;
+    height: 9px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+}
+
+.xcat-vol::-moz-range-thumb {
+    width: 9px;
+    height: 9px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent-yellow);
+}
+
+/* 大预览里没有 resize 手柄，右侧不用额外让位 */
+.xcat-audio-wave.is-preview .xcat-aw-bar {
+    padding-right: 10px;
+}
