@@ -4,14 +4,44 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Infinite-Canvas</title>
-  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js"></script>
-  <link rel="stylesheet" crossorigin href="/infinite_canvas/app/assets/index-5rMw4exW.css">
+  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js?v=20261113m"></script>
+  <link rel="stylesheet" crossorigin href="/infinite_canvas/app/assets/index-5rMw4exW.css?v=20261112o">
   <!-- 本包本地调整，必须排在上面这个样式之后 -->
-  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css">
-  <script defer src="/infinite_canvas/app/assets/xcat-audio-wave.js"></script>
-  <script defer src="/infinite_canvas/app/assets/xcat-media-controls.js"></script>
+  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css?v=20261113l">
+  <script defer src="/infinite_canvas/app/assets/xcat-audio-wave.js?v=20261112d"></script>
+  <script defer src="/infinite_canvas/app/assets/xcat-media-controls.js?v=20261112g"></script>
+  <script defer src="/infinite_canvas/app/assets/xcat-node-names.js"></script>
+  <script defer src="/infinite_canvas/app/assets/xcat-node-actionbar.js"></script>
+  <!-- 选中节点 ⇒ 相连的线一起变白（ComfyUI highlightedLinks 语义） -->
+  <script defer src="/infinite_canvas/app/assets/xcat-edge-hot.js?v=20261112a"></script>
+  <!-- 连线中点圆点，点击断开（ComfyUI drawCenterMarker） -->
+  <script defer src="/infinite_canvas/app/assets/xcat-edge-mid.js?v=20261112d"></script>
+  <!-- 左栏「新建节点」八选一（素材：图片/视频/音频/文本 · 生成：图片/视频/音频/文本） -->
+  <script defer src="/infinite_canvas/app/assets/xcat-new-node.js?v=20261113k"></script>
+  <!-- 画布内 Ctrl+V 粘贴外部图片 / 视频 / 音频 / 文字，直接建素材节点 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-paste.js?v=20261113i"></script>
+  <!-- 文本节点：双击进入编辑，平时与普通节点一样可拖动 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-text-edit.js?v=20261113j"></script>
 </head>
 <body>
+  <!-- 连线描边滤镜：复刻 ComfyUI litegraph 的 render_connections_border
+       （先画 connections_width + 4 的 rgba(0,0,0,0.5) 外描边，再画 3px 本色线）。
+       SVG 一条 stroke 只能一层颜色，这里用 feMorphology dilate 把描边扩 2px
+       （3 + 2×2 = 7px，与 ComfyUI 完全同宽），再与原图合并。 -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+    <defs>
+      <filter id="xcat-link-halo" x="-50%" y="-50%" width="200%" height="200%"
+              filterUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="grow" />
+        <feFlood flood-color="#000000" flood-opacity="0.5" result="ink" />
+        <feComposite in="ink" in2="grow" operator="in" result="halo" />
+        <feMerge>
+          <feMergeNode in="halo" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  </svg>
   <div id="app"></div>
 </body>
 </html>

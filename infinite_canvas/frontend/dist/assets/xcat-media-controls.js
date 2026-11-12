@@ -1,30 +1,35 @@
 /* ==================================================================
-   xcat-media-controls.js — 媒体控制条补强（不动压缩 bundle）
+   xcat-media-controls.js — 媒体控制条（视频 / 音频共用一套自绘实现）
    ------------------------------------------------------------------
-   1) 视频节点：上游 .vp-bar 的音量按钮只有「静音 / 取消静音」两个状态，
-      这里在控制条末尾追加一个音量滑块，直接读写同一个 <video>.volume。
-      Vue 自己的 onVolumechange 仍会同步静音按钮图标，互不干扰。
-   2) 音频节点：xcat-audio-wave.js 生成的波形保留不变，在波形底部补一条
-      与 .vp-bar **逐像素一致**的控制条。内部元素直接复用上游
-      .vp-btn / .vp-time / .vp-seek 三个 class 并补上 scoped 属性
-      data-v-5b5d8e84，让上游 index-*.css 的规则原样命中，避免自己抄一份
-      样式后尺寸慢慢跑偏（音频条曾用 18px 图标，视频条是 14px，肉眼可见）。
-      进度条与波形双向同步：播放在波形上看，也可拖控制条里的细线 seek。
+   视频节点与音频节点现在用**同一份**控制条代码：播放 / 时间 / 进度 /
+   静音 / 音量，全部自绘，不引用上游 .vp-btn / .vp-time / .vp-seek，
+   也不补 data-v-5b5d8e84 scoped 属性。
 
-   为什么全用 DOM 注入而不是改 bundle：.vp-bar 是压缩产物里的 Vue 组件，
-   改它要重写渲染函数与 patch flag；而 Vue 对 vnode 之外追加的 DOM 不会
-   清理（children 由 vnode 数组管理，不按 childNodes 索引重排），注入安全。
+   这套东西要解决的三个观感问题：
+     · 原生 input[type=range] 的 thumb 位置按整像素吸附，222px 的条上
+       每秒只走 1.55px，看起来就是「一顿一顿」；而且 thumb 内缩 4.5px，
+       0% / 100% 与轨道对不齐。
+     · 进度填充用 background 百分比（--progress），同样只能整像素跳。
+     · 时间文字由浏览器按内容撑宽，秒数从 9 进位到 10 时整串变宽，
+       右边元素每秒被挤一下；甚至被压窄后画出省略号「…」。
+   新实现：进度 / 音量是 div + span 画的（轨道 + 填充 + 圆点），位置只用
+   transform: scaleX / translate3d 驱动（亚像素、走合成层、不触发布局）；
+   时间拆成「当前 / 分隔 / 总长」三段定宽（22 + 9 + 22 = 53px），进位
+   不改总宽；播放时用 rAF 每帧跟随媒体时间，而不是只听 timeupdate 的 ~4Hz。
 
-   控制条一律 padding-right:36px，给右下角 .node-resize 手柄让位
-   （上一轮「音量按钮与 resize 重叠」就是这么修的）。
+   视频条怎么换：
+     上游 .vp-bar 是压缩 bundle 里的 Vue 组件（<div class="video-player">
+     下 [video, .vp-bar]），改它要重写渲染函数。做法与节点操作按钮一致：
+     把原 .vp-bar 隐藏（保留 DOM，Vue 的 patch 仍以它为锚点，不会出错），
+     在同一个 .video-player 里追加自己的 .xcat-vbar。Vue 不会清理 vnode
+     之外的追加节点（children 按 vnode 数组管理，不按 childNodes 索引重排）。
+
+   几何：gap 8 / padding 7 10 8 / 按钮 20 / 时间 10px / 进度 3px + 9px
+   圆点 / 音量条 60px；节点里右内边距 36px 让开 .node-resize（见 CSS）。
    ================================================================== */
 (function () {
   'use strict';
   if (window.__xcatMediaControls) return;
-
-  /* VideoPlayer.vue 的 scoped id；注入元素补上它，才能命中上游 .vp-* 样式 */
-  var SCOPE = 'data-v-5b5d8e84';
-  function scoped(el) { el.setAttribute(SCOPE, ''); return el; }
 
   /* 图标与上游 VideoPlayer.vue 完全一致：14×14、同样的 path */
   function icon(paths) {
@@ -55,70 +60,244 @@
     });
   }
 
-  function mkVolume() {
-    var s = document.createElement('input');
-    s.className = 'xcat-vol nodrag';
-    s.type = 'range';
-    s.min = '0'; s.max = '1'; s.step = '0.01'; s.value = '1';
-    s.title = '音量';
-    s.setAttribute('aria-label', '音量');
-    /* 拖动滑块不能触发 Vue Flow 的拖节点 / 卡片切素材 */
-    ['mousedown', 'pointerdown', 'click', 'dblclick', 'wheel'].forEach(function (t) {
-      s.addEventListener(t, function (e) { e.stopPropagation(); });
+  /* ---------------------------------------------------------- 自绘滑块
+     返回 { root, set }。set(0..1) 只改变换，不碰布局。
+     轨道左右各内缩 4.5px，圆点中心正好落在轨道两端。 */
+  function mkSlider(cls, label, onInput) {
+    var root = document.createElement('div');
+    root.className = cls + ' nodrag';
+    root.tabIndex = 0;
+    root.setAttribute('role', 'slider');
+    root.setAttribute('aria-label', label);
+    root.setAttribute('aria-valuemin', '0');
+    root.setAttribute('aria-valuemax', '100');
+
+    var track = document.createElement('span');
+    track.className = cls + '-track';
+    var fill = document.createElement('span');
+    fill.className = cls + '-fill';
+    var thumb = document.createElement('span');
+    thumb.className = cls + '-thumb';
+    root.appendChild(track);
+    root.appendChild(fill);
+    root.appendChild(thumb);
+
+    var ratio = 0, dragging = false, spanPx = 0, lastPct = -1;
+
+    /* 轨道可用宽度缓存在 spanPx 里：paint 每帧都跑，不能每帧读 clientWidth
+       （那是强制同步布局）。尺寸变化交给 ResizeObserver。 */
+    function measure() {
+      spanPx = Math.max(0, root.clientWidth - 9);
+    }
+    function paint() {
+      fill.style.transform = 'scaleX(' + ratio + ')';
+      thumb.style.transform = 'translate3d(' + (ratio * spanPx).toFixed(2) + 'px,0,0)';
+      var pct = Math.round(ratio * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        root.setAttribute('aria-valuenow', String(pct));
+      }
+    }
+    function at(clientX) {
+      var r = root.getBoundingClientRect();
+      var w = r.width - 9;
+      var p = w > 0 ? (clientX - r.left - 4.5) / w : 0;
+      return p < 0 ? 0 : p > 1 ? 1 : p;
+    }
+    function apply(p, fire) {
+      ratio = p;
+      paint();
+      if (fire && onInput) onInput(ratio);
+    }
+
+    root.addEventListener('pointerdown', function (e) {
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
+      dragging = true;
+      try { root.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      apply(at(e.clientX), true);
     });
-    return s;
+    root.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      e.stopPropagation();
+      apply(at(e.clientX), true);
+    });
+    ['pointerup', 'pointercancel'].forEach(function (t) {
+      root.addEventListener(t, function (e) {
+        if (!dragging) return;
+        dragging = false;
+        try { root.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      });
+    });
+    root.addEventListener('keydown', function (e) {
+      var d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? .02
+            : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -.02 : 0;
+      if (!d) return;
+      e.preventDefault();
+      e.stopPropagation();
+      apply(Math.min(1, Math.max(0, ratio + d)), true);
+    });
+    /* 尺寸变化（节点 resize / 大预览）时圆点位置要按新宽度重算 */
+    if (window.ResizeObserver) new ResizeObserver(function () { measure(); paint(); }).observe(root);
+
+    measure();
+    paint();
+    return {
+      root: root,
+      set: function (p) { ratio = p; paint(); }
+    };
   }
 
-  function mkButton(cls, title, svg) {
+  function mkIconButton(cls, title, svg) {
     var b = document.createElement('button');
     b.className = cls + ' nodrag';
     b.type = 'button';
     b.title = title;
     b.innerHTML = svg;
-    return scoped(b);
+    return b;
   }
 
-  /* 把音量滑块 / 静音按钮与一个媒体元素绑定。
-     ownMute=true 时由本脚本切换静音（音频控制条）；
-     false 时静音按钮归 Vue 管，只靠 volumechange 同步（视频控制条）。 */
-  function bindVolume(media, slider, muteBtn, ownMute) {
-    function sync() {
-      var v = media.muted ? 0 : (typeof media.volume === 'number' ? media.volume : 1);
-      slider.value = String(v);
-      slider.style.setProperty('--vol', (v * 100) + '%');
-      if (muteBtn) {
-        var silent = media.muted || media.volume === 0;
-        muteBtn.innerHTML = silent ? ICON_MUTE : ICON_VOL;
-        muteBtn.title = silent ? '取消静音' : '静音';
-      }
+  /* ---------------------------------------------------------- 控制条
+     为任意媒体元素（<video> / <audio>）建一条自绘控制条。
+     cls 决定挂哪个 class（xcat-aw-bar / xcat-vbar），几何由 .xcat-mbar 提供。 */
+  function buildBar(media, cls) {
+    var bar = document.createElement('div');
+    bar.className = 'xcat-mbar ' + cls + ' nodrag';
+
+    var play = mkIconButton('xaw-btn xaw-play', '播放', ICON_PLAY);
+    var mute = mkIconButton('xaw-btn xaw-mute', '静音', ICON_VOL);
+
+    /* 时间：三段定宽，秒数进位不改变总宽（宽度一变右边就会跟着挪） */
+    var time = document.createElement('span');
+    time.className = 'xaw-time';
+    var tCur = document.createElement('b');
+    var tSep = document.createElement('i');
+    var tDur = document.createElement('b');
+    tCur.textContent = '0:00';
+    tSep.textContent = '/';
+    tDur.textContent = '0:00';
+    time.appendChild(tCur);
+    time.appendChild(tSep);
+    time.appendChild(tDur);
+
+    function duration() {
+      var d = media.duration;
+      return (d && isFinite(d) && d > 0) ? d : 0;
     }
-    slider.addEventListener('input', function () {
-      var v = Math.max(0, Math.min(1, Number(slider.value) || 0));
-      media.volume = v;
-      if (v > 0 && media.muted) media.muted = false;
-      sync();
+
+    var seek = mkSlider('xaw-seek', '进度', function (p) {
+      var d = duration();
+      if (!d) return;
+      try { media.currentTime = p * d; } catch (_) { /* ignore */ }
+      paintProgress();
+      paintTime();
     });
-    if (ownMute && muteBtn) {
-      muteBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        media.muted = !media.muted;
-        if (!media.muted && media.volume === 0) media.volume = .5;
-        sync();
-      });
+
+    var vol = mkSlider('xaw-vol', '音量', function (p) {
+      media.volume = p;
+      if (p > 0 && media.muted) media.muted = false;
+    });
+
+    /* 顺序与上游 .vp-bar 一致：播放 / 时间 / 进度 / 静音 / 音量 */
+    bar.appendChild(play);
+    bar.appendChild(time);
+    bar.appendChild(seek.root);
+    bar.appendChild(mute);
+    bar.appendChild(vol.root);
+
+    var lastSec = -1, playing = false, raf = 0;
+
+    /* 只写 transform，不读布局；paint 内部也不读 clientWidth（已缓存） */
+    function paintProgress() {
+      var d = duration();
+      seek.set(d ? Math.min(1, Math.max(0, (media.currentTime || 0) / d)) : 0);
     }
-    media.addEventListener('volumechange', sync);
-    sync();
+    function paintTime() {
+      var s = Math.floor(media.currentTime || 0);
+      if (s === lastSec) return;          // 秒数没变就不碰 DOM
+      lastSec = s;
+      tCur.textContent = fmt(media.currentTime);
+      tDur.textContent = fmt(duration());
+    }
+    function frame() {
+      if (!playing) return;
+      paintProgress();
+      paintTime();
+      raf = requestAnimationFrame(frame);
+    }
+    function repaint() { paintProgress(); paintTime(); }
+
+    play.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (media.paused) {
+        if (!media.getAttribute('src')) return;
+        var p = media.play();
+        if (p && p.catch) p.catch(function () { /* 无手势 / 源不可播 */ });
+      } else media.pause();
+    });
+
+    media.addEventListener('loadedmetadata', function () { lastSec = -1; repaint(); });
+    media.addEventListener('durationchange', function () { lastSec = -1; repaint(); });
+    media.addEventListener('timeupdate', function () { if (!playing) repaint(); });
+    media.addEventListener('seeked', function () { lastSec = -1; repaint(); });
+    media.addEventListener('play', function () {
+      playing = true;
+      play.innerHTML = ICON_PAUSE;
+      play.title = '暂停';
+      cancelAnimationFrame(raf);
+      frame();
+    });
+    media.addEventListener('pause', function () {
+      playing = false;
+      play.innerHTML = ICON_PLAY;
+      play.title = '播放';
+      cancelAnimationFrame(raf);
+      repaint();
+    });
+    media.addEventListener('ended', function () {
+      playing = false;
+      cancelAnimationFrame(raf);
+      lastSec = -1;
+      repaint();
+    });
+
+    /* 静音按钮由本脚本自己管（上游那颗已被隐藏） */
+    function syncVol() {
+      var v = media.muted ? 0 : (typeof media.volume === 'number' ? media.volume : 1);
+      vol.set(v);
+      var silent = media.muted || media.volume === 0;
+      mute.innerHTML = silent ? ICON_MUTE : ICON_VOL;
+      mute.title = silent ? '取消静音' : '静音';
+    }
+    mute.addEventListener('click', function (e) {
+      e.stopPropagation();
+      media.muted = !media.muted;
+      if (!media.muted && media.volume === 0) media.volume = .5;
+      syncVol();
+    });
+    media.addEventListener('volumechange', syncVol);
+
+    stopAll(bar);
+    syncVol();
+    lastSec = -1;
+    repaint();
+
+    return bar;
   }
 
   /* ---------------------------------------------------------- 视频节点 */
   function installVideoBar(bar) {
-    if (installed.has(bar) || bar.querySelector('.xcat-vol')) return;
-    var host = bar.parentElement;
-    var video = host && host.querySelector('.vp-video');
-    if (!video) return;                       // 组件还没渲染完，下次扫描再装
-    var slider = mkVolume();
-    bar.appendChild(slider);                 // 追加到末尾，不插进 vnode 中间
-    bindVolume(video, slider, null, false);
+    if (installed.has(bar)) return;
+    var host = bar.parentElement;              // .video-player（position:relative）
+    if (!host) return;
+    var video = host.querySelector('.vp-video');
+    if (!video) return;                        // 组件还没渲染完，下次扫描再装
+
+    /* 原条保留在 DOM 里（Vue 的 patch 锚点），只藏起来 */
+    bar.style.display = 'none';
+    bar.setAttribute('data-xcat-off', '1');
+
+    host.appendChild(buildBar(video, 'xcat-vbar'));
     installed.set(bar, true);
   }
 
@@ -129,72 +308,7 @@
     var audio = wave.querySelector('.xcat-wave-audio');
     if (!audio) return;
 
-    var bar = document.createElement('div');
-    bar.className = 'xcat-aw-bar nodrag';
-    var play = mkButton('vp-btn xcat-aw-play', '播放', ICON_PLAY);
-    var time = document.createElement('span');
-    time.className = 'vp-time xcat-aw-time';
-    time.textContent = '0:00 / 0:00';
-    scoped(time);
-    /* 与视频 .vp-seek 同一个 class + 同一个 scoped id，样式由上游 CSS 提供 */
-    var seek = document.createElement('input');
-    seek.className = 'vp-seek xcat-aw-seek nodrag';
-    seek.type = 'range';
-    seek.min = '0'; seek.max = '0'; seek.step = '0.01'; seek.value = '0';
-    seek.title = '进度';
-    seek.setAttribute('aria-label', '进度');
-    scoped(seek);
-    var mute = mkButton('vp-btn xcat-aw-mute', '静音', ICON_VOL);
-    var slider = mkVolume();
-    /* 顺序与视频 .vp-bar 完全一致：播放 / 时间 / 进度 / 静音 / 音量 */
-    bar.appendChild(play);
-    bar.appendChild(time);
-    bar.appendChild(seek);
-    bar.appendChild(mute);
-    bar.appendChild(slider);
-    wave.appendChild(bar);
-    stopAll(bar);
-
-    function syncTime() {
-      time.textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration);
-    }
-    function syncSeek() {
-      var d = (audio.duration && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 0;
-      var t = Math.max(0, Math.min(d, audio.currentTime || 0));
-      seek.max = String(d);
-      seek.value = String(t);
-      seek.style.setProperty('--progress', d ? (t / d * 100) + '%' : '0%');
-      syncTime();
-    }
-    function syncPlay() {
-      play.innerHTML = audio.paused ? ICON_PLAY : ICON_PAUSE;
-      play.title = audio.paused ? '播放' : '暂停';
-    }
-    play.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (!audio.getAttribute('src')) return;
-      if (audio.paused) {
-        var p = audio.play();
-        if (p && p.catch) p.catch(function () { /* 无手势 / 源不可播 */ });
-      } else audio.pause();
-    });
-    /* 控制条细线 seek：直接改 currentTime，并让波形立刻跟着重绘 */
-    seek.addEventListener('input', function () {
-      var d = Number(seek.max) || 0;
-      if (!d) return;
-      var t = Math.max(0, Math.min(d, Number(seek.value) || 0));
-      try { audio.currentTime = t; } catch (_) { /* ignore */ }
-      seek.style.setProperty('--progress', (t / d * 100) + '%');
-      try { audio.dispatchEvent(new Event('timeupdate')); } catch (_) { /* ignore */ }
-    });
-    ['loadedmetadata', 'durationchange', 'timeupdate', 'seeked', 'ended'].forEach(function (t) {
-      audio.addEventListener(t, syncSeek);
-    });
-    audio.addEventListener('play', syncPlay);
-    audio.addEventListener('pause', syncPlay);
-    audio.addEventListener('ended', syncPlay);
-    bindVolume(audio, slider, mute, true);
-    syncSeek(); syncPlay();
+    wave.appendChild(buildBar(audio, 'xcat-aw-bar'));
     installed.set(wave, true);
   }
 
@@ -217,18 +331,15 @@
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  /* 主题切换只影响 CSS 变量，滑块填充色自动跟随；无需重绘 */
   installAll();
   window.__xcatMediaControls = {
     install: installAll,
     stats: function () {
       return {
-        videoBars: document.querySelectorAll('.vp-bar .xcat-vol').length,
+        videoBars: document.querySelectorAll('.xcat-vbar').length,
         audioBars: document.querySelectorAll('.xcat-aw-bar').length,
-        audioSeeks: document.querySelectorAll('.xcat-aw-bar .xcat-aw-seek').length,
-        volumes: Array.from(document.querySelectorAll('.xcat-vol')).map(function (s) {
-          return { value: +(+s.value).toFixed(2), fill: s.style.getPropertyValue('--vol') };
-        })
+        hiddenUpstream: document.querySelectorAll('.vp-bar[data-xcat-off]').length,
+        seeks: document.querySelectorAll('.xaw-seek').length
       };
     }
   };

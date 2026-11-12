@@ -3087,8 +3087,17 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     box-shadow: 0 6px 18px var(--c-shadow);
 }
 
-/* 选中 / 可连接高亮：border 已去掉，用 2px 环替代原来的 border-color */
-#app .vue-flow__node.selected .demo-node,
+/* 选中：白色描边环（对齐 ComfyUI 的选中白框），不再是 accent 黄。
+   宽度 = --xcat-link-w（= 3px = ComfyUI connections_width），
+   用户要求「高亮边框与线一样粗」，所以两者共用同一个令牌，改一处就同步。
+   颜色 `NODE_BOX_OUTLINE_COLOR = #FFF`（`draw.ts::strokeShape` 的默认值）。
+   注：ComfyUI 画布上实测选中白框约 1 图内 px、连线 3，本身是 1:3；
+   这里按用户要求统一成与线同粗。 */
+#app .vue-flow__node.selected .demo-node {
+    box-shadow: 0 0 0 var(--xcat-link-w) var(--xcat-sel), 0 6px 18px var(--c-shadow) !important;
+}
+
+/* 「可连接」提示仍保留 accent 黄 —— 那是连接语义，不是选中语义 */
 #app .demo-node.is-connect-hot:hover {
     box-shadow: 0 0 0 2px var(--c-accent), 0 6px 18px var(--c-shadow) !important;
 }
@@ -3154,15 +3163,267 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
 }
 
 /* ==================================================================
-   视频控制条避让 resize 手柄
+   画布连线：对齐 ComfyUI 原生接线
    ------------------------------------------------------------------
-   .vp-bar 是通宽的底部控制条（padding:7px 10px 8px），最右侧是静音按钮；
-   .node-resize 固定在 right:4px / bottom:4px、22×22、z-index:21。
-   内容铺满节点后两者压在同一个角上，实测重叠 16×18px，且 resize 盖在
-   静音按钮上（elementFromPoint 命中 resize 的 svg），音量根本点不到。
-   把控制条右内边距加到 36px：静音按钮与进度条右端一起左移，右下角
-   26px 让给 resize，二者之间还留 10px 间隙。只影响视频控制条，
-   图片 / 音频 / 空节点不受影响。
+   ComfyUI litegraph 的取值（前端包 colorPaletteTheme-*.js 的 dark 调色板）：
+     LINK_COLOR            = #9A9  淡灰绿 (153,170,153)
+     CONNECTING_LINK_COLOR = #AFA  拖拽中的线 (170,255,170)
+     connections_width     = 3     实线，lineCap = round
+   上游画布原本是 --c-edge(#3c3c48) + dasharray 6 5 的虚线，深底上几乎看不见。
+   这里按 ComfyUI 改：实线、加宽、提亮；hover / 选中走白色。
+   亮色主题按同一色阶镜像，否则浅绿压浅底同样看不清。
+   ================================================================== */
+:root {
+    --xcat-link: #99aa99;
+    --xcat-link-connecting: #aaffaa;
+    --xcat-link-hot: #ffffff;
+    /* 线宽：ComfyUI LGraphCanvas.connections_width = 3。
+       选中环、接头都共用这个令牌，保证「边框与线同粗」永远同步。 */
+    --xcat-link-w: 3px;
+    --xcat-slot: #aaaaaa;
+    --xcat-slot-rim: #b2b2b2;
+    --xcat-sel: #ffffff;
+    /* 中点圆点被 hover（= 可点断开）时的「挖孔」色：纯黑，比画布底 #222 还深，
+       读起来才像线上开了一个可以删掉的洞（见「连线中点圆点」节）。 */
+    --xcat-link-hole: #000000;
+}
+
+html[data-theme="light"] {
+    --xcat-link: #6f7f6f;
+    --xcat-link-connecting: #2f7a2f;
+    --xcat-link-hot: #111318;
+    --xcat-slot: #8f8f8f;
+    --xcat-slot-rim: #a3a3a3;
+    --xcat-sel: #111318;
+    --xcat-link-hole: #1b1d1f;
+}
+
+#app .flow-wrap .vue-flow__edge-path {
+    stroke: var(--xcat-link);
+    stroke-width: var(--xcat-link-w);
+    stroke-dasharray: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    /* 不再用 #xcat-link-halo 描边：该滤镜是 objectBoundingBox 单位，
+       完全水平的连线 bbox 高度为 0，按 SVG 规范整条路径不渲染 —— 表现为线消失。*/
+    transition: stroke .12s ease, stroke-width .12s ease;
+}
+
+/* hover / 选中连线：ComfyUI 的 `colors.highlighted = '#FFF'`，
+   只换颜色、**线宽不变**（drawLink 始终用 connectionWidth，加粗是我们自己加的，已去掉）。 */
+#app .flow-wrap .vue-flow__edge:hover .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge.selected .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge:focus .vue-flow__edge-path,
+#app .flow-wrap .vue-flow__edge:focus-visible .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+}
+
+/* 选中节点 ⇒ 与它相连的线一起变白。
+   ComfyUI：selectionView.highlightedLinks = 选中节点的全部 linkId，
+   renderLink 用 colors.highlighted('#FFF')，**线宽不变**。
+   Vue Flow 没有这个联动，class 由 xcat-edge-hot.js 桥接加在 .vue-flow__edge 上。 */
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+}
+
+/* ==================================================================
+   连线中点圆点（点击断开这条线）
+   ------------------------------------------------------------------
+   ComfyUI renderer/core/canvas/pathRenderer.ts：
+     calculateCenterPoint()  ⇒ findPointOnBezier(0.5, …)，取曲线参数中点
+     drawCenterMarker()      ⇒ arc(centerPos, 5) + fill()，半径 5，
+                               填充色 = 该线颜色，无描边、不画 7px 黑 halo
+                               只在 scale >= 0.6 且 highQuality 时绘制
+   ⇒ 圆点直径 10 > 线 7px（3 本色 + 4 外描边），正好把线盖干净；
+     半径 5 是**图内单位**，随缩放一起变大变小（circle 在 viewport transform 里，
+     这一点自动满足）。缩放到 0.6 以下由 xcat-edge-mid.js 隐藏。
+   点击由 xcat-edge-mid.js 走 flow.removeEdges([id])，与 Delete 删边同一 action。
+   hover 时镂空成圆环（外径不变、中心挖黑孔），替换掉上游那个红色叉号按钮 ——
+   后者是 `.edge-delete`（18px 圆 + X，hover 用 --c-danger），本文件末尾已隐藏。
+   ================================================================== */
+#app .flow-wrap .xcat-edge-mid {
+    fill: var(--xcat-link);
+    stroke: none;
+    pointer-events: all;
+    cursor: pointer;
+    transition: fill .12s ease, stroke .12s ease, stroke-width .12s ease, r .12s ease;
+}
+
+/* 悬停命中区：比圆点大一圈的透明圆，append 在圆点之后（= 盖在它上面）。
+   鼠标落在半径 10 个图内单位内就算「对准了这个可断开的点」，比 10px 的圆点好点中。
+   pointer-events:all 必须显式写：上游 `.vue-flow__edge{pointer-events:visibleStroke}`，
+   fill:transparent 的圆默认不参与命中测试。 */
+#app .flow-wrap .xcat-edge-mid-hit {
+    fill: transparent;
+    stroke: none;
+    pointer-events: all;
+    cursor: pointer;
+}
+
+/* hover ⇒ 实心圆镂空成圆环：外沿不动（r 4 + stroke 2 = 5，与实心时的半径相同），
+   中间挖成 --xcat-link-hole，线从洞里穿过去也看不见 —— 就是「线上开了一个洞」。
+   r / stroke-width / 半径 全部是图内单位，跟着缩放一起变。 */
+#app .flow-wrap .xcat-edge-mid.is-hot {
+    r: 4px;
+    fill: var(--xcat-link-hole);
+    stroke: var(--xcat-link);
+    stroke-width: 2px;
+}
+
+/* 选中节点 ⇒ 相连的线、中点、圆环一起走 highlight 色（ComfyUI 同一套 colors.highlighted） */
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .xcat-edge-mid,
+#app .flow-wrap .vue-flow__edge.selected .xcat-edge-mid {
+    fill: var(--xcat-link-hot);
+}
+
+#app .flow-wrap .vue-flow__edge.xcat-edge-hot .xcat-edge-mid.is-hot,
+#app .flow-wrap .vue-flow__edge.selected .xcat-edge-mid.is-hot {
+    fill: var(--xcat-link-hole);
+    stroke: var(--xcat-link-hot);
+}
+
+/* hover 中点圆环时，这条线不再走上面的 hover 白 —— 圆环与线同色、孔是黑的，
+   才是参考图那副样子。选中节点的连线（.xcat-edge-hot）仍然保持白色。 */
+#app .flow-wrap .vue-flow__edge.xcat-edge-marker-hot:not(.xcat-edge-hot):not(.selected) .vue-flow__edge-path {
+    stroke: var(--xcat-link);
+}
+
+/* 上游自带的「删除连线」按钮（18px 圆 + 9px 叉号，悬停整条线就浮出来，
+   hover 时变红色 --c-danger）：它正好压在中点圆点上，一圈红叉就是它。
+   整个隐藏，删除只保留中点圆环这一处，安静得多。 */
+#app .flow-wrap .edge-tool {
+    display: none;
+}
+
+/* ==================================================================
+   剪线（上游 Alt/Ctrl + 拖动划过连线 = 划断）：红色 → 白色
+   ------------------------------------------------------------------
+   上游 index-*.css 两条红：`.cut-line{stroke:#ff3b3b}`（跟随鼠标的轨迹）
+   与 `.vue-flow__edge.is-cutting .vue-flow__edge-path{stroke:#ff3b3b}`。
+   本包整个画布只有一套语义色（线 #99AA99 / 高亮白），红色是唯一跳出的，
+   统一收到 --xcat-link-hot，线宽也跟 --xcat-link-w 走（原来 2.5 / 3 混着）。
+   特异性 (1,n,0) > 上游 (0,5,0)，不需要 !important。
+   ================================================================== */
+#app .flow-wrap .vue-flow__edge.is-cutting .vue-flow__edge-path {
+    stroke: var(--xcat-link-hot);
+    stroke-width: var(--xcat-link-w);
+    stroke-dasharray: none;
+}
+
+#app .cut-line {
+    stroke: var(--xcat-link-hot);
+    stroke-width: var(--xcat-link-w);
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--xcat-link-hot) 45%, transparent));
+}
+
+/* 拖拽新连线时跟随鼠标的那条（上游是 1.5px 虚线，这里改实线并加宽）
+   ComfyUI 的拖拽线同样走 renderLinkDirect ⇒ 一样带 7px 黑描边（skip_border=false） */
+#app .flow-wrap .vue-flow__connection-path {
+    stroke: var(--xcat-link-connecting);
+    stroke-width: var(--xcat-link-w);
+    stroke-dasharray: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    /* 不再用 #xcat-link-halo 描边：该滤镜是 objectBoundingBox 单位，
+       完全水平的连线 bbox 高度为 0，按 SVG 规范整条路径不渲染 —— 表现为线消失。*/
+}
+
+/* 吸附到可连接目标：ComfyUI 拖拽线的颜色恒为 resolveConnectingLinkColor(type)
+   （默认 CONNECTING_LINK_COLOR #AFA），吸附与否都不换色；吸附反馈只体现在
+   目标 slot 上（NodeSlot 的 highlight → 半径 4→5）。这里保持同色。 */
+#app .flow-wrap .vue-flow__connection-path.is-snapped {
+    stroke: var(--xcat-link-connecting);
+    stroke-dasharray: none;
+}
+
+/* ==================================================================
+   节点连接点：10px 灰圆点，圆心压在节点边框线上，**连线端点贴圆边**
+   ------------------------------------------------------------------
+   上游 .node-port 是 20×20 的透明定位盒（left:0/right:0 + translate(∓50%)，
+   圆心压在节点边缘），可见部分由 ::before 画 20px 圆再 clip-path 切一半
+   —— 所以是「半个圆饼贴着侧边」。
+   注意 left/right 与圆心的关系：盒子被 translate(-50%) 平移半个宽度，所以
+   「圆心距边缘的偏移量 = left/right 的值」，正值向内、负值向外；取 0 →
+   圆心正好落在边框线（x=0），圆点一半框内一半框外。
+   **定位盒尺寸必须 = 圆点直径（10px）**：Vue Flow 算 edge 端点用的是 handle
+   的 DOM 矩形（左 handle 取 box.left、右 handle 取 box.right），盒子 20px 时
+   端点落在边框外 10px（圆点半径只有 5px）⇒ 线和圆点之间空 5px 缝。
+   缩到 10px 后端点正好落在「边框 ±5px」= 圆点边缘，线就贴在圆点上（ComfyUI
+   里 link 也是从 slot 圆周出发的）。命中区不受影响：那是 .port-hit
+   （72×72 的独立子元素，不受盒子尺寸约束）。
+   ================================================================== */
+#app .vue-flow__handle.node-port {
+    width: 10px;
+    height: 10px;
+}
+
+#app .vue-flow__handle.node-port.vue-flow__handle-left {
+    left: 0;
+}
+
+#app .vue-flow__handle.node-port.vue-flow__handle-right {
+    right: 0;
+}
+
+/* 圆点配色（用户指定 #AAAAAA）：
+     半径 radius = highlight ? 5 : 4（NodeSlot.draw），即 8px、hover 10px；
+     颜色 = renderingColor() → comfy 的 getSlotColor(type) =
+            `var(--color-datatype-${T}, #AAA)`，画布节点没有 datatype 变量
+            ⇒ 落回 **#AAA**，与是否已连接无关（color_on/color_off 为空）。
+   实测 ComfyUI 截图：圆盘 #AAAAAA（170），外圈一圈更亮的细边（178 ≈ #B2B2B2，
+   约直径的 1/8）—— 用 inset box-shadow 复刻，别用 border（会撑大外径、
+   把圆心挤偏）。hover 只放大、不改色。
+   用户要求圆点 10px，故基础值取 10（ComfyUI 是 8），hover 按 4→5 同比例到 12。 */
+#app .vue-flow__handle.node-port::before {
+    width: 10px;
+    height: 10px;
+    clip-path: none;
+    background: var(--xcat-slot);
+    box-shadow: inset 0 0 0 1px var(--xcat-slot-rim);
+    transition: width .12s ease, height .12s ease, background .12s ease;
+}
+
+/* ComfyUI 的 highlight 只把半径 4→5（label 才变白），填充色不变；
+   这里同理，hover 仅放大 10→12（另有 :hover 规则在下面统一处理）。 */
+
+#app .vue-flow__handle.node-port:hover::before {
+    width: 12px;
+    height: 12px;
+}
+
+/* 圆点跨在边框上，有一半落在卡片内部，需要压过 .media-stack-card（z-index:10）
+   才不会被卡面盖住；层级仍低于删除（20）/ 缩放（21）/ 操作行（25）。
+   —— 关键：上游圆点是「hover 到 .demo-node 才淡入」，鼠标一移出节点就
+   opacity:0，等于点不到。所以给接头自己开 pointer-events 常驻 + :hover 显示，
+   让 20×20 那块（含框外一半）也能直接触发（不可见时也能命中，进出即显隐）。 */
+#app .vue-flow__handle.node-port {
+    z-index: 15;
+    pointer-events: all;
+    cursor: crosshair;
+}
+
+#app .vue-flow__handle.node-port:hover,
+#app .vue-flow__handle.node-port.is-on {
+    opacity: 1;
+}
+
+#app .vue-flow__handle.node-port:hover .port-hit {
+    pointer-events: all;
+}
+
+/* 上游左右各切一半，这里统一取消（上面已含，单独再写一条更稳） */
+#app .vue-flow__handle-left.node-port::before,
+#app .vue-flow__handle-right.node-port::before {
+    clip-path: none;
+}
+
+/* ==================================================================
+   视频控制条避让 resize 手柄（历史规则，现已由 .xcat-mbar 接管）
+   ------------------------------------------------------------------
+   上游 .vp-bar 现在被 xcat-media-controls.js 隐藏（display:none），
+   视频条改由 .xcat-mbar 自绘。这条规则保留仅作双保险：万一隐藏失效、
+   上游条重新露出，右内边距仍是 36px，不会盖住 .node-resize。
+   新条的避让规则见下方 `.demo-node .xcat-mbar`。
    ================================================================== */
 #app .demo-node .vp-bar {
     padding-right: 36px;
@@ -3172,15 +3433,17 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
    音频波形：替代原生 <audio controls> 进度条
    ------------------------------------------------------------------
    bundle 把两处 <audio controls> 换成空的 .xcat-audio-wave 容器，
-   xcat-audio-wave.js 负责解码峰值、canvas 绘制、点击/拖动 seek 与播放。
-   颜色走 --xw-* 令牌，主题切换时 JS 会重绘；暗色底/灰竖条/蓝播放头
-   照参考图，亮色主题按同一色阶镜像。
+   xcat-audio-wave.js 负责解码峰值、canvas 绘制、拖动播放头 seek 与播放。
+   点波形其它位置不会跳进度；只有 hover 到播放头才出左右箭头 + ew-resize
+   光标，按住左右拉才能改进度。颜色走 --xw-* 令牌，主题切换时 JS 会重绘；
+   暗色底/灰竖条/蓝播放头照参考图，亮色主题按同一色阶镜像。
    ================================================================== */
 :root {
     --xw-bg: #232428;
     --xw-bar: #8b929e;
     --xw-played: #4a9eff;
     --xw-head: #3d9cff;
+    --xw-head-fg: #ffffff;
     --xw-btn-bg: rgba(18, 20, 24, .74);
     --xw-btn-fg: #f2f4f8;
 }
@@ -3190,6 +3453,7 @@ html[data-theme=light] {
     --xw-bar: #6f7684;
     --xw-played: #2f7fe0;
     --xw-head: #2f8fff;
+    --xw-head-fg: #ffffff;
     --xw-btn-bg: rgba(255, 255, 255, .86);
     --xw-btn-fg: #23232b;
 }
@@ -3204,6 +3468,10 @@ html[data-theme=light] {
     background: var(--xw-bg);
     touch-action: none;
     user-select: none;
+    /* 跟随节点：上游 .vue-flow__node.draggable 给的是 grab（一只手），
+       不要在这里写 default，否则音频节点的光标会和视频 / 图片不一致。
+       只有命中播放头时 JS 才 inline 覆盖成 ew-resize。 */
+    cursor: inherit;
 }
 
 .xcat-audio-wave .xcat-wave-canvas {
@@ -3263,21 +3531,29 @@ html[data-theme=light] {
 
 
 /* ==================================================================
-   媒体控制条补强：音频波形底部 + 音量滑块
+   媒体控制条（视频 / 音频共用一套自绘，零上游依赖）
    ------------------------------------------------------------------
-   .xcat-aw-bar 外壳照抄上游 .vp-bar（黑渐变 / 8px gap / 7-8px 内边距），
-   但内部按钮、时间、进度条不在这里抄样式：xcat-media-controls.js 直接给
-   它们 .vp-btn / .vp-time / .vp-seek + data-v-5b5d8e84，让上游 scoped
-   规则原样命中。这样音频条与视频条逐像素一致（不会再出现 18px vs 14px
-   图标、0px spacer vs 222.7px 进度线这类偏差）。波形本体、蓝色播放头、
-   点击拖动 seek 全部保留不变。右侧 36px 留白让开 .node-resize。
+   上一版直接复用上游 .vp-bar / .vp-btn / .vp-time / .vp-seek + scoped 属性，
+   排查「时间右侧三个蓝点 / 每秒抖一下」时一直被那套东西干扰：
+     · 原生 input[type=range] 的 thumb 内缩 4.5px、位置按整像素吸附；
+     · 进度是 background 渐变百分比，222px 的条上每秒只走 1.55px，
+       只能整像素跳；时间串宽度随数字变化还会挤动右边元素。
+   这一版全部自有 class + 自绘进度条：
+     · 进度用 transform: scaleX / translate3d 驱动（亚像素、走合成层，
+       不触发布局）；
+     · 时间拆成「当前 / 分隔 / 总长」三段固定宽度，秒数进位不改变总宽；
+     · 不用任何原生表单控件，没有 ::-webkit-slider-thumb 的内缩与吸整像素。
+   视频节点同样换掉了上游 .vp-bar（那条被 JS 隐藏，新建 .xcat-vbar），
+   两种条共用 .xcat-mbar 的几何：gap 8 / padding 7 10 8 / 按钮 20 /
+   时间 10px / 进度 3px + 9px 圆点 / 音量条 60px。
    ================================================================== */
 /* 原来的左下角小播放按钮由控制条里的按钮取代 */
 .xcat-audio-wave .xcat-wave-play {
     display: none;
 }
 
-.xcat-aw-bar {
+/* 音频条 .xcat-aw-bar 与视频条 .xcat-vbar 共用这一套几何与配色 */
+.xcat-mbar {
     position: absolute;
     left: 0;
     right: 0;
@@ -3286,52 +3562,477 @@ html[data-theme=light] {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 36px 8px 10px;
+    padding: 7px 10px 8px;
     background: linear-gradient(transparent, #000000c7 45%);
     color: #f2f2f2;
     touch-action: none;
     user-select: none;
 }
 
-/* 音量滑块：与 .vp-seek 同一套视觉，填充比例走 --vol */
-.xcat-vol {
+/* 节点里右下角有 .node-resize 手柄（right 4 / bottom 4 / 22×22 / z-index 21），
+   控制条右内边距给 36px 让开它；大预览里没有手柄，用上面的 10px。 */
+.demo-node .xcat-mbar {
+    padding-right: 36px;
+}
+
+/* 按钮：与上游 .vp-btn 同尺寸同色 */
+.xaw-btn {
     flex: 0 0 auto;
-    width: 60px;
-    height: 3px;
-    margin: 0;
-    border-radius: 2px;
-    outline: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #f2f2f2;
     cursor: pointer;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background: linear-gradient(to right,
-        var(--accent-yellow) 0,
-        var(--accent-yellow) var(--vol, 100%),
-        rgba(255, 255, 255, .32) var(--vol, 100%),
-        rgba(255, 255, 255, .32) 100%);
 }
 
-.xcat-vol::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
+.xaw-btn:hover {
+    color: var(--accent-yellow);
+}
+
+.xaw-btn svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+}
+
+/* 时间：三段各自定宽，进位时总宽不变。overflow 必须 visible，
+   否则一旦被压窄浏览器就会画省略号（就是那三个点）。 */
+.xaw-time {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    line-height: 1;
+    color: #e6e6e6;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: visible;
+}
+
+.xaw-time b {
+    display: inline-block;
+    min-width: 22px;
+    font-weight: 400;
+    text-align: right;
+}
+
+.xaw-time b:last-child {
+    text-align: left;
+}
+
+.xaw-time i {
+    width: 9px;
+    font-style: normal;
+    text-align: center;
+    opacity: .7;
+}
+
+/* 自绘滑块：轨道左右各留 4.5px，让 9px 的圆点在 0% / 100% 时不越界 */
+.xaw-seek,
+.xaw-vol {
+    position: relative;
+    flex: 0 0 auto;
+    height: 14px;
+    cursor: pointer;
+    outline: none;
+}
+
+.xaw-seek {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.xaw-vol {
+    width: 60px;
+}
+
+.xaw-seek-track,
+.xaw-vol-track,
+.xaw-seek-fill,
+.xaw-vol-fill {
+    position: absolute;
+    top: 50%;
+    left: 4.5px;
+    right: 4.5px;
+    height: 3px;
+    margin-top: -1.5px;
+    border-radius: 2px;
+    pointer-events: none;
+}
+
+.xaw-seek-track,
+.xaw-vol-track {
+    background: rgba(255, 255, 255, .32);
+}
+
+.xaw-seek-fill,
+.xaw-vol-fill {
+    background: var(--accent-yellow);
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+    will-change: transform;
+}
+
+.xaw-seek-thumb,
+.xaw-vol-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0;
     width: 9px;
     height: 9px;
-    border: 0;
+    margin-top: -4.5px;
     border-radius: 50%;
     background: var(--accent-yellow);
+    transform: translate3d(0, 0, 0);
+    pointer-events: none;
+    will-change: transform;
 }
 
-.xcat-vol::-moz-range-thumb {
-    width: 9px;
-    height: 9px;
+.xaw-seek:focus-visible .xaw-seek-thumb,
+.xaw-vol:focus-visible .xaw-vol-thumb {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, .28);
+}
+
+/* 视频条原来的原生 <input type=range> 音量滑块已随整条换掉，
+   .xcat-vol 相关规则删除（新版音量条走 .xaw-vol 自绘滑块）。 */
+
+
+
+
+
+/* ==================================================================
+   节点名称（左上角）+ 上方操作按钮改成一行
+   ------------------------------------------------------------------
+   名称由 xcat-node-names.js 从 Vue Flow store 注入；标签 pointer-events:none，
+   叠在媒体上但不会拦拖拽 / 连线 / 卡片点击。深色半透明底在亮暗主题和
+   任意素材上都可读。z-index 必须 > 10：上游 .media-stack-card.is-active
+   是 z-index:10，空节点没有这层，所以低层级时「只有空节点看得到名称」。
+   这里取 30，同时高于 node-ring(12) / delete(20) / resize(21) / actions(25)，
+   但它们都在右上角或节点上方，与左上角标签不重叠。
+   上游 .node-actions 把 6 枚 .fan-btn 用 inline style 排成扇形
+   （left -120…120 / top -28…-48 / 尺寸 30…38，中间高两边低）。
+   改成节点正上方的一条水平工具行：容器通宽 flex 居中，按钮统一
+   32×32 / 图标 16px。inline 的 left / top / width / height / transform
+   只能用 !important 压过。删除节点由 xcat-node-actionbar.js 注入成第
+   7 枚按钮，右上角原来那枚 .node-delete 隐藏但保留在 DOM（点击事件
+   仍转发给它，删除逻辑完全走上游）。
+   ================================================================== */
+#app .demo-node .xcat-node-name {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 30;
+    display: block;
+    box-sizing: border-box;
+    height: 22px;
+    max-width: calc(100% - 76px);
+    padding: 0 8px;
+    border-radius: 6px;
+    background: rgba(12, 14, 18, .62);
+    color: #fff;
+    font-size: 12px;
+    line-height: 22px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    user-select: none;
+    backdrop-filter: blur(4px);
+}
+
+#app .demo-node .node-actions {
+    left: 0 !important;
+    top: auto !important;
+    bottom: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-sizing: border-box;
+    padding: 0 0 8px;
+    pointer-events: none;
+    transform: translateY(4px);
+}
+
+#app .demo-node .node-actions.is-open {
+    opacity: 1;
+    transform: none;
+}
+
+#app .demo-node .node-actions .fan-btn {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    width: 32px !important;
+    height: 32px !important;
+    transform: none !important;
+    flex: 0 0 32px;
+    box-sizing: border-box;
+}
+
+#app .demo-node .node-actions .fan-btn svg {
+    width: 16px !important;
+    height: 16px !important;
+    flex: 0 0 16px;
+}
+
+/* 删除节点：并入上方操作行末尾，右上角那枚隐藏但保留 DOM（点击转发） */
+#app .demo-node > .node-delete {
+    display: none !important;
+}
+
+/* 删除按钮不跟着上游用红色：hover 只提亮到高亮色（暗色白 / 亮色近黑） */
+#app .demo-node .node-actions .xcat-act-delete:hover {
+    border-color: var(--xcat-link-hot);
+    background: color-mix(in srgb, var(--xcat-link-hot) 12%, transparent);
+    color: var(--xcat-link-hot);
+}
+
+/* ==================================================================
+   素材节点 vs 生成节点（2026-11-12）
+   拖入文件建出来的节点不再挂默认工作流，面板里也就没有提示词 /
+   参数 / 运行；此时面板只剩那条素材条，宽度必须跟着内容收缩，
+   否则会留一条 700px 宽的空壳。
+   ------------------------------------------------------------------ */
+/* 素材节点（面板里没有提示词块）：整个面板不显示。
+   素材本身已经铺在节点上了，下面再挂一条缩略图带是多余的（用户明确要求去掉）。 */
+#app .flow-wrap .node-panel:not(:has(.panel-prompt)) {
+    display: none;
+}
+
+
+/* ------------------------------------------------------------------------
+ * 左栏「新建节点」六选一菜单（xcat-new-node.js）
+ * 挂在 #app 内以继承 --cg-* 令牌；层级高于左栏与工具条。
+ * ------------------------------------------------------------------------ */
+.xcat-nodemenu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 172px;
+    padding: 6px;
+    border: 1px solid var(--cg-line);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.xcat-nodemenu-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 8px 3px;
+}
+
+.xcat-nodemenu-title {
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.xcat-nodemenu-hint {
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+
+.xcat-nodemenu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
     border: 0;
-    border-radius: 50%;
-    background: var(--accent-yellow);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
 }
 
-/* 大预览里没有 resize 手柄，右侧不用额外让位 */
-.xcat-audio-wave.is-preview .xcat-aw-bar {
-    padding-right: 10px;
+.xcat-nodemenu-item:hover {
+    background: var(--cg-accent);
+}
+
+.xcat-nodemenu-item svg {
+    flex: 0 0 auto;
+    opacity: 0.85;
+}
+
+.xcat-nodemenu-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--cg-line);
+}
+
+.xcat-new-tab.is-open .xcat-tab-label {
+    color: var(--cg-fg);
+}
+
+
+/* ------------------------------------------------------------------------
+ * 画布空白处双击 → 节点类型面板（xcat-new-node.js 的 .is-canvas 变体）
+ * 贴鼠标弹出，两列卡片；比左栏下拉更宽、底色抬一层（--cg-secondary）。
+ * ------------------------------------------------------------------------ */
+.xcat-nodemenu.is-canvas {
+    min-width: 304px;
+    padding: 8px;
+    border-color: var(--cg-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--cg-secondary) 88%, #ffffff 12%);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 40%), 0 2px 8px rgb(0 0 0 / 24%);
+    animation: xcat-nodemenu-in 120ms ease-out;
+}
+
+/* 亮色下 --cg-secondary 比画布更深，混黑会显得凹陷；改成混白抬成白卡片 */
+html[data-theme="light"] .xcat-nodemenu.is-canvas {
+    background: color-mix(in srgb, var(--cg-secondary) 40%, var(--cg-input) 60%);
+}
+
+@keyframes xcat-nodemenu-in {
+    from { opacity: 0; transform: translateY(-2px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+.xcat-nodemenu-cap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 6px 7px;
+}
+
+.xcat-nodemenu-caption {
+    color: var(--cg-fg);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.xcat-nodemenu-key {
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-head {
+    padding: 4px 6px 6px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-title {
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-hint {
+    color: var(--cg-muted-fg);
+    opacity: 0.75;
+}
+
+.xcat-nodemenu-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-item {
+    padding: 9px 8px;
+    border-radius: 8px;
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-item:hover {
+    background: var(--cg-accent);
+}
+
+.xcat-nodemenu.is-canvas .xcat-nodemenu-sep {
+    margin: 6px 4px;
+}
+
+
+/* ------------------------------------------------------------------------
+ * 素材节点没有左侧输入端口（2026-11-13 01:30）
+ * 不能把 handle 从 DOM 里删掉：Vue Flow 靠 handle 的 bounding box 算连线终点，
+ * 删了之后原有连线的末端会退到节点左上角（悬空）。这里保留 DOM，
+ * 只做视觉隐藏 + 禁止拖入（pointer-events），几何计算不受影响。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .node-port.xcat-port-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#app .flow-wrap .node-port.xcat-port-hidden .port-hit {
+    pointer-events: none;
+}
+
+/* ------------------------------------------------------------------------
+ * 素材文本节点（asset-text，2026-11-13）
+ * 默认状态：textarea 不接收鼠标（pointer-events:none），所以整块节点的行为
+ * 和图片/视频节点一致——hover 是 grab，按住可以拖动，单击选中。
+ * 双击节点 .demo-node.xcat-text-editing 后 textarea 才接管鼠标，进入编辑。
+ * 编辑态的进入/退出由 assets/xcat-text-edit.js 负责。
+ * ------------------------------------------------------------------------ */
+#app .flow-wrap .xcat-text-wrap {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#app .flow-wrap .xcat-text-area {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 12px;
+    outline: none;
+    background: transparent;
+    color: var(--c-text);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.65;
+    resize: none;
+    scrollbar-width: auto;
+    pointer-events: none;
+    cursor: inherit;
+    user-select: none;
+    caret-color: transparent;
+}
+
+/* 编辑态：接管鼠标，恢复文本光标与选区 */
+#app .flow-wrap .demo-node.xcat-text-editing .xcat-text-area {
+    pointer-events: auto;
+    cursor: text;
+    user-select: text;
+    caret-color: auto;
+}
+
+#app .flow-wrap .xcat-text-area::placeholder {
+    color: color-mix(in srgb, var(--c-text) 38%, transparent);
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar-button {
+    display: none;
+}
+
+#app .flow-wrap .xcat-text-area::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--cg-scroll, var(--cg-line));
+    background-clip: padding-box;
+}
+
+/* 文本节点不显示左上角名称胶囊：文本本身就是内容，胶囊会压住第一行字。 */
+#app .demo-node:has(.xcat-text-wrap) > .xcat-node-name {
+    display: none;
 }
