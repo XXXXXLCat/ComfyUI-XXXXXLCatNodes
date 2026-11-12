@@ -3154,6 +3154,44 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
 }
 
 /* ==================================================================
+   节点连接点：10px 圆点，圆心距节点侧边 10px
+   ------------------------------------------------------------------
+   上游 .node-port 是 20×20 的透明定位盒（left:0 / right:0 + translate(±50%)，
+   圆心正好压在节点边缘），可见部分由 ::before 画 20px 圆再用 clip-path 切掉
+   一半 —— 所以是「半个圆饼贴着侧边」。
+   这里定位盒尺寸不动（Vue Flow 拿它量连线端点，改尺寸会影响吸附与命中），
+   只把 left / right 从 0 挪到 10px：盒子仍在节点内 0~20px，圆心落在 10px 处；
+   ::before 缩到 10px 并清掉 clip-path，变成完整小圆点，横向占 5~15px。
+   Vue Flow 用 handle 的 DOM 矩形算 edge 端点，圆心内移后连线端点自动跟随。
+   ================================================================== */
+#app .vue-flow__handle.node-port.vue-flow__handle-left {
+    left: 10px;
+}
+
+#app .vue-flow__handle.node-port.vue-flow__handle-right {
+    right: 10px;
+}
+
+#app .vue-flow__handle.node-port::before {
+    width: 10px;
+    height: 10px;
+    clip-path: none;
+}
+
+/* 圆心内移后圆点落在节点内部，会被 .media-stack-card（z-index:10）盖住 ——
+   上游的半个圆饼在节点外面，所以从来不需要层级。这里给接头 15：
+   高于媒体（10），低于删除按钮（20）/ 缩放（21）/ 操作行（25）/ 名称（30）。 */
+#app .vue-flow__handle.node-port {
+    z-index: 15;
+}
+
+/* 上游左右各切一半，这里统一取消（上面已含，单独再写一条更稳） */
+#app .vue-flow__handle-left.node-port::before,
+#app .vue-flow__handle-right.node-port::before {
+    clip-path: none;
+}
+
+/* ==================================================================
    视频控制条避让 resize 手柄（历史规则，现已由 .xcat-mbar 接管）
    ------------------------------------------------------------------
    上游 .vp-bar 现在被 xcat-media-controls.js 隐藏（display:none），
