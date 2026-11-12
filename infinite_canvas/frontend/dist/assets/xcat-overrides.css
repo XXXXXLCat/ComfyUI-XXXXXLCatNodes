@@ -3151,3 +3151,18 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
     background: transparent !important;
     color: var(--c-text);
 }
+
+/* ==================================================================
+   视频控制条避让 resize 手柄
+   ------------------------------------------------------------------
+   .vp-bar 是通宽的底部控制条（padding:7px 10px 8px），最右侧是静音按钮；
+   .node-resize 固定在 right:4px / bottom:4px、22×22、z-index:21。
+   内容铺满节点后两者压在同一个角上，实测重叠 16×18px，且 resize 盖在
+   静音按钮上（elementFromPoint 命中 resize 的 svg），音量根本点不到。
+   把控制条右内边距加到 36px：静音按钮与进度条右端一起左移，右下角
+   26px 让给 resize，二者之间还留 10px 间隙。只影响视频控制条，
+   图片 / 音频 / 空节点不受影响。
+   ================================================================== */
+#app .demo-node .vp-bar {
+    padding-right: 36px;
+}

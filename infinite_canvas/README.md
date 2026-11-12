@@ -710,6 +710,13 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
   留出的空白。**不要给卡片或节点加黑底**，否则空节点和音频节点也会整块变黑。
   只改节点内的 `img`：素材条 `.strip-item img`、悬停预览 `.preview-bubble img`
   仍按缩略图语义保留 `cover`。
+- **视频控制条避让 resize**：`.vp-bar` 通宽贴底（`padding:7px 10px 8px`），最右侧是
+  静音按钮；`.node-resize` 固定在 `right:4px / bottom:4px`、22×22、`z-index:21`。
+  内容铺满后两者压在同一个角上，实测重叠 **16×18px**，`elementFromPoint` 在音量按钮
+  中心命中的是 resize 的 svg，音量根本点不到。给 `.vp-bar` 加 `padding-right:36px`
+  （独立幂等标记「视频控制条避让 resize 手柄」）：静音按钮与 `.vp-seek` 右端一起左移，
+  右下角 26px 让给 resize，二者之间还留 10px 间隙。**没有移动 resize 的位置**（仍是
+  右下角、拖动语义不变），也没有改 JS；图片 / 音频 / 空节点不受影响。
 - 副作用：卡片 100% 宽后，非活动素材卡完全被活动卡盖住，左右「露头」的堆叠效果消失，
   多素材仍靠底部 `.media-dots` 与悬浮工具条切换。
 
@@ -732,6 +739,11 @@ input/output 分段从 `.am-bar` 移到 `.am-side` 首项、删掉左栏折叠�
 （左右各 152px）；真实拖动 resize 到 574×316 后显示 574×191（上下各 62px），
 `object-fit=contain`、背景 `rgb(0,0,0)`，截图采样黑边像素为纯 `#000`，
 左右黄色/绿色边缘标记均完整可见（不再裁切）；亮色主题下空节点与音频节点仍是白底。
+音量 / resize 分离另测：修复前重叠 16×18px，修复后 `overlap=false`，
+`elementFromPoint` 命中 `.vp-btn` 内的 path；真实点击静音按钮 title 由「静音」变
+「取消静音」且 `video.muted=true`；resize 自由拖 `454×226 → 515×269`、
+开吸附 → `550×290`（10 的倍数）；多素材 `.media-dots` 与 resize 同样不重叠；
+暗 / 亮主题、图片 `contain`、音频控件 430px 宽、空节点 100%×100%、控制台无报错均通过。
 
 把 ComfyUI 变成一块「无限画布」：每个节点绑定一条工作流，在画布上直接跑图、出视频，产出的素材还能拖到下一个节点继续用。
 
