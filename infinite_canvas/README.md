@@ -71,18 +71,21 @@
     `grid-template-columns: 224px / 1fr / 288px`，`.am-body` 用 `display:contents`
     把三栏提成网格项，`.am-bar` 只占中列第一行；`.float-window` 改 flex 列让内容区
     吃满「弹窗高 − 72px」（原来 `.am` 只有 330px，可用 448px）；搜索框用 `order`
-    从动作组末尾提到最左。详见下节「三个弹窗的内容区」。
-18. **input / output 换成切换按钮、移到弹窗标题栏（「资产管理」右侧）、去掉左栏折叠按钮**：
-    分段本来挤在中列工具条最左，后来挪进左栏，最终按需求放回**标题栏**，紧跟
-    「资产管理」之后。样式三次迭代：官方 `Tabs`（两个透明底文字，暗面 active 的
+    从动作组末尾提到最左。**2026-11-12 又按用户给的参考图把整条工具带搬成通栏顶栏
+    （左栏色块满铺、标题压在上面），搜索 / 刷新 / 批量管理全部上顶栏，详见第 26 条。**
+18. **input / output 换成切换按钮、去掉左栏折叠按钮**：
+    分段本来挤在中列工具条最左，后来挪进左栏，最终按需求放**标题栏**（第 26 条改成
+    顶栏里、左栏色块外的网格左缘）。
+    样式三次迭代：官方 `Tabs`（两个透明底文字，暗面 active 的
     `bg-secondary` 压在 `--background` 上几乎同色，看上去就是标题右边多了两个灰字）
     → 官方 ToggleGroup 方角货 → **胶囊切换按钮**（用户给参考图定稿）：一条
     `--cg-input`(#313235) 全圆角槽（`padding:2px / gap:2px`，28px 高），槽内
     选中的那块是 `--cg-bg`(#171718) 胶囊 + 前景字，未选中只有 `--cg-muted-fg`
     灰字；亮面槽 `--cg-muted`(#d9d9d9)、选中块回到 `--cg-bg`(#f3f3f3)。
     DOM 上它仍挂在 `.am-side` 里（vnode 不再动），靠
-    `.am-side{position:static}` + `position:absolute; top:-50px; left:100px`
-    浮回标题栏，因此 `.float-body` 与 `.am-side` 都要放开 `overflow`。
+    `.am-side{position:static}` + `position:absolute; top:26px; left:248px`
+    （= (80−28)/2 与 224+24）浮在顶栏、网格左缘对齐处，因此 `.float-body`
+    与 `.am-side` 都要放开 `overflow`。
     折叠按钮 `.am-side-toggle` 整段删除，随之清掉 `.am:has(.am-side.is-collapsed)`
     与 `.am-side.is-collapsed` 三条样式。vnode 结构那一轮改过（`bde91b6e` →
     `f914d6cf`），此后的位置 / 样式调整都是纯 CSS。
@@ -161,6 +164,37 @@
     列表高度由 601 → 592（线 1px + 上间距 8px 从列表让出），卡片 rect 不变
     327×112 @ (73,703)，只是整体下移 9px；对比图
     `.workbuddy/tmp/patch/compose_line_compare.png`（暗/亮 × 前/后）。
+
+26. **资产管理改成参考图的「满铺左栏 + 通栏顶栏」**（纯 CSS，用户给参考图）：
+
+    - **左栏色块满铺**：`.float-window:has(.am) .float-body{position:absolute;inset:0}`
+      把内容区顶到窗口顶边（原来排在 72px 高的标题栏下面，左栏色块上沿露出一条
+      `--background`）；`.am` 行改 `80px minmax(0,1fr)`，`.am-side` 仍跨
+      `1/1/3/2` → 色块从窗口顶铺到底。左栏 `padding-top:92`（= 顶栏 80 + 12），
+      分类列表与网格第一行卡片同基线（实测都在 y=188）。
+    - **标题压到色块上**：`.float-head` 改绝对定位浮层（`inset:0 0 auto 0`、
+      高 80、`pointer-events:none`、`z-index:4`），`.float-title` 左 24 / 垂直居中，
+      `.float-close` 右 16 / top 24 / 32×32。
+    - **刷新 / 批量管理 / 搜索上顶栏**：`.am-bar` 从「中列第一行」改成
+      `grid-area:1/2/2/4`（跨中栏+右栏，因为搜索框要伸到右栏上方），
+      `padding:0 64px 0 24px`、`gap:8`；`.am-search` 改用 `margin-left:auto`
+      靠右 + `flex:0 1 464px`，`.am-btn` 跟在后面，关闭按钮在最右。
+    - **删掉「N / N 个素材」计数**：`.am-bar .am-total{display:none}`。
+    - **删掉「文件类型」小标题**：`.am-side-title{display:none}`。
+    - **input / output 移出色块**：`.am-side > .am-tabs` 从 `top:-50/left:100`
+      改 `top:26px / left:248px` —— 槽左缘正好压在网格第一张卡的左缘上
+      （实测槽 x=324、卡片 x=324）。
+    - **右栏让出顶栏**：`.am-right` 由 `1/3/3/4` 改 `2/3/3/4`，否则它把顶栏
+      右半条整个盖住（现象很坑：「刷新 / 批量管理」`getBoundingClientRect` 明明
+      有值、`visibility:visible`，截图里就是不显示）；底色同时改 `transparent`，
+      与中栏同底（参考图右栏没有独立色块）。
+    - 列表项 `.am-cat` 行高 1.2 → 1.4（项高 41 → 44）、圆角 6 → 8；网格
+      `padding:12px 24px 24px`（顶部 12 与左栏分类同一基线，底部 40 → 24）。
+    - 实测（1500×950）：`side[76,96,224,758]`（窗口 95→855，满铺）、
+      `bar[300,96,1124,80]`、`search[760,118,464,36]`、
+      刷新 `[1232,120,48,32]`、批量管理 `[1288,120,72,32]`、关闭 `[1376,120,32,32]`；
+      批量管理模式下 5 个按钮（全选 / 删除 / 下载 / 刷新 / 退出管理）也放得下，
+      搜索框自动收缩；1280×800 窗口不换行、不重叠。
 
 改动集中在三个文件：
 
@@ -497,18 +531,18 @@ ComfyUI 语义色。
 
 | 项 | ComfyUI 真值（出处） | 本包 |
 | --- | --- | --- |
-| 弹窗骨架 | `BaseModalLayout` 是三列 grid：`nav`（通高）/ 中列（header + contentFilter + content）/ 右栏 `#rightPanel`（通高） | `.am` 改 `grid-template-columns: 224px / 1fr / 352px`，`.am-body` 用 `display:contents` 把三块提成网格项；`.am-bar` 只占中列第一行 |
-| 内容区高度 | 弹窗 `h-[80vh]`，内容区吃满「减去 72px 标题栏」的剩余高度 | `.float-window` 改 flex 列、`.float-body` `flex:1 1 auto`；上游是 block，内层 `height:100%` 因此退化成内容高（实测弹窗 520 只用了 330，底部空一块） |
-| 内容容器 | `px-6 pb-10`，自身滚动（`BaseModalLayout.contentContainerClass`） | `.float-body` 改 `padding:0`、`overflow:visible`（内容区不滚，滚动下放到各面板；`visible` 是为了让标题栏里的分段浮出来不被裁），并显式 `scrollbar-gutter:auto` |
-| 过滤条 | 模板 `px-6 pb-4`；资产 `px-6 pt-2 pb-6`（`AssetFilterBar.vue`），**只在中列** | `.cm-bar` 高 32px、无内边距（由 `.cm` 的 24px 管）；`.am-bar` = `padding:8px 24px 16px`（顶部 8px 让搜索框与左栏分类标题同高） |
+| 弹窗骨架 | `BaseModalLayout` 是三列 grid：`nav`（通高）/ 中列（header + contentFilter + content）/ 右栏 `#rightPanel`（通高） | `.am` 改 `grid-template-columns: 224px / 1fr / 352px`，`.am-body` 用 `display:contents` 把三块提成网格项；第 26 条起：行改 `80px / 1fr`，`.am-bar` 跨 `1/2/2/4`（通栏顶栏），`.am-side` 跨两行满铺，`.am-right` 只占第 2 行 |
+| 内容区高度 | 弹窗 `h-[80vh]`，内容区吃满「减去 72px 标题栏」的剩余高度 | 第 26 条起 `.float-window:has(.am) .float-body` 改 `position:absolute; inset:0`（内容区顶到窗口顶边，标题栏变绝对定位浮层），`.am` 仍 `height:100%` |
+| 内容容器 | `px-6 pb-10`，自身滚动（`BaseModalLayout.contentContainerClass`） | `.float-body` 改 `padding:0`、`overflow:visible`（内容区不滚，滚动下放到各面板；`visible` 是为了让浮出的分段 / 标题栏不被裁），并显式 `scrollbar-gutter:auto` |
+| 过滤条 | 模板 `px-6 pb-4`；资产 `px-6 pt-2 pb-6`（`AssetFilterBar.vue`），**只在中列** | `.cm-bar` 高 32px、无内边距（由 `.cm` 的 24px 管）；`.am-bar` = `padding:0 64px 0 24px`、高 80（顶栏，右 64 给关闭按钮让位） |
 | 按钮 | `size="md"`：`h-8 rounded-lg text-xs`（`button.variants.ts`） | 32px / 8px / 12px；`secondary` 底 = `--secondary`，hover `--accent` |
 | 选中态 | `variant="inverted"`：`bg-foreground text-background` | 前景色实底 + 反色字（亮面即黑底白字） |
 | 危险动作 | `destructive-textonly`：透明底 + `--destructive`（coral-700 `#b33a3a`） | 同 |
-| 输入 / 搜索 | `SearchInput` `h-9` + `border-border/50` + 透明底，在 header **最左**、`flex-1 max-w-lg` | 36px / 8px 圆角 / `--cg-line`；用 `order` 从动作组提到最左 |
-| 左栏 | `LeftSidePanel`：`w=14rem(224px)`、`bg-card`、`px-3`，**通高** | `.am-side` 190 → 224px、`--secondary` 底、无右边框、`grid-area: 1/1/3/2`；只剩「文件类型 + 分类列表」，列表自滚 |
-| 切换按钮（input / output） | 官方 `ToggleGroup`（`toggleGroup.variants.ts` + `WidgetToggleSwitch.vue`，带标签布尔控件）的内核，圆角改胶囊 | 胶囊槽 `--cg-input`(#313235) + `padding/gap:2px`、28px 高；选中块 `--cg-bg`(#171718) 圆角 999px + 前景字（12px）、未选中透明 + `--cg-muted-fg`；亮面槽 `--cg-muted`(#d9d9d9)、选中块 `--cg-bg`(#f3f3f3)。放在**弹窗标题栏**「资产管理」右侧（`.am-side > .am-tabs` 绝对定位 `top:-50px / left:100px`，与标题间距 12px、与 header 垂直居中） |
-| 导航项 | `NavItem.vue`：`px-4 py-3 text-sm rounded-md`，active `bg-muted` / hover `bg-accent` | 12/16 / 14px / 6px |
-| 右面板 | `BaseModalLayout` `w-72`(288px)，**通高** | `.am-right` 340 → **352px**（放大预览）、`grid-area: 1/3/3/4`、无左边框 |
+| 输入 / 搜索 | `SearchInput` `h-9` + `border-border/50` + 透明底，在 header **最左**、`flex-1 max-w-lg` | 36px / 8px 圆角 / `--cg-line`；第 26 条起 `margin-left:auto` 靠右、`flex:0 1 464px`，右侧接刷新 / 批量管理 / 关闭 |
+| 左栏 | `LeftSidePanel`：`w=14rem(224px)`、`bg-card`、`px-3`，**通高** | `.am-side` 190 → 224px、`--secondary` 底、无右边框、`grid-area: 1/1/3/2`（从窗口顶铺到底）；「文件类型」小标题已隐藏（`.am-side-title{display:none}`），只剩分类列表，`padding-top:92` 与网格第一行同基线 |
+| 切换按钮（input / output） | 官方 `ToggleGroup`（`toggleGroup.variants.ts` + `WidgetToggleSwitch.vue`，带标签布尔控件）的内核，圆角改胶囊 | 胶囊槽 `--cg-input`(#313235) + `padding/gap:2px`、28px 高；选中块 `--cg-bg`(#171718) 圆角 999px + 前景字（12px）、未选中透明 + `--cg-muted-fg`；亮面槽 `--cg-muted`(#d9d9d9)、选中块 `--cg-bg`(#f3f3f3)。第 26 条起在**顶栏、左栏色块的右外侧**（`.am-side > .am-tabs` 绝对定位 `top:26px / left:248px`），左缘与网格第一张卡对齐 |
+| 导航项 | `NavItem.vue`：`px-4 py-3 text-sm rounded-md`，active `bg-muted` / hover `bg-accent` | 12/16 / 14px / 行高 1.4（项高 44）/ 圆角 8px |
+| 右面板 | `BaseModalLayout` `w-72`(288px)，**通高** | `.am-right` 340 → **352px**、`grid-area: 2/3/3/4`（让出顶栏）、无左边框、底色 `transparent`（与中栏同底） |
 | 卡片网格 | `AssetGrid`：`minmax(15rem,1fr)` + `gap-4`；媒体网格 `minmax(min(240px,30vw),1fr)` + `gap-2` | `.cm-list` 15rem/16px；`.am-grid` `min(160px,25vw)`/8px（官方 240 → 收到 160，中列 4 列、每格约 185px，缩略图更小） |
 | 预览区 | `AssetPreview`：媒体按容器等比、可长可方 | `.am-preview-body` 锁 `aspect-ratio:1/1`，`width:min(100%,46vh)` → 352 栏宽下 **328×328**（原 256），高度不再跟 58% 分比走，剩余高度给提示词区；亮面补 1px `--cg-line` 勾边 |
 | 卡片 | 模板卡 `rounded-lg p-2` + hover `bg-secondary/50`；`AssetCard` `rounded-2xl p-2`；`MediaAssetCard` `rounded-lg p-2` | `.cm-card` 8px/8px；`.am-cell` 8px |

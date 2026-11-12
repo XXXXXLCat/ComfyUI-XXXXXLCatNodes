@@ -1592,16 +1592,17 @@ html[data-theme="light"] #app .canvas-tabbar {
 }
 
 /* ------------------------------------------------------ 资产管理（am） */
-/* 结构与官方 AssetBrowserModal 一一对应：
-     .am-bar   ↔ #contentFilter（px-6 pb-4）
-     .am-side  ↔ LeftSidePanel（14rem / bg-card / px-3 / NavItem）
+/* 布局：一条通栏顶栏（标题 / input·output / 搜索 / 刷新·批量管理 / 关闭），
+   左栏色块从窗口顶边满铺到底，中栏网格、右栏详情各占一列。
+     .am-bar   ↔ 顶部工具带（跨第 2、3 列）
+     .am-side  ↔ LeftSidePanel（14rem / bg-card / 跨两行满铺）
      .am-grid  ↔ AssetGrid（minmax 15rem / gap 16px）
-     .am-right ↔ #rightPanel（w-72 = 288px） */
+     .am-right ↔ #rightPanel（352px） */
 #app .float-window .am {
     box-sizing: border-box;
     display: grid;
     grid-template-columns: 224px minmax(0, 1fr) 352px;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: 80px minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -1611,35 +1612,77 @@ html[data-theme="light"] #app .canvas-tabbar {
     display: contents;
 }
 
-#app .float-window .am-bar {
-    grid-area: 1 / 2 / 2 / 3;
+/* 内容区顶到窗口顶边：原来它排在 72px 高的弹窗标题栏下面，左栏色块顶部
+   因此露出一条 --background。标题栏改成绝对定位浮层（见下），不再占位。 */
+#app .float-window:has(.am) .float-body {
+    position: absolute;
+    inset: 0;
+}
+
+#app .float-window:has(.am) .float-head {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 80px;
+    padding: 0;
+    border-bottom: 0;
+    pointer-events: none;
+    z-index: 4;
+}
+
+/* 标题压在左栏色块上，左缘 24 = 分类列表的左缘 */
+#app .float-window:has(.am) .float-title {
+    position: absolute;
+    left: 24px;
+    top: 0;
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 8px 24px 16px;
+    height: 80px;
+    pointer-events: auto;
+}
+
+/* 关闭按钮浮到顶栏最右端，「批量管理」右侧 */
+#app .float-window:has(.am) .float-close {
+    position: absolute;
+    right: 16px;
+    top: 24px;
+    width: 32px;
+    height: 32px;
+    pointer-events: auto;
+}
+
+/* 顶部工具带：跨中栏 + 右栏（参考图搜索框一直伸到右栏上方）。
+   右内边距 64 = 关闭按钮 32 + 右外边距 16 + 间距 16。 */
+#app .float-window .am-bar {
+    grid-area: 1 / 2 / 2 / 4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 64px 0 24px;
     border-bottom: 0;
 }
 
-/* 搜索框从「动作组末尾」提到最左：官方 SearchInput 在中列 header 最左、
-   flex-1 max-w-lg，动作（上传）在最右；上游把搜索塞在刷新/删除后面。
-   用 display:contents 拆掉动作组 + order 重排，DOM 不动。 */
+/* 搜索框 / 刷新 / 批量管理原先挤在网格上方那条 60px 带里，现在整条搬到顶栏：
+   搜索框靠右（margin-left:auto），后接刷新 / 批量管理，关闭在最右。
+   上游把搜索塞在动作组末尾，用 display:contents 拆组 + order 重排，DOM 不动。
+   「N / N 个素材」计数不显示（参考图没有）。 */
 #app .float-window .am-actions {
     display: contents;
 }
 
 #app .float-window .am-bar .am-search {
-    order: 1;
-    flex: 1 1 240px;
+    order: 2;
+    flex: 0 1 464px;
     width: auto;
     max-width: 512px;
+    margin-left: auto;
 }
 
 #app .float-window .am-bar .am-total {
-    order: 3;
+    display: none;
 }
 
 #app .float-window .am-bar .am-btn {
-    order: 4;
+    order: 3;
 }
 
 /* input / output = 切换按钮（segmented toggle）：一条全圆角的浅色「槽」，
@@ -1762,10 +1805,10 @@ html[data-theme="light"] #app .canvas-tabbar {
 }
 
 /* 左栏 = LeftSidePanel：bg-card(--secondary) + px-3，无右边框（靠底色分区）。
-   分段已经浮到标题栏，所以这里只剩「文件类型 + 分类列表」，列表自己滚。
-   position 必须是 static：让它里面那个绝对定位的分段以 .float-window 为
-   包含块（否则会相对左栏定位）；overflow 也不能 hidden，不然浮上去的分段
-   会被裁掉。 */
+   跨满两行 → 色块从窗口顶边一直铺到底（标题就压在它上面）。
+   顶部 92 = 顶栏 80 + 间距 12，分类列表从这里开始。
+   position 必须是 static：让它里面那个绝对定位的分段以 .am 为包含块；
+   overflow 也不能 hidden，不然浮出去的分段会被裁掉。 */
 #app .float-window .am-side {
     grid-area: 1 / 1 / 3 / 2;
     position: static;
@@ -1773,24 +1816,20 @@ html[data-theme="light"] #app .canvas-tabbar {
     flex-direction: column;
     width: auto;
     min-width: 0;
-    padding: 8px 12px 12px;
+    padding: 92px 12px 12px;
     border-right: 0;
     background: var(--cg-secondary);
     overflow: visible;
 }
 
-/* 切换按钮落在弹窗标题栏：「资产管理」右侧。
-   DOM 上它仍挂在 .am-side 里（vnode 不动），用绝对定位浮回标题栏。
-   .am-side 已改成 position:static，于是包含块是 .am（上游 position:relative），
-   .am 的顶边正好是 header 的底边，所以：
-     top  = −72(header 高) + (72 − 28(槽高)) / 2 = −50
-     left = 24(header 左内距) + 64(「资产管理」4 字 × 16px) + 12(间距) = 100
-   标题字号写死 16px/600（官方 text-base font-semibold），64px 因此稳定。
-   内容区 .float-body 与左栏都已放开 overflow，浮上去不会被裁。 */
+/* 切换按钮浮在顶栏、左栏色块的右外侧，左缘与网格第一张卡的左缘对齐：
+     top  = (80 − 28(槽高)) / 2 = 26
+     left = 224(左栏宽) + 24(网格左内距) = 248
+   DOM 上它仍挂在 .am-side 里（vnode 不动），绝对定位的包含块是 .am。 */
 #app .float-window .am-side > .am-tabs {
     position: absolute;
-    top: -50px;
-    left: 100px;
+    top: 26px;
+    left: 248px;
     width: auto;
     margin: 0;
     z-index: 1;
@@ -1803,22 +1842,21 @@ html[data-theme="light"] #app .canvas-tabbar {
     gap: 4px;
 }
 
+/* 「文件类型」小标题不显示：参考图只有分类列表，标题已在顶栏 */
 #app .float-window .am-side-title {
-    margin: 0;
-    padding: 0 16px 8px;
-    color: var(--cg-muted-fg);
-    font-size: 12px;
+    display: none;
 }
 
-/* NavItem：rounded-md px-4 py-3 text-sm，active bg-muted / hover bg-accent */
+/* NavItem：rounded-md px-4 py-3 text-sm，active bg-muted / hover bg-accent。
+   行高取 1.4（20px）→ 项高 44，与参考图的列表项一致（原来 1.2 只有 41）。 */
 #app .float-window .am-cat {
     padding: 12px 16px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 8px;
     background: transparent;
     color: var(--cg-fg);
     font-size: 14px;
-    line-height: 1.2;
+    line-height: 1.4;
     transition: background 0.15s;
 }
 
@@ -1849,14 +1887,15 @@ html[data-theme="light"] #app .canvas-tabbar {
    = repeat(auto-fill, minmax(min(240px, 30vw), 1fr))，AssetsSidebarGridView 的
    容器是 grid gap-2 p-2。min(…,·vw) 是官方防窄容器只挤一列的写法，照抄。
    本包把下限从 240 收到 160：中列 ~790px 可用宽下从 3 列变 4 列（每格约 191px），
-   缩略图更小、一屏看得更多；左右各留 24px 与上方内容对齐，底部 40px 收口。 */
+   缩略图更小、一屏看得更多；顶部 12 = 与左栏分类列表同一基线，
+   左右各留 24px，底部 24px 收口。 */
 #app .float-window .am-grid {
     grid-area: 2 / 2 / 3 / 3;
     min-height: 0;
     align-content: start;
     grid-template-columns: repeat(auto-fill, minmax(min(160px, 25vw), 1fr));
     gap: 8px;
-    padding: 8px 24px 40px;
+    padding: 12px 24px 24px;
 }
 
 /* 缩略图卡 = MediaAssetCard：rounded-lg(8px) + p-2，hover 淡描边。
@@ -1914,13 +1953,16 @@ html[data-theme="light"] #app .canvas-tabbar {
     font-size: 12px;
 }
 
-/* 右面板 = BaseModalLayout 的 #rightPanel（w-72 = 288px，bg-card，无左边框） */
+/* 右面板 = BaseModalLayout 的 #rightPanel（w-72 = 288px，无左边框）。
+   只占第 2 行：顶栏要横跨到右栏上方，右栏若从第 1 行起会把「刷新 / 批量管理」
+   整块盖住（曾经就是这个原因，两个按钮看得见 rect 却画不出来）。
+   底色与中栏一致（参考图右栏没有独立色块，靠内容分区）。 */
 #app .float-window .am-right {
-    grid-area: 1 / 3 / 3 / 4;
+    grid-area: 2 / 3 / 3 / 4;
     width: auto;
     min-width: 0;
     border-left: 0;
-    background: var(--cg-secondary);
+    background: transparent;
     overflow: hidden;
 }
 
