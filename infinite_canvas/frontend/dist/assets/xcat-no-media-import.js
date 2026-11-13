@@ -43,9 +43,10 @@
     return window.__xcatRole ? window.__xcatRole(n.data) : (n.data && n.data.role) || ''
   }
 
-  /* 生成类四种 + 素材文本（文本节点本来就不收媒体，顺手统一到这里） */
+  /* 生成类四种 + 素材文本（文本节点本来就不收媒体，顺手统一到这里）+ LoRA 栈
+     （它只有一份 lora 列表，没有任何媒体语义） */
   function denied (role) {
-    return role.indexOf('gen-') === 0 || role === 'asset-text'
+    return role.indexOf('gen-') === 0 || role === 'asset-text' || role === 'lora'
   }
 
   function wrapOf (t) {
@@ -68,9 +69,11 @@
     if (!demo) return
     demo.setAttribute(
       'data-xcat-deny-text',
-      role.indexOf('gen-') === 0
-        ? '生成节点不接受素材，请在下方运行工作流'
-        : '文本节点不接受图片 / 视频 / 音频'
+      role === 'lora'
+        ? 'LoRA 节点不接受素材'
+        : role.indexOf('gen-') === 0
+          ? '生成节点不接受素材，请在下方运行工作流'
+          : '文本节点不接受图片 / 视频 / 音频'
     )
     demo.classList.add(DENY_CLASS)
   }

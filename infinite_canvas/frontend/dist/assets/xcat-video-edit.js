@@ -4,10 +4,10 @@
    参考 Toonflow-app 的 packages/nodes/videoNode，按本包约定落地：
 
      提取音轨    点击即执行 → 1 个 asset-audio 节点（m4a / AAC 192k）
-     分离音视频  点击即执行 → asset-audio + asset-video（静音）两个节点
+     音视分离  点击即执行 → asset-audio + asset-video（静音）两个节点
      截取片段    单段时间轴：视频预览 + 10 张缩略图 + 两个可拖手柄 +
                  起止数字输入 → 1 个 asset-video 节点（mp4，含音轨）
-     截取视频帧  三选一（当前帧 / 首帧 / 尾帧）→ 1 个 asset-image 节点（PNG）
+     截取帧  三选一（当前帧 / 首帧 / 尾帧）→ 1 个 asset-image 节点（PNG）
 
    全部走 POST /infinite_canvas/api/video/process（FFmpeg），原节点保留。
    按钮注入 / 后端就绪预检 / 请求解析 / 产物建节点统一用 xcat-media-core.js，
@@ -173,7 +173,7 @@
     if (busy || modal) return;
     var opts = action === 'separate'
       ? {
-          title: '分离音视频', sub: '生成静音视频和音轨两个节点，保留原视频',
+          title: '音视分离', sub: '生成静音视频和音轨两个节点，保留原视频',
           done: '已生成静音视频和音轨两个节点'
         }
       : {
@@ -227,9 +227,9 @@
   function runFrame (which, ctx, time) {
     if (busy || modal) return;
     var labels = { current: '当前帧', first: '首帧', last: '尾帧' };
-    progressModal('截取视频帧', '导出' + labels[which] + '为 PNG 图片节点，保留原视频', ctx,
+    progressModal('截取帧', '导出' + labels[which] + '为 PNG 图片节点，保留原视频', ctx,
       { ref: ctx.ref, action: 'frame', frame: which, time: time || 0 },
-      { title: '截取视频帧', sub: '正在截取' + labels[which] + '…', done: '已生成图片节点' });
+      { title: '截取帧', sub: '正在截取' + labels[which] + '…', done: '已生成图片节点' });
   }
 
   /* ------------------------------------------------------------ 截取片段 */
@@ -580,9 +580,9 @@
   /* ------------------------------------------------------------ 按钮注入 */
   var DEFS = [
     { cls: 'xcat-ve-audio', label: '提取音轨', open: function (ctx) { runSimple('extractAudio', ctx); } },
-    { cls: 'xcat-ve-separate', label: '分离音视频', open: function (ctx) { runSimple('separate', ctx); } },
+    { cls: 'xcat-ve-separate', label: '音视分离', open: function (ctx) { runSimple('separate', ctx); } },
     { cls: 'xcat-ve-trim', label: '截取片段', open: function (ctx) { openTrim(ctx); } },
-    { cls: 'xcat-ve-frame', label: '截取视频帧', open: function (ctx, wrap, btn) { openFrameMenu(ctx, btn); } }
+    { cls: 'xcat-ve-frame', label: '截取帧', open: function (ctx, wrap, btn) { openFrameMenu(ctx, btn); } }
   ];
 
   function install () {

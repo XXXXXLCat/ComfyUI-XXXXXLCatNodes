@@ -41,6 +41,14 @@
         { role: 'gen-audio', label: '生成音频', path: ['M2 10v3', 'M6 6v11', 'M10 3v18', 'M14 8v7', 'M18 5v13', 'M22 10v3'] },
         { role: 'gen-text', label: '生成文本', path: ['M4 6h16', 'M4 11h11', 'M4 16h7', 'm18 13 .6 1.9 1.9.6-1.9.6-.6 1.9-.6-1.9-1.9-.6 1.9-.6z'] }
       ]
+    },
+    {
+      title: '控制节点',
+      hint: '不改素材，只改下游工作流',
+      items: [
+        /* layers 图标（lucide）：一叠 LoRA 的语义 */
+        { role: 'lora', label: 'LoRA 栈', path: ['m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z', 'm22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65', 'm22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65'] }
+      ]
     }
   ]
 
@@ -94,6 +102,7 @@
     if (!flow) return
     var id = nextId()
     var gen = role.indexOf('gen-') === 0
+    var isLora = role === 'lora'
     var wf = gen ? await defaultWorkflow() : ''
     var pos = at || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     if (!at) {
@@ -117,6 +126,7 @@
         media: [],
         index: 0,
         text: (role === 'asset-text' || role === 'gen-text') ? '' : undefined,
+        loras: isLora ? [{ name: '', strength: 1.0, enabled: true }] : undefined,
         role: role
       }
     }])

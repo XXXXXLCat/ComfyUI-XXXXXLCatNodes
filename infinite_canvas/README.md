@@ -277,8 +277,9 @@
 
 30. **框选键改回 `Ctrl + 拖`、剪线只认 `Alt + 拖`**（bundle 两处）：上游把
    `Ctrl` 和 `Alt` 都当剪线套索，早先只能让框选退到 `Shift`。现在
-   `selectionKeyCode = "Control"`、剪线入口 `me()` 只判断 `altKey`；
-   剪线轨迹同时从红改成白（纯 CSS）。详见「选择 / 拖拽 的功能语义」节。
+   剪线入口 `me()` 只判断 `altKey`；框选后来整层改成自管
+   （`assets/xcat-marquee.js`，Vue Flow 内部框选关掉），语义照 ComfyUI。
+   详见「选择 / 拖拽 的功能语义」与「框选照 ComfyUI」两节。
 
 31. **一个节点只对应一个素材 / 一对节点只能连一条线**（bundle 九处）：
    `appendMedia` / `appendItems` 从「往后追加数组」改成「只留一个」（拖到已有素材的
@@ -566,14 +567,242 @@ App 的根节点是 **block**（`openBlock()` + `createElementBlock`），Vue �
 本包是 Vue Flow 不是 litegraph，`bk` 组件的 `applyMode()` 用 store 选项等价实现：
 `panOnDrag = [0,1,2]`（两模式左键都平移）；选择时
 `nodesDraggable / nodesConnectable / elementsSelectable / edgesUpdatable = true`、
-`selectionKeyCode = "Control"`、`deleteKeyCode = "Backspace"`；拖拽时这些全关，
-`selectionKeyCode / deleteKeyCode = null`，并给 `<html>` 加 `xcat-canvas-hand`
+`deleteKeyCode = ["Backspace","Delete"]`；拖拽时这些全关，
+`deleteKeyCode = null`，并给 `<html>` 加 `xcat-canvas-hand`
 （CSS 让 `.vue-flow__node / edge / handle / nodesselection-rect` 全部
 `pointer-events:none`，事件落到 pane 由 d3-zoom 平移；光标 `grab` / `grabbing`）。
-非只读时 pane 光标 `default`、框选时 `crosshair`、拖画布时 `grabbing`。
+非只读时 pane 光标 `default`、拖画布时 `grabbing`。
 模式持久化在 `localStorage["xcat:canvas-toolbar"]`。
 
-**键位分工（与 ComfyUI 一致）**：`Ctrl + 左键拖` = 框选，`Alt + 左键拖` = 剪线。
+**`selectionKeyCode` 已固定为 `"xcat-none"`**（永不匹配的键名）：框选整层改由
+`assets/xcat-marquee.js` 自管，Vue Flow 内部框选关掉，原因与做法见下一节。
+
+**键位分工（与 ComfyUI 一致）**：`Ctrl + 左键拖` = 框选（空白或节点上都可），
+`Alt + 左键拖` = 剪线，`Delete` / `Backspace` = 删除选中节点与连线（见后面两节）。
+
+### 框选照 ComfyUI（2026-11-13 23:5x）
+
+用户：「框选 参考 comfyui」。先把两边的真实行为都量了一遍。
+
+**ComfyUI 的语义（源码 `LGraphCanvas.ts` / `selectionIntent.ts`）**：
+
+| 环节 | 官方实现 |
+| --- | --- |
+| 触发 | `_processPrimaryButton()`：`e.ctrlKey \|\| e.metaKey` 且 `!e.altKey` 且 `LiteGraph.leftMouseClickBehavior === 'panning'` → `_setupNodeSelectionDrag()`；**空白和节点上都起框**。不按 Ctrl 时 `setupCanvasDrag()` → `dragging_canvas = true`（平移） |
+| 命中 | `_getItemsInRect()` 用 `overlapBounding(rect, node.boundingRect)` —— 矩形与节点**相交**就算；group 要求 `containsRect` 完全包含；reroute 看中心点 |
+| 实时 | `Comfy.Graph.LiveSelection` 默认 **true**，`handleLiveSelect()` 拖动中逐帧改选中 |
+| 修饰键 | `resolveMarqueeSelection()`：Shift = `add`、Alt = `subtract`、无 = `replace` |
+| 单击 | `resolveClickSelection()`：带 toggle 修饰（shift/ctrl/meta）时，未选中 → `add`、已选中 → `remove` |
+| 矩形外观 | canvas 绘制：半透明蓝填充 + 1px 实线蓝框、直角 |
+
+**本包原来的差距**（Vue Flow 自带框选）：
+
+1. `selectionMode` 默认 `'full'` —— 节点必须被框**完全包住**才选中，轻划到边选不上；
+2. 只看 `selectionMode`，**不看修饰键** —— Shift 加选、Alt 减选都没有；
+3. 只在 pane 空白起拖才启动（`Pane` 的 `le()` 要求 `ne.target === H.value`）——
+   从节点上 Ctrl+拖会**拖节点**；
+4. Ctrl 单击已选中节点不会取消（`multiSelectionKeyCode` 只做加选）；
+5. 矩形是 `rgba(0,89,220,.08)` + `1px dotted` 虚线，几乎看不见。
+
+**做法（两层）**：
+
+- `index-BXU58XDe.js`：把 `selectionKeyCode` 设成 `"xcat-none"`（`useKeyPress` 永不匹配
+  → 关闭内部框选，避免出现两个矩形）。保留 `selectionMode: "partial"` 作兜底：
+  万一自管脚本没加载，`applyMode()` 会退回 `"Control"`，仍能用 Ctrl 拖框选。
+- 新增 `assets/xcat-marquee.js`（独立脚本，`index.html` 里 `defer` 引入）：
+  `document` 捕获阶段拦 `pointerdown`（`button===0 && (ctrlKey||metaKey)`），
+  `stopPropagation` 阻止节点拖动，自己画矩形、自己算命中。
+
+自管层的要点：
+
+| 点 | 实现 |
+| --- | --- |
+| 不抢的场景 | `input / textarea / select / [contenteditable]`（选文字）、`button / a / .vue-flow__handle / .nodrag / .card-delete / .media-dot`（连线与节点内控件）、只读态（`html.xcat-canvas-hand`）、`Alt` 按下（让位上游剪线） |
+| 命中 | `getBoundingClientRect()` 两两相交（`overlap()`），等价于 `overlapBounding`，不换算 flow 坐标 |
+| 矩形 | 追加一个 `div#xcat-marquee-box.vue-flow__selection` 到 `.vue-flow`，用样式类复用外观 |
+| 修饰键 | pointerdown 时快照 `base` 选中集合，逐帧按 Shift（并集）/ Alt（差集）/ 无（替换）算目标 |
+| 单击 | `moved` 为假时按「按下那一刻」的 `pressWasSelected` 取反，并延后一帧写入（Vue Flow 的 click 会在 pointerup 之后跑一次，同步写会被覆盖） |
+| 收尾 | `pointerup` / `pointercancel` / `Esc` 移除监听并隐藏矩形 |
+
+**矩形样式**（`xcat-overrides.css`，暗色 / 亮色两套）：
+
+```css
+#app .vue-flow__selection {
+    background: rgba(120, 170, 255, 0.3);
+    border: 1px solid rgba(160, 200, 255, 0.95);
+    border-radius: 0;
+}
+html[data-theme="light"] #app .vue-flow__selection {
+    background: rgba(11, 140, 233, 0.14);
+    border: 1px solid #0b8ce9;
+}
+```
+
+填充值是反推来的：真实 ComfyUI 截图里画布底 `(21,21,21)`、框内 `(49,65,92)`，
+解得 `rgb(120,170,255) @ 0.30` 叠在深灰上正好是 `(51,66,91)`。
+
+**验证** `verify-marquee.js`（CDP 真键鼠，20 项 ALL PASS）：
+
+| 场景 | 结果 |
+| --- | --- |
+| Ctrl+拖只盖住节点左上 1/4 | 拖动中即选中该节点（相交判定） |
+| 矩形样式 | `rgba(120,170,255,0.3)` / `1px solid` / `0px` 圆角；且不再出现 Vue Flow 的第二个矩形 |
+| 从节点内部起拖 | 出现框选矩形，节点位置不变（不拖动） |
+| 先选中 C，再 Shift+Ctrl 框 A | 结果 `["A","C"]`（加选） |
+| 不按 Ctrl 拖空白 | 画布平移、无矩形、无误选 |
+| 框住 A+B 大半、C 在框外 | `["A","B"]` |
+| Ctrl 单击未选中节点 / 再点一次 | `["B"]` → `[]`（toggle） |
+| Alt+Ctrl 拖 | 不进框选（与 panning 模式下 `!e.altKey` 判断一致） |
+| 只读 H | 不出矩形、不选中；V 切回后恢复 |
+
+另跑 `verify-del-key` / `verify-ring-align` / `verify-node-size` /
+`verify-strip-input-only` / `verify-rerun-overwrite` / `verify-gen-result` 六套回归全 PASS。
+
+
+### 多选包围框（2026-11-14）
+
+用户：「多选的时候怎么没有框啊？comfyui 有的」。实测确认：ComfyUI 选中 ≥2 个节点时，
+会围绕所有选中节点画一圈**灰色虚线框**（`--border` #494a50、2px、虚线 5/5、圆角 8px）。
+真源是前端包 `core-*.js` 里的内置扩展 `Comfy.SelectionBorder`：
+
+```js
+function drawSelectionBorder(ctx, canvas) {
+    const n = canvas.selectedItems;
+    if (n.size <= 1) return;                       // 单选不画
+    const r = createBounds(n, 10);                 // 包围盒外扩 10 个画布单位
+    ctx.lineWidth = 2 / canvas.ds.scale;           // 屏幕恒 2px
+    ctx.strokeStyle = getComputedStyle(:root).getPropertyValue('--border') || '#ffffff66';
+    const d = 5 / canvas.ds.scale;
+    ctx.setLineDash([d, d]);                       // 屏幕 5 实 5 空
+    ctx.roundRect(r[0], r[1], r[2], r[3], 8 / canvas.ds.scale);  // 屏幕 8px 圆角
+    ctx.stroke();
+}
+```
+
+**做法**：新增 `assets/xcat-selborder.js`（`index.html` 里 `defer` 引入），
+往 `.vue-flow` 追加一层 `<div id="xcat-selborder"><svg><rect></svg></div>`
+（`position:absolute; inset:0; pointer-events:none; z-index:6`，与 ComfyUI 把边框画在
+canvas 前景、节点之上同理），参数逐条对齐上表：
+
+| 项 | 值 |
+| --- | --- |
+| 触发条件 | 选中 **> 1** 个节点；1 个或 0 个时整层 `display:none` |
+| 外扩 | `10 × zoom` 屏幕像素（等价于 10 个画布单位） |
+| 线宽 | 2px（屏幕常量，不随缩放） |
+| 虚线 | `stroke-dasharray: 5 5`（屏幕常量） |
+| 圆角 | `rx = ry = 8`（屏幕常量） |
+| 颜色 | `var(--cg-border)` = `--border`（暗 #494a50 / 亮 #b4b4b4） |
+
+**刷新机制不用 rAF 轮询**：节点选中态是 `class`、位置与视口是 `style` 的 `transform`，
+全都落在 `.vue-flow` 子树内，用 `MutationObserver`（`attributes: ['class','style']` +
+`subtree` + `childList`）在变更时 `setTimeout(0)` 合并重算即可，覆盖选中变化 / 拖节点 /
+平移缩放 / 增删节点 / 窗口 resize。**踩坑**：第一版用 `requestAnimationFrame` 常驻轮询，
+在无头 Chrome（后台标签页同样）里 rAF 被浏览器暂停，框一次都不出现 —— 事件驱动才可靠。
+回调里要跳过目标在 `#xcat-selborder` 内的 mutation，否则自己写 `style` 会触发自我循环。
+
+**验证** `verify-selborder.js`（CDP，17 项 ALL PASS）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 选 A+B | 层 `display:block`、`pointer-events:none`、`z-index:6` |
+| 几何 | 外扩 = `10 × zoom`，宽高 = 节点并集 + 20×zoom（误差 ≤ 3px） |
+| 样式 | `rgb(73,74,80)` / `2px` / `5px,5px` / `rx=8` |
+| 单选 / 无选中 | `display:none`（对齐 `size<=1 return`） |
+| 移动节点 | 框跟随（y 与高度同步变化） |
+| `zoomTo(1.5)` | 外扩随新 zoom 变化（diff 0.04px） |
+| Ctrl+拖框选过程中 | 框选矩形（蓝）与多选包围框（灰虚）同时存在，与 ComfyUI 一致 |
+
+另有真实鼠标拖拽验证：多选后拖 A 移动 `(100,60)`，框同步位移 `(100,60)`。
+
+
+### 多选只留主体（2026-11-14）
+
+用户：「多选的状态下，生成节点不显示主体以外的东西，包括顶部的操作按钮以及底部的提示词之类的」。
+
+**现象**（改前截图 `multihover-2.png`）：多选时**每个**节点都会渲染并展开
+`.node-panel`（工作流列表 + 接入素材条 + 提示词 + 运行，实测 724×233 的浮层），
+顶部 `.node-actions` 也全开（裁剪 / 宫格切分 / 镜像 / 调整 / 下载 / 删除…），
+两个节点并排时两块面板直接连成一片盖住画布下半部，节点本体只占上面一小条。
+
+**做法**：`assets/xcat-selborder.js` 的 `update()` 在选中 ≥2 时给 `#app` 挂根类
+`.xcat-multi-select`（回到 ≤1 即摘掉，与包围框同一份状态），
+`xcat-overrides.css` 据此收起节点上的全部浮层：
+
+```css
+#app.xcat-multi-select .demo-node > .node-actions,   /* 顶部操作按钮条 */
+#app.xcat-multi-select .demo-node > .node-panel,     /* 底部：工作流 / 素材条 / 提示词 / 运行 */
+#app.xcat-multi-select .demo-node > .node-delete,    /* 右上 ×（上游默认 none，留作兜底） */
+#app.xcat-multi-select .demo-node > .node-resize,    /* 右下缩放手柄 */
+#app.xcat-multi-select .card-delete {                /* 媒体卡片右上 ×（多选时唯一还露着的按钮） */
+    display: none !important;
+}
+```
+
+**为什么可以纯 CSS 隐藏**：这几个元素全是 `position:absolute` 浮层（`.node-panel`
+是 `.demo-node` 的直接子元素，`position:absolute`，不参与布局），
+所以节点尺寸、连线端点、多选包围框全都不变 —— 实测多选前后节点都是 `496×279`。
+
+**保留**：主体（`.node-media` / `.node-empty`）、左上角文件名标签 `xcat-node-name`
+（多选时还要靠它认节点）、左右连接端口。
+
+**验证** `verify-multi-hide.js`（CDP 真鼠标，19 项 ALL PASS）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 单选 | 无根类；`.node-panel` 与 `.card-delete` 照常可见 |
+| 多选 2 个 | 根类挂上；两节点的 `.node-actions` / `.node-panel` / `.node-delete` / `.node-resize` / `.card-delete` 全 `display:none` |
+| 节点尺寸 | 多选前后同为 `496×279`（浮层不占布局） |
+| 包围框 | 照常出现，位置尺寸不变 |
+| 多选下真实 hover 节点 | 浮层仍不出现 |
+| 回单选 / 取消选中 | 根类移除，面板与按钮恢复 |
+
+截图 `multi-hide-on.png`（多选只留主体）/ `multi-hide-off.png`（单选恢复）/
+`multi-hide-compare.png`（前后对比）。
+
+
+### Delete 删除节点 / 连线（2026-11-13 23:40）
+
+上游只把 `Backspace` 交给 Vue Flow（store 默认 `deleteKeyCode:"Backspace"`），
+`Delete` 按下去没有任何反应 —— 而 `Mn()` 那个 keydown 监听里其实早就写了
+`v.key!=="Backspace"&&v.key!=="Delete"`，只是拿它拍撤销快照，没真删。
+
+**改法（两处）**：
+
+| 位置 | 原 | 现 |
+| --- | --- | --- |
+| store 默认值 | `deleteKeyCode:"Backspace"` | `deleteKeyCode:["Backspace","Delete"]` |
+| `applyMode()` | `F.deleteKeyCode.value = hand ? null : "Backspace"` | `hand ? null : ["Backspace","Delete"]` |
+
+`is()` 的键盘过滤器本身支持数组（`Array.isArray(e)?e.some(...)`），不需要另写监听。
+删除动作走上游 Pane 的那条链路：`removeNodes(选中节点)` + `removeEdges(选中边)`，
+所以**关联边自动清理**、下游 `inputMedia` 里的接入项也会一并消失（实测确认）。
+
+**输入框保护**：Pane 里 `is(deleteKeyCode,{actInsideInputWithModifier:!1})` 会先查
+`ga()`（`INPUT/SELECT/TEXTAREA`、`contenteditable`、`.nokey`），命中就 return。
+所以在提示词框里按 Delete 只删文字，不会删节点；`xcat-text-edit.js` 退出编辑时也会主动
+`blur()`，避免 Delete / 方向键被 textarea 吃掉。
+
+**撤销顺序坑**：`Mn()` 原本挂在 `window` 的**冒泡**阶段，而 Vue Flow 的删除在
+`document` 阶段就执行完了 —— 快照拍到的是「已经删掉」的状态，`Ctrl+Z` 只会跳到更早的一步
+（实测删完按 Ctrl+Z，回来的是上上个画布状态）。把监听改成捕获阶段
+（`addEventListener("keydown",Mn,!0)`）后，快照先于删除，`Ctrl+Z` 才能恢复被删的节点。
+
+**只读模式**：拖拽（hand）态下 `deleteKeyCode = null`，按 Delete 不会删。
+
+**验证**（`verify-del-key.js`，11 项 ALL PASS，8198 + CDP 真键鼠）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 选中节点按 Delete | 节点消失、关联边一起消失、其它节点不动 |
+| Backspace | 仍可删除（原快捷键不回退） |
+| 提示词框聚焦时按 Delete | 节点保留（文字编辑优先） |
+| 失焦后再按 Delete | 正常删除 |
+| 只读模式（H）按 Delete | 不删 |
+| 删除上游后 | 边清空，下游 `inputMedia` 不再残留已删节点的素材 |
+| 多选后 Delete | 一次性删除选中项 |
+| 删除后 Ctrl+Z | 节点恢复 |
+
+对照图 `del-key-before-after.png`。纯前端，刷新即可。
 
 上游无限画布的 `canvasGraph` 原本把 `Ctrl` 和 `Alt` **都**当「切断连线」套索
 （`me()` 在 pointerdown 捕获阶段 `preventDefault + stopPropagation`，会挡掉
@@ -582,11 +811,12 @@ bundle 补丁（`patch_selection_keys.py`，幂等，备份 `.selkeys.bak.js`）
 
 | 位置 | 原 | 现 |
 |---|---|---|
-| `applyMode()` | `selectionKeyCode = "Shift"` | `"Control"` |
+| `applyMode()` | `selectionKeyCode = "Shift"` | `"xcat-none"`（框选交给 `assets/xcat-marquee.js`） |
 | `canvasGraph` 剪线入口 `me()` | `if (button!==0 \|\| !(ctrlKey\|\|altKey)) return` | `if (button!==0 \|\| !altKey) return` |
 
-`multiSelectionKeyCode` 保持上游默认（非 mac `Control` / mac `Meta`）：与框选同键
-不冲突 —— 框选只从 pane 上按下触发，`Ctrl + 点节点` 仍是加选。
+`multiSelectionKeyCode` 保持上游默认（非 mac `Control` / mac `Meta`），但已不参与框选：
+自管层自己读 `e.shiftKey / e.altKey / e.ctrlKey`，`Ctrl + 点节点` 的切换语义也在那里实现
+（详见「框选照 ComfyUI」节）。
 
 按钮顺序（从左到右）：模式选择 │ 适应视图 缩放控制 │ 网格吸附 隐藏连接线 —— 两个开关按
 ComfyUI 的做法把「隐藏连接线」收在末尾（官方工具栏也是 minimap / link visibility 收尾）。
@@ -1628,11 +1858,56 @@ const Ht=480,ln=270,Dc=72;           // 排布用宽高
 
 > **只改常量还不够**：上游有 `fitNodeToFirstImage`（bundle 里是 `async function F(v,T)`），
 > 图片 onload 后按首图宽高比改写 `data.w/h`，所以拖进来永远不是 480×270。
-> 换算公式（`Zs=22` 内边距、`Bc=.84` 卡片占宽比、`Rc=900` 上限）：
-> `h = 22 + (w-22)*0.84*(imgH/imgW)`，高度不足 270 时封顶高度并反向补宽。
-> 16:9 → 547×270；1:1 → 480×407。2026-11-13 01:55 起在 `F` 开头加判定：
-> `xcatRole(node.data)` 前缀为 `asset-` 直接 `return false`，素材类固定 480×270，
-> 非 16:9 的图在框内 `object-fit:contain` 留黑边；生成类仍按产物比例自适应。
+> 上游原公式（`Zs=22` 内边距、`Bc=.84` 卡片占宽比、`Rc=900` 上限）：
+> `h = 22 + (w-22)*0.84*(imgH/imgW)`，高度不足 270 时封顶高度并反向补宽；
+> 旧结果 16:9 → 547×270、1:1 → 480×407。**该公式已于 23:00 按本包布局改写，
+> 见下一节。** 2026-11-13 01:55 起在 `F` 开头加判定：`xcatRole(node.data)` 前缀为
+> `asset-` 直接 `return false`，素材类固定 480×270；生成类按产物比例自适应。
+
+### 节点尺寸公式：22 与 0.84 都是废弃前提（2026-11-13 23:00）
+
+**那两个数是什么**：`22` = 上游 `.demo-node{padding:10px; border:1px}` 的左右合计
+（`10×2 + 1×2`，全站 `*{box-sizing:border-box}`，所以 `width:480` 里内容区只有 458）；
+`0.84` = `.media-stack-card{width:84%; left:50%}` 的卡片占宽比（多素材层叠时左右各露 8%）。
+两者相乘的含义是「按图片真实显示宽度算高」：
+
+```
+节点高 = 上下装饰 22 + 图片实际显示宽 × (图高/图宽)
+        = 22 + (w − 22) × 0.84 × ratio
+```
+
+**为什么不再成立**：本包为了「图片铺满卡片」早已改成
+`#app .demo-node { padding:0 !important; border:0 !important }` 与
+`.demo-node .media-stack-card { width:100% }`。实测（8198，480 宽节点）
+`clientWidth = 480`、卡片宽 `480`，而公式仍按 `458 × 0.84` 算 → 节点比图片**矮约 19%**，
+`object-fit:contain` 之后方图左右各留 36px 黑边（1:1 被算成 480×407）。
+
+**改法**（`index-BXU58XDe.js` 的 `F(v,T)`，常量 `Ht=480 / ln=270 / Rc=900 / Lc=.02 / zc=3` 保留）：
+
+```js
+let w = Math.max(480, data.w || 480);
+let h = Math.round(w * (imgH / imgW));      // 原来是 22 + (w-22)*0.84*ratio
+if (h > 900) h = 900;                        // 封顶，宽度不回算
+else if (h < 270) { h = 270; w = Math.round(h / ratio); }   // 顶到下限反推宽
+w = Math.max(480, w);
+```
+
+防抖阈值 `|Δ| <= max(3, 2%)` 未动：算出来正好等于 480×270 时不写 `data.w/h`（节点本来就是默认值）。
+
+**实测**（`verify-node-size.js`，5 张已知尺寸图 + 换图重算 + 素材节点，11 项 ALL PASS）：
+
+| 图片 | 旧 | 新 | 铺满 |
+| --- | --- | --- | --- |
+| 1024×1024 | 480×407 | **480×480** | 无黑边 |
+| 1920×1080 | 547×270 | **480×270** | 无黑边（正好等于默认值，防抖不写入） |
+| 512×1024 | 480×791 | **480×900** | 留边，960 撞 900 上限 |
+| 1024×4096 | 480×900 | 480×900 | 留边，1920 撞 900 上限 |
+| 4096×1024 | 1203×270 | **1080×270** | 无黑边 |
+
+能铺满的区间被两个硬约束夹出：宽 ≥ 480、高 ≤ 900 → 图片比例须落在
+`480:900 ~ 宽上限` 之间；9:16 竖图会留左右各 15px，1:4 长条会留更多。
+要彻底铺满只能放宽 480 最小宽或提高 900 上限（会改变节点默认观感，暂不动）。
+对照图 `square-before-after.png`；纯前端，刷新即可。
 
 **2. 素材节点只有右侧输出口**：不能把 target handle 从 DOM 里删掉——Vue Flow 靠 handle 的
 bounding box 算连线终点，删掉后原有连线的末端会退到节点左上角（实测截图确认悬空）。
@@ -2263,6 +2538,8 @@ ComfyUI-Infinite-Canvas/
 | POST            | `/infinite_canvas/api/settings`                | 保存画布设置         |
 | GET/POST        | `/infinite_canvas/api/workflows`               | 工作流列表 / 上传     |
 | PUT             | `/infinite_canvas/api/workflows/order`         | 拖动排序           |
+| POST            | `/infinite_canvas/api/workflows/{name}/category` | 改分类（六类，见「工作流分类」节） |
+| POST            | `/infinite_canvas/api/workflows/{name}/rename` | 重命名            |
 | GET/PUT         | `/infinite_canvas/api/workflows/{name}/fields` | 字段配置读写         |
 | GET/POST        | `/infinite_canvas/api/canvases`                | 画布列表 / 新建      |
 | GET/PUT         | `/infinite_canvas/api/canvases/{id}`           | 读取 / 保存画布      |
@@ -2457,19 +2734,19 @@ fan-btn 描边全部 `rgb(11,140,233)`；带 scoped 属性临时造的 `.panel-r
 版本号：`xcat-media-core.js?v=20261113e`、`xcat-audio-edit.js?v=20261113g`、
 `xcat-video-edit.js?v=20261113a`、`xcat-overrides.css?v=20261113x`。
 
-### 视频节点：提取音轨 / 分离音视频 / 截取片段 / 截取视频帧（2026-11-13）
+### 视频节点：提取音轨 / 音视分离 / 截取片段 / 截取帧（2026-11-13）
 
 用户要求参考 Toonflow 项目，交互按用户三项选择定稿：
 
 | 工具 | 交互 | 产物 |
 | --- | --- | --- |
 | 提取音轨 | 点击直接执行 + 进度弹窗（可取消） | 1 个 `asset-audio`（m4a） |
-| 分离音视频 | 同上 | 2 个：`asset-audio` + 静音 `asset-video` |
+| 音视分离 | 同上 | 2 个：`asset-audio` + 静音 `asset-video` |
 | 截取片段 | 单段起止：视频预览 + 10 张缩略图条 + 双拖拽手柄 + 数字输入 | 1 个 `asset-video`（mp4） |
-| 截取视频帧 | 点击弹三选一：当前帧 / 首帧 / 尾帧 | 1 个 `asset-image`（png） |
+| 截取帧 | 点击弹三选一：当前帧 / 首帧 / 尾帧 | 1 个 `asset-image`（png） |
 
 四者都**保留原视频、产物是右侧新节点**。操作行按钮用 CSS flex `order` 固定：
-`-6 提取音轨 / -5 分离音视频 / -4 截取片段 / -3 截取视频帧`，下载 `90`、
+`-6 提取音轨 / -5 音视分离 / -4 截取片段 / -3 截取帧`，下载 `90`、
 全部下载 `91`、删除 `99` 永远在末尾。缩略图固定 10 张，用离屏 `<video>` +
 canvas `160×96` JPEG，不随视频时长增长。
 
@@ -2577,12 +2854,724 @@ if(a.key==="preview"&&(
 | 节点 | 操作行 |
 | --- | --- |
 | 素材图片 | 裁切 / 扩图 / 宫格 / 下载 / 删除 |
-| 素材视频 | 提取音轨 / 分离音视频 / 截取片段 / 截取视频帧 / 下载 / 删除 |
+| 素材视频 | 提取音轨 / 音视分离 / 截取片段 / 截取帧 / 下载 / 删除 |
 | 素材音频 | 截取 / 变速 / 下载 / 删除（回归） |
 | gen-image / gen-video / gen-audio 空节点 | 删除 |
 
+（上表为当时的结果；裁切 / 扩图 / 宫格已在后面「删除图片节点的裁切 / 扩图 / 宫格」
+一节删掉，现在素材图片只剩 `下载 / 删除`。）
+
 六类节点**均无「预览」**，下载 `90`、删除 `99` 仍在末尾，视频四工具
 `-6/-5/-4/-3`、音频 `-2/-1` 顺序不变。只改前端 bundle，四处同步后刷新即可。
+
+### 删除图片节点的裁切 / 扩图 / 宫格（2026-11-13）
+
+用户「删除现有的节点功能：裁剪、扩图、宫格」。其中「裁剪」对应上游按钮
+`key:"crop"`、label「裁切」；三个 key 是 `crop` / `expand` / `grid`。
+
+**做法**：不改 `L` 按钮定义、不动上游弹窗组件，只在补丁函数 `xcatFanActions()`
+里把这三个 key 一律过滤掉（`return!1`），和此前「去预览」同一处。这个函数同时
+被两处调用 —— 节点操作栏 `.node-actions` 与预览面板内的 `.tool-btn` 工具条 ——
+所以两处入口一并消失。后端本来就没有 crop / expand / grid 路由，其它注入脚本
+也没有引用；上游三个弹窗组件保留在 bundle 里成为不可达死代码，要恢复只需把
+这一行改回 `return kind==="image"`。
+
+删除后**素材图片节点只剩「下载 / 删除」**；视频、音频、文本节点按钮行不受影响：
+视频 `提取音轨 / 音视分离 / 截取片段 / 截取帧 / 下载 / 删除`，音频
+`截取 / 变速 / 下载 / 删除`。`order` 规则没动（下载 `90`、删除 `99` 仍在末尾）。
+
+注意：右下浮动工具条的「九宫格」（网格吸附，15px 对齐）与这里的 `grid` 宫格
+不是同一功能，未动。
+
+版本 `index-BXU58XDe.js?v=20261113q→r`、`xcat-overrides.css?v=20261113z→aa`（CSS 只改注释）。
+只改前端，四处同步后刷新浏览器即可。
+
+## 图片节点三个工具：宫格切分 / 镜像 / 调整（2026-11-13）
+
+参考 **`E:\Toonflow\packages\nodeShared\src\`**（注意不是旧的
+`C:\Users\41325\Downloads\Toonflow-app-master`，那个版本没有「镜像 / 调整」）：
+
+| 功能 | 参考真源 | 交互 | 产物 |
+| --- | --- | --- | --- |
+| 宫格切分 | `components/imageGridSplit.vue` | 2/3/4/5 宫格预设 + 行数/列数各 1~10 自定义 + 原图上叠加网格线与序号实时预览 + 「共 N 张图片 / 从左到右，逐行切分」汇总 | 一次切出 N 张 PNG，N 个 `asset-image` 节点，名 `原名 · 行-列` |
+| 镜像 | `components/imageMirror.vue` | 左右翻转 / 上下翻转 / 顺时针 90° / 逆时针 90° / 180° 五选一，悬停或聚焦时 CSS transform 实时预览，点即执行 | 1 张 PNG，名 `原名 · 左右翻转` 等；90° 旋转交换宽高 |
+| 调整 | `components/imageAdjust.vue` + `imageAdjust.ts` | 11 个滑块（亮度 / 曝光 / 对比度 / 高光 / 阴影 / 饱和度 / 自然饱和度 / 暖色 / 淡色 / 清晰度 / 晕影，除晕影 0~1 外都是 -1~1、step 0.01）+ 重置 + 512px canvas 实时预览 | 1 张 PNG，名 `原名 · 调整 亮度·对比度·…`（取前三项） |
+
+三者共同约定与参考一致：**只搬像素、生成新节点、原图保留、输出 PNG**。
+
+### 架构决策：纯前端，后端零改动
+
+参考实现本来就是 Vue 组件里 `new Image() + canvas.drawImage + toBlob`，
+没有后端依赖。本包 dist 是编译产物（无 node_modules、无法注册 Vue 组件），
+所以改成两个独立注入脚本：
+
+- `xcat-image-adjust-core.js`：把 `imageAdjust.ts` 的 11 项算法**逐行移植成纯 JS**。
+  魔数（saturation 的 `0.213/0.715/0.072`、vignette 的 `inner .20 / outer 1.1 /
+  curvature .65`、highlights 的 `-0.76 / -0.8`）与合并顺序全部照抄；像素在
+  **[0,1] 线性光**空间算，入口 sRGB 解码、出口编码，中间必须 `Float32Array`
+  中转（直接用 8bit ImageData 会把暗部量化吃掉，与 GPU 差 20~40 灰阶）。
+  预览走 512px 下采样副本、每次从副本重算；导出按原图全分辨率重算一次
+  （清晰度这类局部对比算子必须在原分辨率做才准）。
+- `xcat-image-tools.js`：按钮注入 + 三个弹窗 + Canvas 处理 + 上传 + 建节点。
+
+产物落盘**复用本包已有的 `POST /infinite_canvas/api/media`**（JSON
+`{name, data: dataURL}` → 写进 `input/`，返回 `{name, filename, subfolder, type}`），
+再交给 `xcat-media-core.js` 的 `buildResultNodes()` 生成 `asset-image` 节点。
+因此**没有新增后端路由、不需要重启 ComfyUI，刷新浏览器即可生效**。
+失败时会用 `DELETE /api/media/{filename}` 清掉已上传的孤儿 PNG。
+
+### 踩过的坑
+
+1. **`commit()` 的 Promise 链必须累积结果**：逐张串行上传时若每个 `.then`
+   只返回单个对象，最后传给 `buildResultNodes()` 的就是对象而不是数组，
+   报 `files.forEach is not a function`。用 `results[]` 累积。
+2. **大批量切分要先把视口缩小，且可见区必须包含源节点**。上游 Vue Flow 会
+   丢掉视口外没能完成初始化的节点（见「视频节点四工具」节第 4 条坑），
+   `buildResultNodes()` 的 `placeClear()` 又是按 `visibleRect()` 找空位。
+   `ensureViewportFor(count)` 在 >9 个产物时按
+   `side=ceil(sqrt(count))` 计算所需 flow 宽高，调 `setViewport()` 缩小 zoom
+   并平移。**第一版把可见区左上角设在源节点右侧，结果源节点自己被推出可见区
+   清掉，连带打乱 id 分配（25 张只剩 24 张、`1-1` 丢失）**；改成从源节点
+   左上角起算后 5×5 = 25 张全部留住（zoom 0.7→0.418）。
+3. **滑块列表不要内层滚动**：初版给 `.xcat-im-adjust-list` 设 `max-height:250px`，
+   11 行里最后一行「晕影」被切掉半截。改成不设高度、由外层
+   `.xcat-ae-body`（已有 `overflow-y:auto`）承担滚动，并按项目约定给它补回
+   10px 轨道 / 6px 圆角滑块（`scrollbar-width:auto` 复位 +
+   `::-webkit-scrollbar-button{display:none}` + `background-clip:padding-box`）。
+4. 镜像弹窗的「暂无图片」占位在有图时必须移除，否则会露在预览图下方。
+5. 图标用内联 SVG + `stroke="currentColor"`（参考用 Tabler 图标组件，
+   独立 iframe 里用不了），暗亮主题自动跟随。
+
+按钮 CSS `order` 为 `-9 / -8 / -7`，排在视频四工具 `-6..-3`、音频 `-2/-1`
+之前；下载 `90`、删除 `99` 永远在末尾。版本号
+`xcat-image-tools.js?v=20261113d`、`xcat-image-adjust-core.js?v=20261113a`、
+`xcat-overrides.css?v=20261113ac`。
+
+### 验证（8198 干净实例 + CDP 9333 真鼠标）
+
+- `verify-image-tools.js` 全通过：按钮行 `宫格切分 / 镜像 / 调整 / 下载 / 删除`
+  且 order 为 `-9/-8/-7/90/99`；宫格预设 2→2×2/4 格、3→3×3/9 格，
+  切分生成 9 个节点、切片尺寸 213×120（640/3、360/3）、编号 `1-1`…`3-3`；
+  悬停镜像 `scaleX(-1)`、真点后像素红→蓝且宽高不变 640×360；
+  调整 11 滑块、亮度 +0.50 预览均值 112.6→157.2、导出全分辨率且确实变亮；
+  视频节点按钮行不变。
+- `check-adjust-core.js` 26 项像素级自检全通过（恒等 / 各滑块正负值 /
+  无 NaN / 亮度方向 / alpha 不变）。
+- `verify-image-grid-bulk.js`：5×5 = 25 张全部留住且都带 media，26 个节点。
+- 回归：视频四工具 `8 DONE`（6 个产物节点）、音频截取导出生成新 m4a 节点。
+- 截图 `image-tools-{grid,mirror,adjust}-dark.png`、`image-tools-adjust-light.png`。
+
+## 图片节点第四个工具：裁剪（2026-11-13，分支 `feat/image-crop`）
+
+用户「增加裁剪功能」。因为上一轮刚把上游的「裁切 / 扩图 / 宫格」三个入口删掉，
+这里存在两条路，先按约定问过再动手，用户选 **「按新体系重做」**：
+不走上游那个被过滤的 `crop` 弹窗，而是和宫格切分 / 镜像 / 调整共用
+`xcat-image-tools.js` 的同一套弹窗骨架、`upload()` / `commit()` / `buildResultNodes()`
+内核。**`E:\Toonflow` 里没有独立的图片裁剪组件**（`imageEditor.vue` 是标记 / 局部重绘，
+`imageOutpaint.ts` 是扩图提示词），所以只借交互定位，实现是本包自研。
+
+| 项 | 做法 |
+| --- | --- |
+| 按钮 | `裁剪`，文字按钮，`order:-10`，排在宫格切分 `-9` 之前；弹窗宽 520px |
+| 选区 | 拖拽新建 / 框内拖动 / 四角 + 四边共 8 个手柄缩放，带三分构图参考线，框外用 `box-shadow: 0 0 0 9999px rgba(0,0,0,.55)` 压暗 |
+| 比例 | **12 项**：自由 / 原图 / 1:1 / 4:3 / **3:4** / 3:2 / **2:3** / 16:9 / 9:16 / **21:9** / **9:21** / 自定义。横竖成对，锁定时以拖拽方向的「对边 / 对角」为固定点，按宽度反推高度，再按到边界的可用空间统一收缩 |
+| 自定义比例 | 选中「自定义」胶囊后展开「宽 : 高」两个整数输入（默认 5:4），实时显示 `21 : 9 · 2.333` 这类比值并立即重算选区；非法值（0 / 空 / 非数）退回自由比例并提示。任何比例都能锁定，不必再逐个补预设 |
+| 数值 | X / Y / 宽 / 高 四个原图像素输入，与选区双向联动、越界自动 clamp；方向键微调 1px，Shift 10px；「全选」按当前比例取最大内接矩形 |
+| 输出 | 初始居中 80% 选区；`drawImage(img, sx,sy,sw,sh, 0,0,sw,sh)` 按**原图全分辨率**裁切 → PNG → `/api/media` → 1 个 `asset-image` 节点，名 `原名 · 裁剪 W×H`，原图保留 |
+
+### 关键技术点
+
+1. **坐标系一律用原图像素**。`S.rect` 存 `{x,y,w,h}`（原图），只在 `paintCrop()`
+   渲染时乘 `S.scale`；导出直接取整交给 `drawImage` 九参数形式，预览缩放不引入
+   取整误差。
+2. **预览框尺寸由 JS 显式算出**，`.xcat-im-crop-frame` 直接设 `width/height`
+   （`scale = min(availW/natW, availH/natH)`），图片 `position:absolute; inset:0;
+   width:100%; height:100%`。照旧避开「父级 `display:grid` + `max-height:100%`
+   退化成 none，竖向媒体被裁」的坑。实测 640×360 → 416×234，比例误差 < 0.02。
+3. **8 个手柄 + 比例锁定共用一套 `cropResize()`**：由 `dir` 里的 `n/s/e/w`
+   推出固定点 `fx/fy` 与方向 `dx/dy`，锁比例时 `w = max(w, h*r); h = w/r`，
+   再用 `lim = min(availW, availH*r)` 收缩，最后 clamp 回画布内。
+4. **纯前端、后端零改动**，沿用 `POST /infinite_canvas/api/media`，刷新浏览器即可。
+
+### 踩过的坑
+
+- **命中浏览器缓存时「应用」按钮被压成 disabled**：`openCrop()` 末尾那行
+  `run.disabled = true` 排在 `init()` 之后。图片未缓存时 `load` 事件异步、最后
+  由 `paintCrop()` 设回可用；**已缓存时 `img.complete` 为真、`init()` 同步跑完，
+  随后被这行覆盖成禁用**，表现为「打开裁剪什么都没干，按钮却点不了」。
+  把禁用挪到 `init()` 之前即修复，并在验证脚本里加了「第二次打开」的专项回归。
+- 整图选区（点了「全选」）时直接填 `X` 会被 clamp 到 0，因为宽度已占满、
+  选区不能右移 —— 这是裁剪器的正常行为，不是联动失效；先缩小宽高再填 X/Y 即可。
+- 数值输入隐藏了原生 `::-webkit-*` spin button，否则四列布局里箭头会挤掉数字。
+
+版本号 `xcat-image-tools.js?v=20261113d→g`（e 首版、f 修缓存 bug、g 补比例）、
+`xcat-overrides.css?v=20261113ac→ae`。`index.html` 注释同步改成「四者」。
+
+### 验证（8198 干净实例 + CDP 9333 真鼠标 / 真键盘）
+
+- `verify-image-crop.js` **全部通过**：按钮行 `裁剪/宫格切分/镜像/调整/下载/删除`
+  且 order `-10/-9/-8/-7/90/99`；弹窗 12 比例 / 4 输入 / 8 手柄 / 4 三分线、
+  frame 与 img 同为 416×234、等比无裁切；真拖拽框选换算误差 <6px；拖 se 手柄
+  放大；**10 个预设逐个真点击校验 w/h（误差 <0.02 且选区不越界）**；自定义
+  7:5 生效、非法值回退、切回自由后收起；全选 / 四格数值联动 / 越界 clamp /
+  → 与 Shift+→ 微调；导出 300×220，**五个取样点跨红蓝白三色块全部与源图对应
+  坐标像素一致**（证明是全分辨率裁切而非缩放、且位置正确）；缓存命中再次打开
+  「应用」仍可用；亮色主题截图；视频按钮行与宫格切分弹窗回归不变。
+- `verify-image-tools.js` 更新按钮行期望后**回归全通过**：9 张切片 213×120、
+  镜像红→蓝、调整 11 滑块均值 112.6→157.2、导出 640×360。
+- 截图 `image-crop-dark.png`、`image-crop-light.png`、
+  `image-crop-custom-dark.png`、`image-crop-before-apply.png`。
+- `node --check` 通过、CSS 括号配对 720/720；四处 `index.html` /
+  `xcat-image-tools.js` / `xcat-overrides.css` 哈希一致。只改前端，刷新即可。
+
+### 补齐比例预设与自定义比例（同日，用户反馈）
+
+用户「怎么只有 1:1、4:3、3:2、16:9、9:16，3:4 呢？2:3 呢？21:9 呢？」——
+首版只给了横版 + 一个竖版 `9:16`，**漏了所有镜像比例和超宽**。补法：
+
+- `CROP_RATIOS` 扩到 **12 项**：在原 7 项基础上补 `3:4 / 2:3 / 21:9 / 9:21`，
+  形成 `4:3↔3:4`、`3:2↔2:3`、`16:9↔9:16`、`21:9↔9:21` 四组横竖对称；
+  胶囊行 `flex-wrap` 自动折成两行（第一行 9 项、第二行 3 项），实测无重叠。
+- 再加第 12 项 **「自定义」**，点开后展开「宽 : 高」两个整数输入（默认 5:4），
+  `S.customRatio = w/h`，`ratioValue()` 对它单独分支；输入即重算选区并实时显示
+  `21 : 9 · 2.333`，非法值退回自由比例并提示。这样任何比例都不必再补预设。
+- **坑**：`.xcat-im-crop-custom` 设了 `display:flex`，会盖掉浏览器 UA 的
+  `[hidden]{display:none}`，必须自己再写一条
+  `#app .xcat-im-crop-custom[hidden] { display: none; }`，否则这行永远收不起来。
+- 展开自定义后 `.xcat-ae-body` 高 554px = `scrollHeight` 554px，内容完整可见、
+  不会把底部按钮挤出弹窗。`21:9` 实测选区 640×274（Y=43 居中）。
+
+## 画布缩放上限 200% → 1000%（2026-11-13，分支 `feat/zoom-range`）
+
+用户「画布放大 200 就不能放大了，我希望像 comfyui 一样可以放大到 1000」。
+
+**数值不是猜的**：解 ComfyUI 前端包 `treeUtil-D1drLutg.js.map` 的
+`sourcesContent`，真源 `src/lib/litegraph/src/DragAndScale.ts` 构造函数里是
+`this.max_scale = 10` / `this.min_scale = 0.1`，即 **10%～1000%**。
+本包是 Vue Flow 不是 litegraph，但语义一一对应。
+
+**卡在 200% 的是四处独立上限，缺一不可**：
+
+| 位置 | 原来 | 现在 |
+| --- | --- | --- |
+| 主画布 `<VueFlow id="demo">` props | `min-zoom:.02` / `max-zoom:2` | `max-zoom:10`（下界不动） |
+| 工作流预览 `<VueFlow id="wf-preview">` props | `min-zoom:.2` / `max-zoom:2` | `max-zoom:10` |
+| 预览弹层 `h(w)` 里的 `zoomTo` clamp | `Math.min(Math.max(w,.2),2)` | 上界 10 |
+| 右下工具条 `setZoom(z)` | `Math.min(2,Math.max(.02,z))` | `Math.min(10,Math.max(.02,z))` |
+| Vue Flow store 内置默认值（兜底） | `minZoom:.5,maxZoom:2` | `minZoom:.1,maxZoom:10` |
+
+props 优先于 store 默认值：两个 VueFlow 都显式传了 `min-zoom`/`max-zoom`，
+store 默认只在初始化瞬间生效，所以**只改 store 默认值不解决问题**；反过来
+只改 props 也行，但把 store 一起对齐可避免以后新增未传 props 的实例又卡 2。
+d3 在 `Viewport` mounted 时 `scaleExtent([store.minZoom, store.maxZoom])`，
+实测 `d3Zoom.scaleExtent() === [0.02, 10]`。下界刻意保留主画布原有的
+`.02`（2%）和预览的 `.2`，不因为对齐 ComfyUI 就削弱已有能力。
+
+**UI 配套**：
+- 工具条百分比输入本来就是 `min:1,max:1000`，但被 `setZoom` 的 2 砍掉，
+  现改成 `min:2,max:1000`，与下界 `.02` 对齐；填 1000 直接到 1000%。
+- `.tb-zoom` 从固定 `width:60px` 改成 `width:auto;min-width:60px`，
+  `.tb-zoom-val` 加 `white-space:nowrap`。官方按钮按最多 3 位（100%）设计，
+  `1000%` 是 4 位，固定宽度会把下拉箭头挤出按钮（实测改后按钮 76px =
+  文字 40px + caret 16px + gap 4px + padding 16px，无重叠）。
+- **顺手修一个边界 bug**：「放大 / 缩小」原来用四舍五入后的百分比
+  `zpct/100*1.2` 算步进，在 2% 时 `2×1.2=2.4%` 又被取整成 2%，连点放大
+  永远卡在下界；改用真实 `viewport.zoom*1.2`。
+
+**验证**（8198 干净实例 + CDP 9333 真滚轮 / 真鼠标，`verify-zoom-range.js`
+**25 项全通过**）：
+- `scaleExtent = [0.02,10]`；真滚轮 36 次把 `0.7 → 10`、再滚 8 次仍 10；
+  反向 60 次停在 `0.02`。`.vue-flow__transformationpane` 的 transform 实测
+  `matrix(10,0,0,10,…)`。
+- 两层网格 `pattern` 宽度从 `10/100` 变成 `100/1000`（`scaledGap=gap×zoom`），
+  无摩尔纹、无 pattern id 撞车。
+- 工具条显示 `1000%`、输入 `2000` 收敛到 1000、`500` 精确生效（旧版卡 200）、
+  输入 `1` 收敛到 2%；2% 点放大脱离下界、1000% 点缩小到 833%；
+  有节点时「适应视图」把 1000% 收敛到 2.722。
+- 注入一个 480×270 素材文本节点，1000% 下 DOM 尺寸 `4800×2700`
+  （比值精确 10.000），截图里文字清晰锐利，不是位图拉伸。
+- **两个验证手法坑**（不是产品 bug，记下来免得以后误判）：
+  ① 缩放 transform 挂在 `.vue-flow__transformationpane`，不是
+  `.vue-flow__viewport`；② 切主题必须点真实 `.cm-item`（它会更新 Vue 的
+  `theme` ref → `patternColor`），只 `setAttribute('data-theme','light')`
+  会让 CSS 底色变亮但网格线仍是暗色 `#191919`，截出错误的"亮色网格"。
+  真实亮色下两层线是 `#e6e6e6` / `#ebebeb`。
+
+**改动文件**：`index-BXU58XDe.js`（5 处字面量 + 2 处按钮步进）、
+`xcat-overrides.css`（按钮宽度）、`index.html`（bundle `r→s`、
+overrides `ae→af`）。**纯前端，后端零改动、不用重启，刷新即可**。
+截图 `zoom-popup-1000-dark.png`、`zoom-1000-light-real.png`、
+`zoom-node-content-1000-dark.png`。四处哈希一致。
+
+## 工作流配置自动识别分辨率选择器（2026-11-13，分支 `feat/workflow-resolution-autofill`）
+
+用户实际在用的 `image_minimax_h3_image_t2i.json` 里有 `class_type: "ResolutionSelector"`
+（inputs `aspect_ratio / megapixels / multiple`），手工配置的 `.fields.json` 里
+「高宽比」只有 `options: ["1:1 (Square)"]` 一项、「百万像素」没有 min/max/step，
+于是画布节点上的比例下拉只有一个选项。现在上传 / 打开工作流配置时自动识别并补全。
+
+**识别规则（用户选定）**：不看 `class_type`，只要一个节点同时有
+`aspect_ratio` 与 `megapixels` 两个输入就按分辨率选择器处理。官方
+`ResolutionSelector`、本包 `🐈‍⬛ResolutionSelector`（DynamicCombo / Custom）
+和同结构的第三方节点都覆盖。
+
+| 环节 | 行为 |
+| --- | --- |
+| 后端 `GET /workflows/{name}/fields` | 该节点从没配置过 → 自动注入 `aspect_ratio`（select，`auto:true`）与 `megapixels`（number，`auto:true`）两条；已配置过则只补内容、不擅自改动用户的勾选 |
+| `aspect_ratio` | 自动填完整比例 + 中文名「高宽比」；默认 `1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9 / 21:9` 八项，本包 `🐈‍⬛` 节点追加 `Custom` 共九项。用户自定义过的额外选项保留在末尾 |
+| `megapixels` | 自动填中文名「百万像素」与 `min / max / step`：官方 `0.1 / 16 / 0.01`，本包节点 `0 / 16 / 0.01`（对齐 `nodes/resolution_selector.py` 的 0.01 步长） |
+| 默认值 | 取工作流里的当前值；DynamicCombo 的 dict 值取其中的 `aspect_ratio` 选中项 |
+| 前端字段弹窗 | 两条自动勾上、完整选项与数值直接显示，footer 追加「· 已自动识别分辨率选择器」，并置脏让「保存配置」可落盘 |
+| 选项真源 | 弹窗打开时再 `fetch('/object_info/<class_type>')`，用节点真实定义的 `options` 与 `min/max/step` 覆盖自动字段（第三方节点也能对），失败静默回退内置表 |
+| 执行时回填 | `_apply_params` 对 dict 型 `aspect_ratio` 只替换 `{"aspect_ratio": 选中值}`，保留 `custom_width/custom_height`，避免把 DynamicCombo 写成字符串导致 API 400 |
+
+**不擅自改用户文件**：自动填入只在读取时动态生效，所以已有的
+`.fields.json`（即使只有一项选项）不用重新保存，画布节点刷新即可选到全部比例；
+只有点「保存配置」才把补全结果写进 `<name>.fields.json`。
+前端 `Bo()` 与节点预览会过滤掉内部哨兵记录，画布不会多出控件。
+
+**取消自动的机制**：把两条自动字段都取消勾选并保存，会写入
+`{"nodeId": id, "key": "__xcat_no_auto__"}` 哨兵（`fields` 数组 +
+顶层 `noAutoResolution` 都写），后端跳过注入、弹窗不再自动勾，但仍可手动勾选；
+删掉工作流重新上传 / 清空配置即恢复自动。哨兵必须随 `GET → PUT` 往返，
+只写顶层会「关不掉」（第一版踩过，已修）。
+
+**改动文件**：`__init__.py`（识别 / 补全 / 注入 / 哨兵 / `_apply_params` dict 回填）、
+`index-BXU58XDe.js`（`NodeFields` 的 `p()` 允许 dict 型 `aspect_ratio` 成为字段行、
+`auto` 标记与哨兵输出、footer 提示、`xcatEnhance()` 读 object_info、
+`Bo()` 过滤哨兵）、`dist/index.html`（bundle `s→t`）。**改了后端 Python，
+三处部署副本已同步，自己的 ComfyUI 必须重启才生效。**
+
+**验证**：`verify-resolution-fields.py` 26 项全通过（注入 / 残缺补全 / 哨兵 /
+本包 dict / 第三方 / 普通节点不误伤 / `_apply_params` dict 回填）；
+`verify-resolution-ui.js` 33 项全通过（弹窗自动填入与落盘、本包 9 项含 Custom、
+画布节点下拉 8 项与 16:9 写回 params、取消自动不复发、暗亮主题）。
+截图 `resolution-config-dark.png`、`resolution-config-light.png`。
+只改前后端逻辑，CSS 未动（overrides 版本仍是 `af`）。
+
+## 画布顶部状态条：菜单栏监视器进画布（2026-11-13，分支 `feat/canvas-monitor`）
+
+用户给了一张 ComfyUI 菜单栏截图，要求「这些也出现在画布里」——即
+`RAM Cleanup / VRAM Cleanup ┃ CPU / RAM / GPU / VRAM / TEMP` 整套状态条。
+
+**位置**：画布顶部 `.canvas-tabs-strip`（38px 高）右侧的整段空白，绝对定位
+`top:3px; right:12px`，宽 346px、高 32px，与 ComfyUI 菜单栏里的位置一一对应，
+不占标签栏的 flex 流、不遮画布内容、不覆盖「+」新建画布按钮。
+顶部标签栏与 `.vue-flow` 是兄弟节点，所以状态条天然不在画布图层里。
+
+**实现**：新增 `frontend/dist/assets/xcat-monitor.js`，`index.html` 以
+`?v=20261113a→b` 注入。外观（配色、38×30 段、50×30 两行按钮、1×22 分隔符、
+数值格式、tooltip、峰值记录）逐字段对齐 `web/monitor.js`，读数是同一份数据源：
+
+```
+GET  /xxxxxlcat-monitor   500ms 轮询，cpu / ram / gpus / disk / ts
+POST /prompt              RAM Cleanup → 🐈‍⬛RAMReclaim（clean_file_cache、
+                          clean_processes、clean_dlls、retry_times:3）
+                          VRAM Cleanup → 🐈‍⬛VRAMSweep（offload_model、
+                          offload_cache），client_id = xxxxxlcat-canvas-monitor
+```
+
+画布是独立 iframe，拿不到 ComfyUI 前端的 `app` / `api` 模块，所以直接用**同源
+fetch**（实测 iframe 内 `/xxxxxlcat-monitor` 返回 200，字段完整），不需要父页面
+桥接、不需要改后端、不需要新增路由。清理按钮点下去是真正排入 ComfyUI 队列执行，
+不是摆设；两个按钮各自独立禁用 800ms，互不吞点击（首版误用了全局 busy 标志，
+已修）。
+
+**两处必要的适配**：
+- 深色底板 `rgba(23,23,24,.94)` + 6px 圆角：状态段原本是
+  `rgba(255,255,255,.07)` 半透明白底 + 白字，那是针对 ComfyUI 深色菜单栏写的；
+  画布亮色主题下顶栏是浅灰，会白字白底看不见。给整条一个深色底板后，暗/亮
+  两种主题都可读，观感也与菜单栏一致。
+- 每次轮询都检查 `root.isConnected`：Vue 重渲染 / 主题切换可能换掉标签栏子节点，
+  掉了就在 500ms 内自动挂回（验证里手动 remove 过一次）。
+
+**手势隔离**：状态条在 `.vue-flow` 之外，但上游把双击建节点、滚轮缩放等监听绑在
+window 上，所以在**冒泡阶段**拦 `pointerdown / mousedown / dblclick / wheel /
+contextmenu`。注意不能在 capture 阶段拦 —— 祖先节点 capture 里
+`stopPropagation()` 会让事件到不了按钮自身，清理按钮就点不动了。
+
+**验证**（8198 干净实例 + CDP 真鼠标，`verify-canvas-monitor.js` **全部通过**）：
+挂载父节点与 z-index、7 项结构与文案顺序、位置（`strip.right - root.right = 12`、
+底边 35 ≤ 38、不覆盖「+」）、五格数值与 tooltip 逐项对照实时遥测（CPU 14%、
+RAM 48%、VRAM 29.1G / 91.5% 填充、TEMP 39°C）、填充高度误差 <0.2%、
+手动移除后 500ms 自动重挂、双击不弹新建节点菜单也不建节点、滚轮不缩放、
+两个清理按钮的 `/prompt` 载荷与独立禁用恢复、真实 `.cm-item` 切亮色后的底板色、
+标签栏 / 左栏 / 右下工具条 / 缩放上限 10 全部回归。
+截图 `canvas-monitor-{dark,light}.png`、`canvas-monitor-strip-{dark,light}.png`（3× 放大）。
+
+**只改前端，后端零改动，刷新即可**；三处部署副本已逐文件同步，四处哈希一致。
+`web/monitor.js` 未动，菜单栏原状态条保持原样，两边各读各的接口、互不依赖。
+
+## 生成产物留在节点自己的框里 + 素材节点真正禁连（2026-11-13，分支 `feat/gen-result-new-node`）
+
+用户反馈三件事：① 点「运行」后产物要落在**原节点里**，不要新建节点；② 产物不该出现在
+接入端口，第一行显示**接入的素材**；③ 素材节点虽然没有左侧接入口，却仍然能接线。
+
+**先分清楚节点里的两个「框」**（上游组件，看 DOM 实测）：
+
+| DOM | 位置 | 数据 | 作用 |
+| --- | --- | --- | --- |
+| `.node-media > .media-stack` | 节点本体（收起态就可见的大缩略图区） | `data.media` | **节点自己的产物框**；为空时生成节点显示 `.xcat-gen-empty`「选择工作流并运行，生成结果会显示在这里」 |
+| `.node-panel > .media-strip` | 点击节点展开的面板第一行（**提示词框上方那条**） | `q()` 过滤后的 `data.inputMedia` | **接入端口**：只列带 `sourceId` 的项（= 其他节点连线接过来的素材）；节点自身的上传 / 粘贴 / 生成产物一律不进来 |
+
+我第一版把「产物留在原节点」理解反了，改成给每个产物新建 `asset-*` 节点——所以产物
+跑到节点外面去了。正确行为是产物写回**原节点自己的产物框**，第一行只保留接入素材。
+
+**根因**：
+- 执行成功回调 `Oi()` → `O(v,se)`，而上游 `O()` 是 `W.data.media=[T[0]]`，只取第一个
+  产物；并且 `q()` 把 `data.media` 也塞进第一行的 `own` 组，于是产物同时出现在
+  「接入端口」和产物框里，第一行就被生成结果占掉了。
+- 素材节点的左侧 target handle 只加了 `xcat-port-hidden` class（CSS `opacity:0;
+  pointer-events:none`），**DOM 必须保留**（删掉会让已有连线的末端退到节点左上角
+  悬空）。但 Vue Flow 靠 `handleBounds` 找端口，`pointer-events:none` 挡不住；更关键
+  的是上游 `onConnectEnd` 有一段「拖到节点本体就直接建边」的兜底逻辑，完全绕过 handle
+  检测 —— 这才是「没有接入口还能接线」的真凶。
+
+**改动**（`frontend/dist/assets/index-BXU58XDe.js`，bundle `x↔y`、`xcat-overrides.css?v=ag`）：
+1. `O()` 还原并补全：`W.data.media = T`（**全部**产物，不再只取 `[0]`）、
+   `index = 0`、`F(v,[T[0]])`。**不新建节点、不碰 `inputMedia`、不自动连线。**
+2. `q()`：**只返回 `inputMedia` 中带 `sourceId` 的项**（所有角色统一，不再区分 `gen-`/`asset-`），
+   即第一行只显示「其他节点接过来的素材」；`data.media`（自身上传 / 粘贴 / 生成产物）
+   完全不进第一行，只在产物框里显示。见下一节「二次纠正」。
+3. 素材节点禁连四重拦截：节点渲染给 target handle 传 `connectable:xcatIsGen(e.data)`；
+   `xcatIsAssetTarget(id)` 判定 + 在 `onConnect` (`Ge`)、`onConnectEnd`（节点本体兜底
+   分支）、`le()`（同步 `inputMedia`）、`oe()`（媒体变化同步下游）四处拦掉 `asset-*`
+   目标。`xcat-port-hidden` 的 CSS 保留，已有连线的几何不受影响。
+   调试钩子 `window.__xcatIsAssetTarget` / `window.__xcatSpawnResults`。
+
+**验证**（8198 + CDP 真鼠标，`verify-gen-result.js` **ALL PASS**）：
+- `O()` 写回后节点总数不变（4→4，`before=4 after=4`）；原节点 `media` 拿到两个产物、
+  `inputMedia` 仍是「接入素材.png」、坐标不变；边缘数不变（不自动连线）。
+- 产物框 `.media-stack-card` title = `生成结果 1.png, 生成结果 2.png`。
+- 点开节点面板后第一行 `.media-strip .strip-item` = `["接入素材.png"]`（无产物）；
+  素材节点 B = `["素材B.png"]`；无接入素材的生成节点 D 第一行为空、产物框仍显示自身产物；
+  无产物的生成节点 C 显示 `.xcat-gen-empty` 占位。
+- 端口 class：生成节点 target handle 带 `connectable`，素材节点不带（只有
+  `xcat-port-hidden`）；`xcatIsAssetTarget` 判定正确。
+- 真鼠标从生成节点拖到素材节点本体 / 隐藏左端口都不建边且 `inputMedia` 不被污染；
+  生成节点 → 生成节点仍能连线，`le()` 同步未被误伤。
+- 状态条、缩放上限 10（1000%）、左栏、右下工具条回归。
+- 截图 `gen-own-box-dark.png` / `gen-own-box-light.png`。
+
+**纯前端，后端零改动，刷新即可**；三处部署副本已同步，四处哈希一致。
+`Oi()` 仍调用 `O(v,se)`，真实执行完成链路走的就是这套逻辑。
+
+### 二次纠正：第一行「只认接入素材」，不是「节点自身的素材」（2026-11-13 晚）
+
+用户第二轮反馈原话：「我说的是**提示词上面那个区域**里的内容！！」「`@image#1:Clipboard_Screenshot.png`
+这里是显示**接入的素材**，而不是显示**生成的素材**！！！接入是指**其他节点接过来的素材**在这里显示，
+**不是节点自身生成的内容**」。
+
+定位：那一条就是 `.node-panel > .media-strip`，`q()` 是唯一数据源。上一版只对 `gen-*` 收窄，
+留下两个口子：① 素材节点（`asset-*`）第一行照旧显示自己的 `media`；② `gen-*` 的 `inputMedia`
+里若混进**没有 `sourceId`** 的项（历史数据 / 自身上传残留），也照样显示。
+
+改法（一行过滤，`q()` 不再看 `role`）：
+
+```js
+q = computed(() => L.value                       // L = data.inputMedia
+  .map((N, i) => ({ item: N, group: 'input', i, sep: false }))
+  .filter(x => !!(x.item && x.item.sourceId)));  // 只有连线接进来的才算「接入」
+```
+
+`sourceId` 正是 `le()`（连线）/ `ye()` watch（上游媒体变化同步下游）写进 `inputMedia` 时打的标记，
+所以「有 `sourceId`」= 来自其他节点，语义与用户说的一致。`group:'own'` 那套（把 `media` 塞进
+第一行、拖动排序、`sep` 分隔线）全部不再产生——自身素材的删除/切换走产物框
+`.media-stack-card` 上的 `.card-delete` 与 `.media-dot`，入口没丢。
+
+**验证**（`verify-strip-input-only.js`，8198 + CDP 真鼠标，**12 项 ALL PASS**）：
+
+| 场景 | 期望 | 结果 |
+| --- | --- | --- |
+| 生成节点 `inputMedia=[无 sourceId 的 Clipboard_Screenshot.png]` + 产物 | 接入条空、产物在产物框 | 条 `[]`、产物框 `["自身产物.png"]` |
+| 生成节点 `inputMedia=[带 sourceId 的接入图]` | 接入条显示接入图 | `["接入图.png"]` |
+| 素材节点 `media=[自有素材]` | 接入条空、素材在产物框 | 条 `[]`、产物框 `["自有素材.png"]` |
+| 真鼠标连线 上游→下游 | 下游接入条出现上游素材、条目带 `sourceId` | `["上游素材.png"]` / `sourceId=n-src` |
+| 下游再运行出产物 | 产物进产物框，接入条不变、`inputMedia` 不被污染 | 产物框 `["新产物.png"]`、条 `["上游素材.png"]` |
+
+截图 `strip-input-only.png`；改前对照 `probe-strip-own.png`（主图 8190/8188 实例需刷新一次
+才能拿到 `index-BXU58XDe.js?v=20261113aa`）。
+
+## 再次运行 = 覆盖原节点，不再新建子节点（2026-11-13，同一分支）
+
+用户要求：「当生成节点已经生成之后，再次点击运行，那么覆盖原来的内容，而不是创建新节点。」
+
+**根因**在节点组件的运行函数 `Nn()` 第一行（上游原始逻辑，链式生成设计）：
+
+```js
+const S = H.value.length ? pe.spawnChildNode(t.id) : t.id;   // H = data.media
+```
+
+只要节点**已经有产物**（`media` 非空），就 `spawnChildNode(t.id)` 派生一个子节点接结果。
+`spawnChildNode`（store 内 `ue()`）做三件事：把**源节点现有产物**复制成新节点的
+`inputMedia` 并打 `sourceId`、复制 `workflow/params/randomFields/role`、**自动建一条边**。
+所以第二次点运行就长出一个带接入素材、已连线的新节点——这也是之前「生成的素材出现在接入端口」
+的另一半来源。
+
+**改动**（bundle `z→aa`）：`Nn()` 里固定 `const S = t.id;`，其余分支本来就有 `S!==t.id`
+判断（`markUploading` / `clearUploading` / 失败时 `removeNodes([S])`），自动全部跳过。
+完成回调 `Oi(v,T,images)` → `O(v,se)` 本来就是 `W.data.media = T` 全量替换，所以是**覆盖**不是追加。
+
+`spawnChildNode` 函数本身保留（其他派生入口不受影响），只是运行按钮不再调用它。
+
+**验证**（`verify-rerun-overwrite.js`，8198 + CDP 真鼠标点击「运行」，`fetch` 本地 stub：
+`POST /api/execute` 返回假 `prompt_id`，`GET /api/prompts/<id>` 直接返回 `done + images`）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 节点已有 `media=["旧产物.png"]` + `inputMedia=["接入图.png"]` | 起始 1 节点 / 0 边 |
+| 第 1 次点运行 | 仍 1 节点、id 不变、0 边 → `media=["结果1.png"]`（旧产物被覆盖）、`inputMedia` 不变 |
+| 第 2 次点运行 | 仍 1 节点、0 边 → `media=["结果2.png"]`（**覆盖**，不是 `结果1+结果2`） |
+
+截图 `rerun-overwrite.png`。纯前端，刷新即可；三副本已同步，四处哈希一致。
+
+### 硬规则：任何地方都不得把「节点已有产物」写成「接入素材」（bundle `aa→ab`）
+
+用户要求：「不允许将当前节点已有产物当作『接入素材』，找到这些代码，并删除类似的代码。」
+
+全量排查 bundle 里所有写 `sourceId`（接入标记）的位置，只有 4 处，其中**只有 1 处是违规的**：
+
+| 位置 | 行为 | 处理 |
+| --- | --- | --- |
+| `ue()` = `spawnChildNode` | 把源节点 `data.media` 复制成新节点 `inputMedia`（打 `sourceId`）+ **自动建边** | **删除**：`const X=[]`，并去掉 `ke(v,null,he,null)` 自动连线；派生节点不再继承任何接入项 |
+| `le()` = `onConnect` | 连线时把**源节点**当前产物写进目标 `inputMedia` | 保留（这是「其他节点接过来」的正当接入） |
+| `oe()` = 上游媒体变化 watch | 上游产物更新时同步到已连线的下游 `inputMedia` | 保留（同上，方向永远 source→target） |
+| `Se()` = 断线清理 | 按 `sourceId` 移除断开的接入项 | 保留 |
+
+排查时同时确认：`O(v,T)`（完成写回）只碰 `data.media`；`F(v,T)` 只是按产物宽高比调节点尺寸；
+`I()` 是素材条同组内排序；`xcat-paste.js` / `xcat-media-core.js` / `xcat-new-node.js` 建节点时
+`inputMedia` 一律初始化为 `[]`；扩展脚本里没有任何 `spawnChildNode` 调用。
+
+**验证**（`verify-no-own-input.js`，8198 + CDP，**8 项 ALL PASS**）：直接调用
+`window.__xcatGraph.spawnChildNode('own-src')`（源节点 `media=["我的产物.png"]`、
+`inputMedia=["接入图.png"]`）→ 新节点 `inputMedia=[]`、`media=[]`、边数仍 0；源节点两列表都不变；
+再调 `O()` 写一个新产物 → `media` 被覆盖、`inputMedia` 仍是接入图。
+另跑 `verify-strip-input-only.js`（12 项）、`verify-rerun-overwrite.js`（12 项）、
+`verify-gen-result.js`（其中「素材节点第一行显示自己素材」的旧断言已按新规则改为「应为空」）全 PASS。
+
+## 运行进度环 = 选中高亮框，两条线要重合（2026-11-13，`xcat-overrides.css` `ag→ah`）
+
+用户：「节点运行中的进度 与高亮的框不重叠，应该要重叠才对。」
+
+**两者本是两条不同几何的描边**：
+
+| 元素 | 画法 | 占据的像素带 |
+| --- | --- | --- |
+| 选中高亮框（`.vue-flow__node.selected .demo-node`） | `box-shadow: 0 0 0 3px`，**向外**扩、无模糊 | 盒子外沿起 `[-3px, 0]` |
+| 运行进度环（`.node-ring` 里的 `<rect>`） | SVG `inset:0` + `stroke-width:3`，**以盒子边缘为中心线** | `[-1.5px, +1.5px]` |
+
+于是画面上白框在外、蓝弧在内，肉眼是两条错位的线（截图 `probe-running-node.png`）。
+
+改法（纯 CSS，写在 `xcat-overrides.css`，不动 dist 上游文件）：
+
+```css
+#app .demo-node > .node-ring {
+    inset: calc(var(--xcat-link-w) / -2);            /* -1.5px，反向外扩半个线宽 */
+    width: calc(100% + var(--xcat-link-w));          /* 不能写 auto：SVG 会退回固有 300×150 */
+    height: calc(100% + var(--xcat-link-w));
+}
+#app .demo-node > .node-ring rect {
+    stroke-width: var(--xcat-link-w);
+    rx: calc(12px + var(--xcat-link-w) / 2);         /* 节点 radius 12，上游写死 19 是配 radius 20 的 */
+    ry: calc(12px + var(--xcat-link-w) / 2);
+}
+#app .vue-flow__node.selected .demo-node .node-ring-track { stroke: transparent; }
+```
+
+- 线宽全部走 `--xcat-link-w`（3px），改一处，**高亮框 / 连线 / 进度环**三者同步；
+- 环的中心线因此落在高亮带正中，外缘 = 盒子 +3px、内缘 = 盒子，与 `box-shadow` 完全重合；
+- 选中时白框本身就是「轨道」，再叠 20% accent 轨道会把白框染脏灰，故隐藏 `.node-ring-track`；
+- 未选中时环仍在盒子外 1.5px（不跳变），只是没有白框垫底。
+
+**验证**（`verify-ring-align.js`，8198 + CDP，真鼠标点运行，11 项 ALL PASS）：SVG `inset=-1.5px`、
+尺寸 `483×273`（480/270 + 线宽）、`stroke-width=3`、`rx=13.5`；按缩放折算后左/右外扩各 `1.500`，
+环外缘外扩 `3.000`、内缘 `0.000`，与白框带完全一致；取消选中后偏移仍 `1.5`。
+改前 / 改后对照图 `ring-align-compare.png`。
+
+## 画布「LoRA 栈」节点（2026-11-14）
+
+画布上的节点一直是「一条工作流 + 素材 + 字段」的模型，没有「改模型」的位置。
+新增的第九种节点 `role = "lora"` 补上这一层：它自己**不跑工作流**，只保存一份
+LoRA 列表，运行时由后端把整条链插进下游生成节点的工作流里 —— 位置正是
+「UNet / Checkpoint 加载器之后」。
+
+### 数据契约
+
+```jsonc
+// node.data
+{
+  "role": "lora",
+  "workflow": "",                 // 控制类节点不带工作流
+  "loras": [                      // 顺序即应用顺序
+    { "name": "Krea2/35mmKrea2.safetensors", "strength": 0.75, "enabled": true }
+  ]
+}
+```
+
+- `name` 直接取自 `/object_info/LoraLoaderModelOnly` 的 `lora_name` 选项，
+  与 ComfyUI 自己的下拉完全同源（含 `Krea2\xxx.safetensors` 这类子目录写法）；
+- `strength` 夹在 `±100`，`0` 与 `enabled:false` 都表示「跳过」；
+- 目录里已删除/改名的文件在运行前被过滤（只打一行日志，不让整条工作流失败）。
+
+### 后端：把链插到 MODEL 源头之后
+
+`_inject_loras(workflow, loras)`（`infinite_canvas/__init__.py`）：
+
+1. **找插入点不靠 class_type 白名单**：所有 `"model": [上游id, 0]` 都是连线，
+   顺藤反查来源；那个「被 `model` 引用、自己又没有 `model` 输入」的节点就是
+   MODEL 链的源头 —— `UNETLoader` / `CheckpointLoaderSimple` / GGUF / 第三方
+   加载器一视同仁。多个源头时优先名字里带 `loader` / `checkpoint` 的。
+2. **先记下要被改接的连线，再插节点**：插完再扫会把新链自己的 `model` 也改掉，
+   直接自环。
+3. 逐个插 `LoraLoaderModelOnly`，`id` 取现有纯数字 id 的最大值 + 1
+   （`23:1` 这类带冒号的跳过，不会撞）。
+4. 原本吃源头 MODEL 的连线全部改吃链尾。
+
+改完即 `加载器 → LoRA1 → LoRA2 → … → 原消费方`，`CheckpointLoaderSimple` 的
+CLIP / VAE 输出不受影响。函数返回插入条数，`POST /api/execute` 的响应里带
+`{"prompt_id": …, "loras": n}` 便于排查。
+
+### 前端：`assets/xcat-lora.js` + CSS
+
+- 面板 `.xcat-lora-body` 是 `.vue-flow__node` 的**直接子元素**（与 `.demo-node`
+  平级），`position:absolute; inset:0` 铺满节点；节点拖动/缩放的 `transform`
+  在父级上，面板自动跟随，**不需要任何位置监听**。
+- **面板本身带 `nopan` 但不带 `nodrag`**：Vue Flow 认定 `.nodrag` 的按下是「点在
+  控件上」，面板铺满整个节点时若挂了 `nodrag`，节点就彻底拖不动。只有里面的
+  按钮 / 输入框各自标 `nodrag nopan`，空白处（标题、行间距）照常拖着走。
+- 每行：选文件（点开是一个 320px 的下拉，带搜索框，选中项置顶、只渲染前 300 条）
+  + 强度步进器（`−` / 两位小数 / `+`，每次 `±0.01`，数值也可直接输入，上下键同样
+  走 0.01）+ 启用开关 + 删除。改强度只更新数值不整块重画，连续点不会断；写数据
+  按 index 重新取条目（`updateNodeData` 会换掉 `data` 副本，闭包里的旧对象会变孤儿）。
+- **节点高度随行数增长**：`.demo-node` 的内联 `480×270` 由 CSS 变量
+  `--xcat-lora-h` 覆盖（`!important`），变量值在每次重绘后由 `fitHeight()` 量出
+  ——把面板临时设成 `height:auto` 读 `offsetHeight` 再还原。只保底 270，**不锁
+  上限**，加多少行就长多高（实测 8 行 460、16 行 812），列表因此永远不需要滚动；
+  端口、选中高亮框、连线端点都跟着新高度走。
+- 写入走 `flow.updateNodeData(id, { loras })`，画布自动保存与撤销栈照常；面板
+  每 400ms 比对一次数据签名，被外部改（撤销 / 加载画布 / 粘贴）就重绘，正在
+  输入时不重绘。
+- 运行收集：`window.__xcatLorasFor(nodeId)` 沿上游连线找 `role==="lora"` 的节点，
+  串联时先递归更上游的，再拼自己（离加载器越近越先应用），带 visited 防环。
+- bundle 里只改两处：`xcatRole` 的合法 role 表加 `'lora'`；`submitExecution`
+  调用多传一个 `loras`（`window.__xcatLorasFor` 不存在时为空数组，老缓存下也不会崩）。
+- 节点原有 UI 全部收起（纯 CSS，靠 `:has(> .xcat-lora-body)` 命中）：
+  `.node-media` / `.node-empty`（上传按钮就在里面）/ `.node-actions` /
+  `.node-name` / `.node-delete` / `.node-resize` / `.node-panel`。
+- 左侧「新建节点」菜单新增第三组「控制节点」，项为「LoRA 栈」（lucide `layers`）。
+
+### 验证（`verify-lora-node.js` + `verify-lora-drag.js`，8198 + CDP 真 DOM）
+
+`verify-lora-node.js` 27 项 ALL PASS：role / 默认一行 / 面板挂载 / 原生 UI 收起 →
+下拉 273 项（与目录一致）/ 搜索过滤 123 项 → 选中写回数据、行上显示 basename →
+添加第二行 → 步进器默认 `1.00`、点一次减号 `0.99`、加号回 `1.00`、手输 `0.65`
+规范成两位小数 → 开关停用/恢复、行变暗 → 删行 → 真鼠标从 source 口拖到生成节点
+target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 → 拦截 fetch 确认
+`/api/execute` 的 payload 带 `loras` → 删节点后无残留面板。
+
+`verify-lora-drag.js` 26 项 ALL PASS：高度自适应（空节点 270 / 4 行 284 / 6 行
+全部可见 / 16 行 812 不锁高 / 删回 1 行回落 270）；强度步进器（两位小数、`±0.01`
+无浮点抖、手输规范、改强度后点开关不丢值、连点 20 次不断链）；拖动（抓标题区能
+移动且位移与鼠标一致、拖输入框与文件名按钮不移动节点、单击空白仍能选中、端口跟
+高度居中、多选不误伤 LoRA 面板）。
+
+回归：`verify-selborder`（17 项）、`verify-del-key`（11 项）、`verify-marquee`
+（20 项）、`verify-ring-align`（11 项）、`verify-node-size`（11 项）、
+`verify-strip-input-only`（12 项）、`verify-rerun-overwrite`（12 项）、
+`verify-gen-result`、`verify-multi-hide`（19 项）全 PASS。
+
+后端另有离线单测 `.workbuddy/tmp/test-inject-loras.py`：拿真实的
+`文生图-MiniMax-H3-Image.json` 跑注入，断言链首接回 `23:1 UNETLoader`、
+第二环接第一环、`KSampler.model` 改吃链尾、无自环；并覆盖空栈、单条、强度越界、
+停用/0 强度/空名/路径穿越的清洗。
+
+### 坑
+
+- **`removeNodes()` 是异步生效的**：同一句里 `removeNodes()` 紧跟 `addNodes()`，
+  新节点会被随后的清理一起吞掉（表现为「加了但 `getNodes` 是空」）。测试里必须
+  分两次 evaluate，中间隔 400ms。
+- 面板挂在 `.vue-flow__node` 上而不是 `.demo-node` 里：后者由 Vue 渲染，任何
+  重绘都可能把我们插的节点 patch 掉。
+- **`.demo-node` 的宽高是内联样式**（`width:480px;height:270px`，媒体节点默认值），
+  想改高度只能靠 CSS `!important` 或 `style.setProperty(..., 'important')`；普通
+  的 `el.style.height = ...` 会被 Vue 下次 patch 覆盖。
+- **`updateNodeData` 会换掉 `data` 副本**：事件闭包里抓到的 `item` 引用在第一次
+  写回后就成了孤儿，后续再改它不会进入数据。所有写操作都要 `loraList(node)[index]`
+  重新取。
+- 节点的 target（左侧）端口对非 `gen-` 角色是 `xcat-port-hidden`（`pointer-events:none`），
+  所以 LoRA 节点**只能作为上游**（右侧 source 口）连到生成节点，方向是对的。
+
+## 工作流分类：六类（2026-11-14，同一分支）
+
+导入的工作流按用途分**六类**，顺序就是界面顺序：
+
+`文生图像 · 图像编辑 · 文生视频 · 参考生视频 · 图像放大 · 图像反推`
+
+分类**只影响列表分组，不改工作流本身**（JSON 文件一个字节都不动），存在
+`user/<id>/ComfyUI-Infinite-Canvas/canvas_settings.json` 的 `workflow_categories`
+里（`{工作流名: 类别}`）；重命名时跟着搬、删除时清掉。
+
+### 后端（`__init__.py`）
+
+- 常量 `WORKFLOW_CATEGORIES` / `_DEFAULT_WORKFLOW_CATEGORY`；`_normalize_category()`
+  只放行六类，其余（含空、乱写）返回空串。
+- **自动识别** `_detect_workflow_category()`：只看 `class_type`（小写子串），顺序是
+  ① 取标题/打标签（`caption|tagger|interrogat|florence|blip|joytag|wd14|promptgen|reverseprompt`）
+  → 图像反推；② 放大（`upscale|imagescale|resizeimagemask|imageresize|seedvr|esrgan|swinir|superresolution`
+  等）→ 图像放大；③ 有视频产物（`savevideo|videocombine|savewebm|animatedwebp|createvideo`）
+  → 有 `LoadImage` 类输入是参考生视频，否则文生视频；④ 有图像产物 → 有图像输入是图像编辑，
+  否则文生图像；⑤ 都没有 → 文生图像。
+- `_list_workflows()` 每条多返回 `category`：**存过的优先，没存过的现场推断**
+  （所以老工作流不用迁移就自动有分类）。
+- `POST /workflows` 收 `category`（不传或非法就自动识别），响应回 `category`；
+  新增 `POST /workflows/{name}/category`（非法 400、不存在 404，成功后回
+  `{name, category, workflows}`）；`DELETE` / `rename` 同步维护 `workflow_categories`。
+
+### 前端（bundle 补丁 + CSS）
+
+- 左栏列表从「扁平 v-for」改成 `xcatWFGrouped(l.value)`：按六类顺序摊成
+  「组标题行 + 组内条目」，组标题复用 `.wf-item` 的盒模型、加 `xcat-wf-group`
+  类（藏图标、字 11px/600、右侧显示「N 个工作流」、`pointer-events:none`）。
+  没有条目的类别不出现。
+- **拖拽排序改成按名称**（原来是数组下标，加了组标题就错位）：`q/y/F/g` 四个函数
+  改成传工作流名，`F()` 先 `findIndex` 出源/目标位置再 splice；**跨组拖拽会顺带改分类**
+  （拖到别的类别上＝归到那一类），最后照旧 `PUT /workflows/order`。
+- 右栏动作条多一枚 `分类 · <当前类>`（`key:3`，夹在「保存配置」与「重命名」之间）。
+  点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），六类单选、当前项
+  `is-active`，选中后 `POST .../category` → `B()` 重取列表 → 提示条「已归类为 X」。
+- 节点底部的工作流药丸（`.panel-workflows`）也按分类分段：`xcatWFRemember()` 在
+  `ul()` 拉列表时把 `name→category` 记进 `window.__xcatWfCats`，`xcatWFPills()`
+  摊成「类别标签 + 该类药丸」，标签带 `xcat-wf-pill-g`（无边框、10px、muted、点了
+  不选中工作流）。
+- 导入提示从「已保存 X」变成「已保存 X（分类）」，一眼能看出被归到哪。
+
+### 坑
+
+- **`P("button", {…}, "动态文本")` 必须带 patchFlag `1`（TEXT）**：放在 block 的
+  `dynamicChildren` 里做优化 patch 时，`patchFlag <= 0` 且无 `dynamicChildren`
+  的 vnode，**子节点根本不 diff**——组件重渲染了、列表也变了，就只有这枚按钮的字
+  停在旧值。加 `,1` 后才走 `hostSetElementText`。（`xe(x)` 那类写法编译器本来就会带 1，
+  手写新增的 vnode 容易漏。）
+- 组标题行的 `.wf-item-meta` 要单独 `display:inline` 放出来——本包全局把它藏了
+  （左栏列表项只留名字一条到底）。
+- 分类弹层的遮罩挂在 `.float-window` 里（`position:absolute; inset:0`），和
+  「重命名」一致，别挂 `body`。
+
+### 验证（`verify-wf-category.js` 31 项 + `verify-wf-category2.js` 17 项）
+
+`verify-wf-category.js`：API 每条带合法 category 且六类齐 → 左栏 6 个分组标题按序、
+每组条目与后端一致、标题带条数、标题不可点/无图标 → 动作条「分类 · X」文案与顺序 →
+弹层 6 项按序、仅当前项高亮、挂在浮窗内 → 改到另一类后后端生效、列表重新分组、
+条目落到新组、按钮文案跟着变、提示条出现 → 非法分类 400 / 不存在 404 → 重载后保持
+→ 节点药丸：分类标签与有内容的类别一致、顺序＝分组顺序、标签不参与选中、点标签不改
+工作流、点药丸能选中并高亮。
+
+`verify-wf-category2.js`：POST 不带类别 → 自动识别文生图像 / 参考生视频；带 `category`
+→ 指定优先；带乱写类别 → 退回自动识别；列表按预期归组；同组拖拽改顺序（后端 order
+落盘）；**跨组拖拽改分类**（后端 category 落盘、原组里消失）；删除后条目与分类记录
+一起清掉。
+
+回归：`verify-selborder`（17）、`verify-lora-node`（27）、`verify-multi-hide`（19）全 PASS。
 
 ## 常见问题
 

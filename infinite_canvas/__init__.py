@@ -110,10 +110,96 @@ def _is_api_workflow(data):
     )
 
 
+# ---------------------------------------------------------------- 工作流分类
+# 导入的工作流按用途分六类，画布左栏按这个分组、节点上的工作流选择器也按它排段。
+# 顺序即界面顺序；新增类别只改这里（前端 xcatWFCats() 同步）。
+WORKFLOW_CATEGORIES = (
+    "文生图像",
+    "图像编辑",
+    "文生视频",
+    "参考生视频",
+    "图像放大",
+    "图像反推",
+)
+_DEFAULT_WORKFLOW_CATEGORY = WORKFLOW_CATEGORIES[0]
+
+# 按节点类名（小写子串）推断用途，只用于导入时给个初始分类，用户可随时改
+_CATEGORY_HINTS = {
+    "图像反推": (
+        "caption",
+        "tagger",
+        "interrogat",
+        "florence",
+        "blip",
+        "joytag",
+        "wd14",
+        "promptgen",
+        "reverseprompt",
+    ),
+    "图像放大": (
+        "upscalemodelloader",
+        "imageupscalewithmodel",
+        "latentupscale",
+        "upscale",
+        "imagescale",
+        "resizeimagemask",
+        "imageresize",
+        "seedvr",
+        "esrgan",
+        "swinir",
+        "superresolution",
+    ),
+}
+_VIDEO_OUTPUT_HINTS = (
+    "savevideo",
+    "videocombine",
+    "savewebm",
+    "animatedwebp",
+    "createvideo",
+    "saveanimated",
+)
+_IMAGE_OUTPUT_HINTS = ("saveimage", "previewimage")
+_IMAGE_INPUT_HINTS = ("loadimage", "loadvideo", "vhs_loadvideo", "loadimagemask")
+
+
+def _normalize_category(value):
+    """只有六类算合法分类，其余（含空）返回空串"""
+    text = str(value or "").strip()
+    return text if text in WORKFLOW_CATEGORIES else ""
+
+
+def _detect_workflow_category(workflow):
+    """按节点类名猜分类：取标题/打标签 → 放大 → 视频（有无参考图）→ 图像（有无参考图）"""
+    classes = []
+    if isinstance(workflow, dict):
+        for node in workflow.values():
+            if isinstance(node, dict) and isinstance(node.get("class_type"), str):
+                classes.append(node["class_type"].lower())
+    if not classes:
+        return _DEFAULT_WORKFLOW_CATEGORY
+
+    def has(hints):
+        return any(hint in name for name in classes for hint in hints)
+
+    for category in ("图像反推", "图像放大"):
+        if has(_CATEGORY_HINTS[category]):
+            return category
+
+    video_out = has(_VIDEO_OUTPUT_HINTS)
+    image_out = has(_IMAGE_OUTPUT_HINTS)
+    image_in = has(_IMAGE_INPUT_HINTS)
+    if video_out:
+        return "参考生视频" if image_in else "文生视频"
+    if not image_out:
+        return _DEFAULT_WORKFLOW_CATEGORY
+    return "图像编辑" if image_in else "文生图像"
+
+
 def _list_workflows():
     workflow_dir = _workflow_dir()
     if not os.path.isdir(workflow_dir):
         return []
+    workflow_categories = _load_settings().get("workflow_categories") or {}
     items = []
     for filename in sorted(os.listdir(workflow_dir)):
         if not filename.lower().endswith(".json"):
@@ -127,11 +213,16 @@ def _list_workflows():
                 data = json.load(handle)
         except Exception:
             continue
+        name = filename[:-5]
+        category = _normalize_category(workflow_categories.get(name))
+        if not category:
+            category = _detect_workflow_category(data)
         items.append(
             {
-                "name": filename[:-5],
+                "name": name,
                 "nodes": len(data) if isinstance(data, dict) else 0,
                 "updated": int(os.path.getmtime(path)),
+                "category": category,
             }
         )
 
@@ -143,7 +234,12 @@ def _list_workflows():
 
 
 def _load_settings():
-    settings = {"comfy_address": "", "workflow_order": [], "fab_position": None}
+    settings = {
+        "comfy_address": "",
+        "workflow_order": [],
+        "fab_position": None,
+        "workflow_categories": {},
+    }
     path = _settings_path()
     if os.path.isfile(path):
         try:
@@ -166,10 +262,19 @@ def _load_settings():
                     }
                 except (TypeError, ValueError):
                     settings["fab_position"] = None
+            categories = data.get("workflow_categories")
+            if isinstance(categories, dict):
+                settings["workflow_categories"] = {
+                    str(name): str(category)
+                    for name, category in categories.items()
+                    if name and str(category) in WORKFLOW_CATEGORIES
+                }
     return settings
 
 
-def _save_settings(address=None, workflow_order=None, fab_position=None):
+def _save_settings(
+    address=None, workflow_order=None, fab_position=None, workflow_categories=None
+):
     settings = _load_settings()
     if address is not None:
         settings["comfy_address"] = address
@@ -177,10 +282,23 @@ def _save_settings(address=None, workflow_order=None, fab_position=None):
         settings["workflow_order"] = [str(name) for name in workflow_order if name]
     if fab_position is not None:
         settings["fab_position"] = fab_position
+    if workflow_categories is not None:
+        settings["workflow_categories"] = dict(workflow_categories)
     os.makedirs(_data_dir(), exist_ok=True)
     with open(_settings_path(), "w", encoding="utf-8") as handle:
         json.dump(settings, handle, ensure_ascii=False, indent=2)
     return _load_settings()
+
+
+def _set_workflow_category(name, category):
+    """记住某个工作流的分类；category 为空表示忘掉它（删除 / 改名时用）"""
+    categories = dict(_load_settings().get("workflow_categories") or {})
+    if category:
+        categories[name] = category
+    else:
+        categories.pop(name, None)
+    _save_settings(workflow_categories=categories)
+    return categories
 
 
 def _comfy_base(request):
@@ -649,6 +767,70 @@ _FIELD_TYPES = {
 }
 _FIELD_NUM_KEYS = ("min", "max", "step")
 
+# ------------------------------------------------- 分辨率选择器：自动识别 / 自动填入
+# 判定不看 class_type：一个节点只要同时有 aspect_ratio 与 megapixels 两个输入，
+# 就按分辨率选择器处理。这样官方 ResolutionSelector、本包
+# 🐈‍⬛ResolutionSelector（DynamicCombo / Custom）以及同结构的第三方节点都能覆盖。
+# 自动填入只补「缺失 / 残缺」的内容，用户手填的显示名与自定义选项一律保留。
+_RESOLUTION_KEYS = ("aspect_ratio", "megapixels")
+_RESOLUTION_LABELS = {"aspect_ratio": "高宽比", "megapixels": "百万像素"}
+_RESOLUTION_RATIOS = [
+    "1:1 (Square)",
+    "2:3 (Portrait Photo)",
+    "3:2 (Photo)",
+    "3:4 (Portrait Standard)",
+    "4:3 (Standard)",
+    "9:16 (Portrait Widescreen)",
+    "16:9 (Widescreen)",
+    "21:9 (Ultrawide)",
+]
+# 用户在字段弹窗里取消掉自动字段后写进 <name>.fields.json 的哨兵，
+# 避免下次读取又被自动注入回来（仍然可以手动勾选）。
+_NO_AUTO_KEY = "__xcat_no_auto__"
+
+
+def _is_resolution_node(node):
+    inputs = node.get("inputs") if isinstance(node, dict) else None
+    return isinstance(inputs, dict) and all(key in inputs for key in _RESOLUTION_KEYS)
+
+
+def _resolution_spec(node):
+    """两条自动字段的完整定义；比例选项与数值范围取自节点自身版本。"""
+    custom = "🐈‍⬛" in str((node or {}).get("class_type") or "")
+    ratios = list(_RESOLUTION_RATIOS) + (["Custom"] if custom else [])
+    return {
+        "aspect_ratio": {
+            "key": "aspect_ratio", "type": "select",
+            "label": _RESOLUTION_LABELS["aspect_ratio"],
+            "options": ratios, "auto": True,
+        },
+        "megapixels": {
+            "key": "megapixels", "type": "number",
+            "label": _RESOLUTION_LABELS["megapixels"],
+            "min": 0.0 if custom else 0.1,
+            "max": 16.0, "step": 0.01, "auto": True,
+        },
+    }
+
+
+def _resolution_value(value):
+    """DynamicCombo 的 aspect_ratio 在 API JSON 里是 dict，取其中的选中比例。"""
+    if isinstance(value, dict):
+        for key in ("aspect_ratio", "key", "value"):
+            picked = value.get(key)
+            if isinstance(picked, str):
+                return picked
+        return ""
+    return value
+
+
+def _suppressed_nodes(raw):
+    return {
+        str(item.get("nodeId") or "")
+        for item in (raw if isinstance(raw, list) else [])
+        if isinstance(item, dict) and item.get("key") == _NO_AUTO_KEY
+    }
+
 
 def _fields_path(name):
     return os.path.join(_workflow_dir(), f"{name}.fields.json")
@@ -679,9 +861,16 @@ def _clean_fields(raw, workflow):
         node = workflow.get(node_id) if isinstance(workflow, dict) else None
         if not isinstance(node, dict) or not key:
             continue
-        value = (node.get("inputs") or {}).get(key)
-        if isinstance(value, (list, dict)):
+        if key == _NO_AUTO_KEY:
+            # 用户显式关闭了自动填入；只是配置哨兵，不是画布字段
             continue
+        value = (node.get("inputs") or {}).get(key)
+        is_resolution = _is_resolution_node(node) and key in _RESOLUTION_KEYS
+        if isinstance(value, (list, dict)):
+            # 本包 🐈‍⬛ResolutionSelector 的 DynamicCombo 输入是 dict，
+            # 允许暴露成下拉框；其余对象一律当作不可修改的输入跳过。
+            if not (is_resolution and isinstance(value, dict) and key == "aspect_ratio"):
+                continue
         marker = (node_id, key)
         if marker in seen:
             continue
@@ -691,12 +880,17 @@ def _clean_fields(raw, workflow):
         if field_type not in _FIELD_TYPES:
             field_type = "text"
         title = (node.get("_meta") or {}).get("title")
+        label = item.get("label")
+        if is_resolution and not label:
+            label = _RESOLUTION_LABELS[key]
         entry = {
             "nodeId": node_id,
             "key": key,
             "type": field_type,
-            "label": str(item.get("label") or title or key)[:40],
+            "label": str(label or title or key)[:40],
         }
+        if item.get("auto") is True:
+            entry["auto"] = True
         if field_type == "select":
             options = item.get("options")
             entry["options"] = (
@@ -709,29 +903,80 @@ def _clean_fields(raw, workflow):
                 num = item.get(num_key)
                 if isinstance(num, (int, float)) and not isinstance(num, bool):
                     entry[num_key] = num
+
+        if is_resolution:
+            spec = _resolution_spec(node)[key]
+            if key == "aspect_ratio" and field_type == "select":
+                # 旧的手工配置常常只有当前值一项，补齐整套比例；
+                # 用户自定义过的额外选项仍保留在末尾。
+                merged = list(spec["options"])
+                for option in entry["options"]:
+                    if option and option not in merged:
+                        merged.append(option)
+                current = _resolution_value(value)
+                if isinstance(current, str) and current and current not in merged:
+                    merged.append(current)
+                entry["options"] = merged[:60]
+            if key == "megapixels" and field_type in ("number", "slider", "random"):
+                for num_key in _FIELD_NUM_KEYS:
+                    entry.setdefault(num_key, spec[num_key])
         cleaned.append(entry)
     return cleaned
 
 
 def _public_fields(name, workflow):
-    """返回字段配置，并把默认值取成工作流里的当前值"""
+    """返回字段配置，并把默认值取成工作流里的当前值。
+
+    分辨率选择器节点如果从没配置过，自动注入「高宽比 / 百万像素」两条字段；
+    已经配置过的节点只做内容补全（选项、范围、显示名），不擅自改动用户的勾选。
+    """
+    raw = _load_fields(name)
+    fields = _clean_fields(raw, workflow)
+    suppressed = _suppressed_nodes(raw)
+    configured = {field["nodeId"] for field in fields}
+    if isinstance(workflow, dict):
+        for node_id, node in workflow.items():
+            if not _is_resolution_node(node):
+                continue
+            if str(node_id) in suppressed or str(node_id) in configured:
+                continue
+            for spec in _resolution_spec(node).values():
+                fields.append(dict(spec, nodeId=str(node_id)))
     result = []
-    for field in _clean_fields(_load_fields(name), workflow):
-        value = (workflow[field["nodeId"]].get("inputs") or {}).get(field["key"])
+    for field in fields:
+        node = workflow.get(field["nodeId"]) or {}
+        value = _resolution_value((node.get("inputs") or {}).get(field["key"]))
         field["default"] = value if isinstance(value, (str, int, float, bool, list)) else ""
         result.append(field)
+    # 把「关闭自动填入」的记录也返回，配置页保存时会原样带回；
+    # 画布节点 / 节点预览会在前端按 key 过滤掉它。
+    for node_id in sorted(suppressed):
+        if isinstance(workflow, dict) and node_id in workflow:
+            result.append({
+                "nodeId": node_id, "key": _NO_AUTO_KEY,
+                "type": "text", "label": "", "default": "", "suppressed": True,
+            })
     return result
 
 
-def _save_fields(name, fields):
-    if not fields:
+def _save_fields(name, fields, suppressed=None):
+    suppressed = sorted(suppressed or [])
+    if not fields and not suppressed:
         path = _fields_path(name)
         if os.path.isfile(path):
             os.remove(path)
         return
+    # 哨兵同时写进 fields 数组，保证下次 GET → PUT 能原样带回来，
+    # 用户既不会「关不掉自动填入」，也能重新手动勾选再恢复。
+    payload_fields = list(fields) + [
+        {"nodeId": node_id, "key": _NO_AUTO_KEY} for node_id in suppressed
+    ]
+    payload = {"fields": payload_fields}
+    if suppressed:
+        payload["noAutoResolution"] = suppressed
     os.makedirs(_workflow_dir(), exist_ok=True)
     with open(_fields_path(name), "w", encoding="utf-8") as handle:
-        json.dump({"fields": fields}, handle, ensure_ascii=False, indent=2)
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
 def _delete_fields(name):
@@ -1169,9 +1414,27 @@ def _apply_params(workflow, params):
         if not isinstance(inputs, dict):
             continue
         for key, value in values.items():
-            # 只覆盖已存在的字面量；不新增键，也不改动连线
-            if key in inputs and not isinstance(inputs[key], (list, dict)):
-                inputs[key] = value
+            if key not in inputs:
+                continue
+            current = inputs[key]
+            if isinstance(current, dict):
+                # 本包 🐈‍⬛ResolutionSelector 的 DynamicCombo 输入形如
+                # {"aspect_ratio": "1:1 (Square)", "custom_width": ...}。
+                # 画布上给的是比例字符串，写回时只替换选中项、保留自定义宽高。
+                if (
+                    key == "aspect_ratio"
+                    and _is_resolution_node(node)
+                    and isinstance(value, str)
+                    and "aspect_ratio" in current
+                ):
+                    updated = dict(current)
+                    updated["aspect_ratio"] = value
+                    inputs[key] = updated
+                continue
+            if isinstance(current, list):
+                # 连线不覆盖
+                continue
+            inputs[key] = value
 
 
 def _resolve_media_value(value, field_type):
@@ -1207,6 +1470,172 @@ def _apply_media_params(workflow, name):
         if isinstance(inputs[field["key"]], (list, dict)):
             continue
         inputs[field["key"]] = _resolve_media_value(inputs[field["key"]], field["type"])
+
+
+# ============================================================ 画布 LoRA 栈注入
+#
+# 画布上的「LoRA 栈」节点不参与工作流本身：它只有一份 {文件名, 强度} 列表，
+# 运行时由这里把整条链插进工作流 —— 位置正是用户要求的「UNet 加载器之后」。
+#
+# 找插入点的办法不依赖 class_type 白名单：所有 "model" 输入都是连线，
+# 顺着这些连线反查来源，那个「被 model 引用、自己又没有 model 输入」的节点
+# 就是 MODEL 链的源头（UNETLoader / CheckpointLoaderSimple / 各种 GGUF、自定义
+# 加载器都一样）。把它的全部消费方改接到链尾，链首接回它，顺序即
+# 加载器 → LoRA1 → LoRA2 → … → 原来的消费方。
+_LORA_CLASS = "LoraLoaderModelOnly"
+_LORA_LIMIT = 100.0
+_lora_names_cache = {"at": 0.0, "names": set()}
+
+
+def _is_link(value):
+    """API 格式里连线是 [上游节点 id, 输出槽位]"""
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and isinstance(value[1], int)
+    )
+
+
+def _normalize_lora_name(name):
+    """画布与 ComfyUI 的目录分隔符可能是 / 也可能是 \\，比较时统一成 /"""
+    return str(name or "").replace("\\", "/").strip()
+
+
+def _lora_names():
+    """LoRA 目录里的文件名集合（60 秒缓存，避免每次运行都扫目录）"""
+    now = time.time()
+    if now - _lora_names_cache["at"] < 60 and _lora_names_cache["names"]:
+        return _lora_names_cache["names"]
+    names = set()
+    try:
+        import folder_paths
+
+        names = {_normalize_lora_name(n) for n in folder_paths.get_filename_list("loras")}
+    except Exception as exc:  # pragma: no cover - 只可能在非 ComfyUI 环境触发
+        print(f"[XXXXXLCat] 读取 LoRA 目录失败: {exc}")
+    if names:
+        _lora_names_cache["at"] = now
+        _lora_names_cache["names"] = names
+    return names
+
+
+def _clean_loras(raw):
+    """把前端传来的栈洗成 [(name, strength)]：丢掉空行、停用行、0 强度与不存在的文件"""
+    known = _lora_names()
+    items = []
+    skipped = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        name = _normalize_lora_name(entry.get("name"))
+        if not name or ".." in name or name.startswith("/"):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        try:
+            strength = float(entry.get("strength"))
+        except (TypeError, ValueError):
+            strength = 1.0
+        strength = max(-_LORA_LIMIT, min(_LORA_LIMIT, strength))
+        if strength == 0:
+            continue
+        # 目录里找不到就跳过：模型被删/改名时整条工作流不该失败
+        if known and name not in known:
+            skipped.append(name)
+            continue
+        items.append((name, strength))
+    if skipped:
+        print(f"[XXXXXLCat] 画布 LoRA 已跳过（目录里没有）: {', '.join(skipped[:5])}")
+    return items
+
+
+def _looks_like_loader(node):
+    class_type = str((node or {}).get("class_type") or "").lower()
+    return "loader" in class_type or "checkpoint" in class_type
+
+
+def _model_root(workflow):
+    """MODEL 链的源头节点 id；找不到返回 ""。"""
+    sources = []
+    for node in workflow.values():
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        for key, value in inputs.items():
+            if key == "model" and _is_link(value) and value[0] not in sources:
+                sources.append(value[0])
+
+    roots = []
+    for node_id in sources:
+        node = workflow.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and _is_link(inputs.get("model")):
+            continue  # 中间节点（ModelSampling 之类），继续往上找
+        roots.append(node_id)
+
+    if not roots:
+        return ""
+    # 多个源头时优先真加载器，否则取第一个
+    for node_id in roots:
+        if _looks_like_loader(workflow.get(node_id)):
+            return node_id
+    return roots[0]
+
+
+def _next_node_id(workflow):
+    """新节点的 id：现有纯数字 id 的最大值 + 1（"23:1" 这类跳过，不会撞）"""
+    biggest = 0
+    for node_id in workflow:
+        try:
+            biggest = max(biggest, int(str(node_id)))
+        except (TypeError, ValueError):
+            continue
+    return biggest + 1
+
+
+def _inject_loras(workflow, loras):
+    """把 LoRA 链插到 MODEL 源头之后，返回真正插入的条数"""
+    if not loras or not isinstance(workflow, dict):
+        return 0
+    root = _model_root(workflow)
+    if not root:
+        print("[XXXXXLCat] 画布 LoRA：工作流里没有 MODEL 连线，已跳过")
+        return 0
+
+    # 先记下要被改接的连线，避免插完再扫时把新链自己的 model 也改掉（会自环）
+    targets = []
+    for node_id, node in workflow.items():
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        for key, value in inputs.items():
+            if key == "model" and _is_link(value) and value[0] == root:
+                targets.append((node_id, key))
+    if not targets:
+        print("[XXXXXLCat] 画布 LoRA：MODEL 源头没有被任何节点使用，已跳过")
+        return 0
+
+    base = _next_node_id(workflow)
+    previous = [root, 0]
+    for index, (name, strength) in enumerate(loras):
+        node_id = str(base + index)
+        workflow[node_id] = {
+            "class_type": _LORA_CLASS,
+            "inputs": {
+                "model": previous,
+                "lora_name": name,
+                "strength_model": strength,
+            },
+            "_meta": {"title": f"LoRA {index + 1}（画布）"},
+        }
+        previous = [node_id, 0]
+
+    for node_id, key in targets:
+        workflow[node_id]["inputs"][key] = list(previous)
+    return len(loras)
 
 
 def _prompt_error(body):
@@ -1661,8 +2090,37 @@ def register_routes(app):
                 {"error": "不是 ComfyUI API 格式工作流（需为 {节点id: {class_type, inputs}}）"},
                 status=400,
             )
+        # 导入时没指定分类就按节点猜一个，用户随后可在「工作流配置」里改
+        category = _normalize_category(payload.get("category"))
+        if not category:
+            category = _detect_workflow_category(workflow)
         _save_workflow(name, workflow)
-        return web.json_response({"name": name})
+        _set_workflow_category(name, category)
+        return web.json_response({"name": name, "category": category})
+
+    async def set_workflow_category(request):
+        """改某个工作流的分类（「工作流配置」右侧的「分类」按钮）"""
+        name = _safe_name(request.match_info.get("name", ""))
+        if _read_workflow(name) is None:
+            return web.json_response({"error": "工作流不存在"}, status=404)
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+        category = _normalize_category(payload.get("category"))
+        if not category:
+            return web.json_response(
+                {"error": "分类只支持：" + "、".join(WORKFLOW_CATEGORIES)},
+                status=400,
+            )
+        _set_workflow_category(name, category)
+        return web.json_response(
+            {
+                "name": name,
+                "category": category,
+                "workflows": _list_workflows(),
+            }
+        )
 
     async def delete_workflow(request):
         name = _safe_name(request.match_info.get("name", ""))
@@ -1670,6 +2128,7 @@ def register_routes(app):
             return web.json_response({"error": "工作流不存在"}, status=404)
         os.remove(_workflow_path(name))
         _delete_fields(name)
+        _set_workflow_category(name, "")
         return web.json_response({"ok": True})
 
     async def rename_workflow(request):
@@ -1702,6 +2161,10 @@ def register_routes(app):
                 _save_settings(
                     workflow_order=[new if name == old else name for name in order]
                 )
+            categories = dict(_load_settings().get("workflow_categories") or {})
+            if old in categories:
+                categories[new] = categories.pop(old)
+                _save_settings(workflow_categories=categories)
         return web.json_response({"name": new, "workflows": _list_workflows()})
 
     async def get_fields(request):
@@ -1722,8 +2185,9 @@ def register_routes(app):
         except Exception:
             return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
 
-        fields = _clean_fields(payload.get("fields"), workflow)
-        _save_fields(name, fields)
+        raw_fields = payload.get("fields")
+        fields = _clean_fields(raw_fields, workflow)
+        _save_fields(name, fields, _suppressed_nodes(raw_fields))
         return web.json_response({"fields": _public_fields(name, workflow)})
 
     async def upload_media(request):
@@ -1839,7 +2303,7 @@ def register_routes(app):
         })
 
     async def process_video(request):
-        """视频节点：提取音轨 / 分离音视频 / 截取片段 / 截取视频帧。
+        """视频节点：提取音轨 / 音视分离 / 截取片段 / 截取帧。
 
         body: {ref: {filename, subfolder, type},
                action: "extractAudio"|"separate"|"trim"|"frame",
@@ -2152,6 +2616,9 @@ def register_routes(app):
         _apply_images(workflow, filenames)
         _apply_params(workflow, payload.get("params"))
         _apply_media_params(workflow, name)
+        # 画布「LoRA 栈」节点：把链插到 MODEL 源头之后（UNet / Checkpoint 加载器后面）。
+        # 放在参数写入之后：字段配置只覆盖已有节点的字面量，改不到新插的节点。
+        lora_count = _inject_loras(workflow, _clean_loras(payload.get("loras")))
 
         origin = _comfy_base(request)
         # 前端用同一个 clientId 连 /ws：ComfyUI 的进度消息只推给提交任务的客户端
@@ -2175,7 +2642,7 @@ def register_routes(app):
             return web.json_response({"error": "ComfyUI 未返回任务 id"}, status=502)
 
         # 立即返回任务 id，进度与产物由前端通过 /ws 和 /prompts/{id} 跟进
-        return web.json_response({"prompt_id": prompt_id})
+        return web.json_response({"prompt_id": prompt_id, "loras": lora_count})
 
     async def prompt_result(request):
         """查询一次任务结果：done 带素材，error 带原因，running 表示还没结束"""
@@ -2324,6 +2791,7 @@ def register_routes(app):
             web.get(f"{API_PREFIX}/workflows/{{name}}", get_workflow),
             web.delete(f"{API_PREFIX}/workflows/{{name}}", delete_workflow),
             web.post(f"{API_PREFIX}/workflows/{{name}}/rename", rename_workflow),
+            web.post(f"{API_PREFIX}/workflows/{{name}}/category", set_workflow_category),
             web.get(f"{API_PREFIX}/workflows/{{name}}/fields", get_fields),
             web.put(f"{API_PREFIX}/workflows/{{name}}/fields", save_fields),
             web.post(f"{API_PREFIX}/media", upload_media),
