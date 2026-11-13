@@ -896,15 +896,22 @@ html[data-theme="light"] #app .xcat-lbl-dark {
     color: var(--cg-fg);
 }
 
-/* 缩放按钮：ComfyUI 是 h-8 w-15（32×60）+ text-xs + px-2 */
+/* 缩放按钮：ComfyUI 是 h-8 w-15（32×60）+ text-xs + px-2。
+   官方最多显示 3 位（100%），我们放到 1000% 是 4 位，固定 60px 会挤掉箭头，
+   所以改成 min-width + 内容撑开；.tb-btn 基类的 width:32px 由这里覆盖。 */
 #app .canvas-tabbar .tb-zoom {
-    width: 60px;
+    width: auto;
+    min-width: 60px;
     gap: 4px;
     padding: 0 8px;
     font-family: var(--xcat-rail-font);
     font-size: 12px;
     font-weight: var(--xcat-rail-weight);
     line-height: 1;
+}
+
+#app .canvas-tabbar .tb-zoom-val {
+    white-space: nowrap;
 }
 
 #app .canvas-tabbar .tb-zoom .tb-mode-caret svg {
@@ -2243,6 +2250,7 @@ html[data-theme="light"] #app .float-window .am-preview-body {
 #app .float-window .wf-primary,
 #app .float-window .wf-upload,
 #app .float-window .wf-rename,
+#app .float-window .wf-cat,
 #app .float-window .wf-save,
 #app .float-window .wf-danger {
     height: 32px;
@@ -2260,6 +2268,7 @@ html[data-theme="light"] #app .float-window .am-preview-body {
 #app .float-window .wf-primary:hover,
 #app .float-window .wf-upload:hover,
 #app .float-window .wf-rename:hover,
+#app .float-window .wf-cat:hover,
 #app .float-window .wf-save:hover:not(:disabled),
 #app .float-window .wf-danger:hover {
     border: 0;
@@ -3100,6 +3109,115 @@ html:not(.xcat-canvas-hand) .vue-flow__pane.dragging {
 /* 「可连接」提示仍保留 accent 黄 —— 那是连接语义，不是选中语义 */
 #app .demo-node.is-connect-hot:hover {
     box-shadow: 0 0 0 2px var(--c-accent), 0 6px 18px var(--c-shadow) !important;
+}
+
+/* ==================================================================
+   运行进度环必须压在「选中高亮框」上，不是错开一圈（2026-11-13）
+   ------------------------------------------------------------------
+   高亮框 = 上面那条 box-shadow 0 0 0 3px：从节点盒子外沿再向外扩 3px、
+   无模糊，也就是占据 [-3px, 0] 这一圈。
+   上游 .node-ring 是 inset:0 的 SVG，<rect> 描边以盒子边缘为中心线，
+   3px 描边落在 [-1.5px, +1.5px] —— 白框在外、蓝弧在内，肉眼就是两条
+   错位的线（用户：「进度与高亮的框不重叠，应该要重叠才对」）。
+   修法：SVG 反向外扩半个线宽，让描边中心线正好落进高亮带正中，蓝弧就
+   严丝合缝盖在白色高亮框上；圆角同步成「节点半径 12 + 半个线宽」，
+   上游写死的 rx=19 是配 radius 20 的，跟本包的 12 也对不上。
+   ================================================================== */
+#app .demo-node > .node-ring {
+    inset: calc(var(--xcat-link-w) / -2);
+    /* 不能写 width:auto —— SVG 没有 width 属性时会退回固有尺寸 300×150，
+       必须显式给「100% + 线宽」。left 已偏移 -1.5px，宽度补 3px 后右边缘
+       正好也在节点外侧 1.5px 处。 */
+    width: calc(100% + var(--xcat-link-w));
+    height: calc(100% + var(--xcat-link-w));
+}
+
+#app .demo-node > .node-ring rect {
+    stroke-width: var(--xcat-link-w);
+    rx: calc(12px + var(--xcat-link-w) / 2);
+    ry: calc(12px + var(--xcat-link-w) / 2);
+}
+
+/* 选中时白色高亮框本身就是「进度轨道」，再叠一层 20% accent 轨道会把白框
+   染成脏灰；隐藏轨道后画面上只剩一条白框 + 一段蓝弧，读起来就是进度。 */
+#app .vue-flow__node.selected .demo-node .node-ring-track {
+    stroke: transparent;
+}
+
+/* ---- 框选矩形（Ctrl + 左键拖）照 ComfyUI 画 ----
+   ComfyUI 是 litegraph 画在 canvas 上：半透明蓝填充 + 1px 实线蓝框、直角。
+   反推自真实截图取样：画布底 (21,21,21) → 框内 (49,65,92)，解得
+   rgb(120,170,255) @ 0.30 叠在深灰底上正好是 (51,66,91)。
+   Vue Flow 默认是 rgba(0,89,220,.08) 极淡填充 + 1px dotted 虚线，
+   划起来几乎看不见框，判定又是「完全包住」，所以以前框选很难用。
+   填充盖在节点上方（z-index 6 > viewport 4），与 ComfyUI 一致。 */
+#app .vue-flow__selection {
+    background: rgba(120, 170, 255, 0.3);
+    border: 1px solid rgba(160, 200, 255, 0.95);
+    border-radius: 0;
+}
+
+html[data-theme="light"] #app .vue-flow__selection {
+    background: rgba(11, 140, 233, 0.14);
+    border: 1px solid #0b8ce9;
+}
+
+/* 自管框选的矩形（assets/xcat-marquee.js 创建，挂在 .vue-flow 下）
+   外观沿用上面那条，这里只补定位与命中穿透。 */
+#app .xcat-marquee-box {
+    position: absolute;
+    pointer-events: none;
+    z-index: 6;
+}
+
+/* ---- 多选包围框（assets/xcat-selborder.js）----
+   照 ComfyUI 内置扩展 Comfy.SelectionBorder 的 drawSelectionBorder：
+   选中 ≥2 个节点时，围绕它们的包围盒外扩 10 个画布单位，画一圈
+   2px 虚线（屏幕恒定，实空各 5px）、圆角 8px（屏幕恒定），
+   颜色取 --border（暗色 charcoal-200 #494a50 = --cg-border）。
+   外扩量随缩放（10 × zoom）由 JS 算好，线宽/虚线/圆角都是屏幕常量，
+   所以这里只写固定值，不做缩放。 */
+#app #xcat-selborder {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+    display: none;
+}
+
+#app #xcat-selborder > svg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    display: block;
+}
+
+#app #xcat-selborder rect {
+    fill: none;
+    stroke: var(--cg-border);
+    stroke-width: 2;
+    stroke-dasharray: 5 5;
+}
+
+/* ---- 多选只留主体（2026-11-14）----
+   选中 ≥2 个节点时，节点上除主体（.node-media / .node-empty）以外的东西全部收起：
+   · .node-actions  顶部操作按钮条（裁剪 / 宫格切分 / 镜像 / 调整 / 下载 / 删除…）
+   · .node-panel    底部浮层（工作流列表 / 接入素材条 / 提示词 / 运行）
+   · .node-delete   右上角 ×
+   · .node-resize   右下角缩放手柄
+   · .card-delete   媒体卡片右上角的 × 删除钮（实测多选时唯一还留在主体上的按钮）
+   五者都是 position:absolute 浮层（.node-panel 实测挂在 .demo-node 下、724×233，
+   不参与布局），隐藏后节点尺寸、连线端点、多选包围框都不变；单选或取消选中即恢复。
+   根类 .xcat-multi-select 由 assets/xcat-selborder.js 维护（同一份选中状态）。 */
+#app.xcat-multi-select .demo-node > .node-actions,
+#app.xcat-multi-select .demo-node > .node-panel,
+#app.xcat-multi-select .demo-node > .node-delete,
+#app.xcat-multi-select .demo-node > .node-resize,
+#app.xcat-multi-select .card-delete {
+    display: none !important;
 }
 
 /* 媒体层铺满节点；卡片不再留边、不再自带边框与底色 */
@@ -3956,10 +4074,14 @@ html[data-theme="light"] .xcat-nodemenu.is-canvas {
 
 
 /* ------------------------------------------------------------------------
- * 素材节点没有左侧输入端口（2026-11-13 01:30）
+ * 素材节点没有左侧输入端口（2026-11-13 01:30；21:40 补强）
  * 不能把 handle 从 DOM 里删掉：Vue Flow 靠 handle 的 bounding box 算连线终点，
  * 删了之后原有连线的末端会退到节点左上角（悬空）。这里保留 DOM，
  * 只做视觉隐藏 + 禁止拖入（pointer-events），几何计算不受影响。
+ * 但仅靠 CSS 挡不住连线：拖线到节点本体时上游 onConnectEnd 会绕过 handle
+ * 直接建边。所以 bundle 里同时给素材节点的 target handle 传
+ * connectable:false，并在 onConnect / onConnectEnd / le() / oe() 四处拦截
+ * asset-* 目标，才真正做到「素材节点不可接线」。
  * ------------------------------------------------------------------------ */
 #app .flow-wrap .node-port.xcat-port-hidden {
     opacity: 0;
@@ -4789,7 +4911,7 @@ html[data-theme="light"] .xcat-ae-dialog {
    appendChild 注入的，DOM 顺序取决于加载与 patch 时机，用 JS 反复搬节点
    既容易和 Vue 打架也会闪。这里直接给 flex 子项定 order：
      -2 / -1  截取 / 变速（最前）
-      0       其余操作（裁切 / 扩图 / 预览 / 宫格，音频节点已无预览）
+      0       其余操作（预览；裁切 / 扩图 / 宫格三个功能已删除）
      90 / 91  下载 / 全部下载
      99       删除（永远最后）
    flex-wrap 下 order 依然生效，Vue 重建按钮后也无需重新排序。
@@ -4852,7 +4974,7 @@ html[data-theme="light"] .xcat-ae-dialog {
 
 /* ==================================================================
    视频节点四个工具（2026-11-13）
-   提取音轨 / 分离音视频 / 截取片段 / 截取视频帧；按钮排在音频的
+   提取音轨 / 音视分离 / 截取片段 / 截取帧；按钮排在音频的
    截取(-2) / 变速(-1) 之前，下载(90) / 删除(99) 永远在行尾。
    弹窗复用 .xcat-ae-* 骨架，这里只补视频时间轴与菜单。
    ================================================================== */
@@ -4900,7 +5022,7 @@ html[data-theme="light"] .xcat-ae-dialog {
 }
 @keyframes xcat-ve-spin { to { transform: rotate(360deg); } }
 
-/* 截取视频帧：三选一下拉 */
+/* 截取帧：三选一下拉 */
 #app .xcat-ve-menu {
     position: fixed;
     z-index: 9999;
@@ -5110,3 +5232,799 @@ html[data-theme="light"] #app .xcat-ve-menu { background: var(--cg-input); }
     white-space: nowrap;
 }
 #app .xcat-ve-hint { margin: 14px 0; color: var(--cg-muted-fg); font-size: 12px; line-height: 1.6; }
+
+
+/* ==================================================================
+   图片节点工具：裁剪 / 宫格切分 / 镜像 / 调整（2026-11-13）
+   后三个参考 E:/Toonflow/packages/nodeShared/src/components/
+     imageGridSplit.vue / imageMirror.vue / imageAdjust.vue
+   四个功能都是纯 Canvas 处理 + 新节点产物，弹窗复用 .xcat-ae-* 骨架。
+   按钮排在视频四工具(-6..-3)、音频(-2/-1) 之前，下载/删除仍永远末尾；
+   裁剪(-10) 是后加的，样式在后半段单独一节。
+   ================================================================== */
+#app .demo-node .node-actions .fan-btn.xcat-im-grid   { order: -9; }
+#app .demo-node .node-actions .fan-btn.xcat-im-mirror { order: -8; }
+#app .demo-node .node-actions .fan-btn.xcat-im-adjust { order: -7; }
+
+#app .xcat-im-dialog { width: 440px; }
+#app .xcat-im-dialog.is-adjust { width: 470px; }
+#app .xcat-im-body { padding: 16px 18px 18px; }
+
+/* ---- 通用预览框 ---- */
+#app .xcat-im-preview {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 156px;
+    padding: 8px;
+    border-radius: 8px;
+    background: var(--cg-bg);
+    overflow: hidden;
+}
+#app .xcat-im-preview img,
+#app .xcat-im-preview canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 150px;
+}
+#app .xcat-im-preview-inner { position: relative; max-width: 100%; line-height: 0; }
+#app .xcat-im-preview-empty { color: var(--cg-muted-fg); font-size: 12px; }
+#app .xcat-im-preview-badge {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 11px;
+}
+#app .xcat-im-preview-badge[hidden] { display: none; }
+#app .xcat-im-hint { margin: 12px 0 0; color: var(--cg-muted-fg); font-size: 11px; line-height: 1.6; }
+
+/* ---- 宫格切分 ---- */
+#app .xcat-im-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+#app .xcat-im-preset {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    box-sizing: border-box;
+    padding: 9px 4px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+#app .xcat-im-preset:hover,
+#app .xcat-im-preset.is-active { border-color: var(--cg-primary); color: var(--cg-primary); }
+#app .xcat-im-preset:focus-visible { outline: 2px solid var(--cg-primary); outline-offset: 2px; }
+#app .xcat-im-preset small { font-size: 10px; color: var(--cg-muted-fg); }
+#app .xcat-im-preset-icon { display: grid; gap: 2px; width: 26px; height: 26px; }
+#app .xcat-im-preset-icon i { border-radius: 1px; background: currentColor; opacity: .68; }
+
+#app .xcat-im-grid-custom { display: flex; align-items: flex-end; gap: 10px; margin: 14px 0; }
+#app .xcat-im-grid-custom label { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; color: var(--cg-muted-fg); font-size: 12px; }
+#app .xcat-im-grid-custom input {
+    box-sizing: border-box;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+#app .xcat-im-grid-custom input:focus { border-color: var(--cg-primary); outline: 1px solid var(--cg-primary); }
+#app .xcat-im-times { line-height: 32px; color: var(--cg-muted-fg); font-size: 14px; }
+
+#app .xcat-im-grid-preview { margin-top: 2px; }
+#app .xcat-im-grid-lines {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    outline: 1px solid rgb(255 255 255 / 80%);
+}
+#app .xcat-im-grid-lines > span {
+    min-width: 0;
+    min-height: 0;
+    outline: 1px solid rgb(255 255 255 / 80%);
+    line-height: 0;
+}
+#app .xcat-im-grid-lines small {
+    display: inline-block;
+    padding: 0 3px;
+    background: rgb(0 0 0 / 45%);
+    color: #fff;
+    font-size: 10px;
+    line-height: 14px;
+}
+#app .xcat-im-summary { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0 0; font-size: 12px; }
+#app .xcat-im-summary span:last-child { color: var(--cg-muted-fg); }
+
+/* ---- 镜像 ---- */
+#app .xcat-im-mirror-preview img { transition: transform .18s ease; }
+#app .xcat-im-mirror-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0 10px; }
+#app .xcat-im-mirror-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    box-sizing: border-box;
+    padding: 10px 4px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font: inherit;
+    cursor: pointer;
+}
+#app .xcat-im-mirror-btn:hover,
+#app .xcat-im-mirror-btn:focus-visible { border-color: var(--cg-primary); color: var(--cg-primary); outline: none; }
+#app .xcat-im-mirror-btn:disabled { opacity: .6; cursor: wait; }
+#app .xcat-im-mirror-btn.is-wide { grid-column: span 2; flex-direction: row; justify-content: center; gap: 8px; }
+#app .xcat-im-mirror-icon { display: grid; place-items: center; height: 20px; }
+#app .xcat-im-mirror-label { font-size: 13px; }
+#app .xcat-im-mirror-btn small { font-size: 11px; color: var(--cg-muted-fg); }
+
+/* ---- 调整 ---- */
+#app .xcat-im-adjust-preview { min-height: 150px; }
+#app .xcat-im-adjust-preview canvas { border-radius: 4px; }
+/* 11 行滑块一次性铺开，别用内层滚动区把最后一行切掉半截。窗口过矮时
+   由外层 .xcat-ae-body 承担滚动（它已有 overflow-y:auto）。上游 index-*.css
+   全局把滚动条藏了，这里按项目约定补回 10px 轨道 / 6px 圆角滑块，必须用
+   scrollbar-width:auto 复位，否则 Windows Chromium 会切原生细滚动条。 */
+#app .xcat-im-adjust-list { margin-top: 12px; }
+#app .xcat-im-dialog .xcat-ae-body { scrollbar-width: auto; }
+#app .xcat-im-dialog .xcat-ae-body::-webkit-scrollbar { display: block; width: 10px; }
+#app .xcat-im-dialog .xcat-ae-body::-webkit-scrollbar-button { display: none; }
+#app .xcat-im-dialog .xcat-ae-body::-webkit-scrollbar-track { background: transparent; }
+#app .xcat-im-dialog .xcat-ae-body::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--cg-scroll);
+    background-clip: padding-box;
+}
+#app .xcat-im-adjust-row {
+    display: grid;
+    grid-template-columns: 78px minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+#app .xcat-im-adjust-label { color: var(--cg-muted-fg); font-size: 12px; }
+#app .xcat-im-slider { width: 100%; height: 18px; margin: 0; accent-color: var(--cg-primary); cursor: pointer; }
+#app .xcat-im-adjust-value {
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+#app .xcat-im-adjust-value.is-changed { color: var(--cg-primary); }
+#app .xcat-ae-foot .xcat-ae-btn#xcat-im-reset { min-width: 60px; }
+
+/* ==================================================================
+   图片节点第四个工具：裁剪（2026-11-13）
+   走本包内核重做，不是上游那个已被过滤掉的 crop 弹窗。选区预览靠
+   frame 显式尺寸 + 图片绝对定位铺满，避免 grid 父级下 max-height:100%
+   退化；遮罩用 box-shadow 大扩散 + frame overflow:hidden 裁掉，省去四块
+   遮罩 div 的位置同步。
+   ================================================================== */
+#app .demo-node .node-actions .fan-btn.xcat-im-crop { order: -10; }
+#app .xcat-im-dialog.is-crop { width: 520px; }
+#app .xcat-ae-foot .xcat-ae-btn#xcat-im-crop-all { min-width: 56px; }
+
+#app .xcat-im-crop-preview {
+    border-radius: 8px;
+    background: var(--cg-bg);
+    overflow: hidden;
+}
+#app .xcat-im-crop-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100%;
+    height: 250px;
+    padding: 8px;
+    overflow: hidden;
+}
+#app .xcat-im-crop-frame {
+    position: relative;
+    flex: 0 0 auto;
+    overflow: hidden;
+    line-height: 0;
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+}
+#app .xcat-im-crop-frame > img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+#app .xcat-im-crop-box {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    border: 1px solid #0B8CE9;
+    box-shadow: 0 0 0 9999px rgb(0 0 0 / 55%);
+    cursor: move;
+}
+/* 三分构图参考线 */
+#app .xcat-im-crop-third {
+    position: absolute;
+    background: rgb(255 255 255 / 38%);
+    pointer-events: none;
+}
+#app .xcat-im-crop-third.t-v1,
+#app .xcat-im-crop-third.t-v2 { top: 0; bottom: 0; width: 1px; }
+#app .xcat-im-crop-third.t-v1 { left: 33.33%; }
+#app .xcat-im-crop-third.t-v2 { left: 66.66%; }
+#app .xcat-im-crop-third.t-h1,
+#app .xcat-im-crop-third.t-h2 { left: 0; right: 0; height: 1px; }
+#app .xcat-im-crop-third.t-h1 { top: 33.33%; }
+#app .xcat-im-crop-third.t-h2 { top: 66.66%; }
+
+#app .xcat-im-crop-handle {
+    position: absolute;
+    box-sizing: border-box;
+    width: 9px;
+    height: 9px;
+    border: 1px solid #0B8CE9;
+    border-radius: 2px;
+    background: #fff;
+}
+#app .xcat-im-crop-handle[data-dir="nw"] { left: -5px; top: -5px; cursor: nwse-resize; }
+#app .xcat-im-crop-handle[data-dir="n"]  { left: 50%; top: -5px; margin-left: -4.5px; cursor: ns-resize; }
+#app .xcat-im-crop-handle[data-dir="ne"] { right: -5px; top: -5px; cursor: nesw-resize; }
+#app .xcat-im-crop-handle[data-dir="e"]  { right: -5px; top: 50%; margin-top: -4.5px; cursor: ew-resize; }
+#app .xcat-im-crop-handle[data-dir="se"] { right: -5px; bottom: -5px; cursor: nwse-resize; }
+#app .xcat-im-crop-handle[data-dir="s"]  { left: 50%; bottom: -5px; margin-left: -4.5px; cursor: ns-resize; }
+#app .xcat-im-crop-handle[data-dir="sw"] { left: -5px; bottom: -5px; cursor: nesw-resize; }
+#app .xcat-im-crop-handle[data-dir="w"]  { left: -5px; top: 50%; margin-top: -4.5px; cursor: ew-resize; }
+
+#app .xcat-im-crop-ratios { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+#app .xcat-im-ratio {
+    box-sizing: border-box;
+    padding: 5px 11px;
+    border: 1px solid var(--cg-border);
+    border-radius: 999px;
+    background: var(--cg-secondary);
+    color: var(--cg-muted-fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+#app .xcat-im-ratio:hover { color: var(--cg-fg); }
+#app .xcat-im-ratio.is-active { border-color: var(--cg-primary); color: var(--cg-primary); }
+#app .xcat-im-ratio:focus-visible { outline: 2px solid var(--cg-primary); outline-offset: 2px; }
+
+/* 自定义宽高比：只在选中「自定义」胶囊时展开。display:flex 会盖掉 UA 的
+   [hidden]{display:none}，必须自己再写一条，否则这行永远收不起来。 */
+#app .xcat-im-crop-custom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+}
+#app .xcat-im-crop-custom[hidden] { display: none; }
+#app .xcat-im-crop-custom > span { color: var(--cg-muted-fg); font-size: 12px; white-space: nowrap; }
+#app .xcat-im-crop-custom > b { color: var(--cg-muted-fg); font-size: 13px; }
+#app .xcat-im-crop-custom input {
+    box-sizing: border-box;
+    width: 64px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+#app .xcat-im-crop-custom input:focus { border-color: var(--cg-primary); outline: 1px solid var(--cg-primary); }
+#app .xcat-im-crop-custom input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+#app .xcat-im-crop-custom input::-webkit-outer-spin-button,
+#app .xcat-im-crop-custom input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#app .xcat-im-crop-custom small {
+    margin-left: auto;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#app .xcat-im-crop-fields {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+#app .xcat-im-crop-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+}
+#app .xcat-im-crop-fields input {
+    box-sizing: border-box;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+#app .xcat-im-crop-fields input:focus { border-color: var(--cg-primary); outline: 1px solid var(--cg-primary); }
+/* 四列里数字箭头会挤掉输入值，按项目惯例隐藏原生 spin button */
+#app .xcat-im-crop-fields input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+#app .xcat-im-crop-fields input::-webkit-outer-spin-button,
+#app .xcat-im-crop-fields input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ==========================================================================
+   画布「LoRA 栈」节点（role = "lora"，assets/xcat-lora.js 注入 .xcat-lora-body）
+   --------------------------------------------------------------------------
+   面板是 .vue-flow__node 的直接子元素（兄弟于 .demo-node），绝对定位铺满节点；
+   节点拖动/缩放的 transform 在父级上，面板因此自动跟随，不需要 JS 计算位置。
+   节点原有的空素材框 / 上传按钮 / 顶部操作条在这里整块收起，只留下面板，
+   选中高亮（.node-ring）与左右端口不受影响。
+   ========================================================================== */
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-actions,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-media,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-empty,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .xcat-node-name,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-delete,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-resize,
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node > .node-panel {
+    display: none !important;
+}
+
+#app .vue-flow__node:has(> .xcat-lora-body) .demo-node {
+    /* 节点高度按行数增长：变量由 assets/xcat-lora.js 的 fitHeight() 写进 .demo-node。
+       内联的 480×270 是媒体节点默认值，必须 !important 才盖得住；
+       只保底 270，加多少行就长多高（不锁上限）。 */
+    height: var(--xcat-lora-h, 270px) !important;
+}
+
+#app .xcat-lora-body {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px 14px;
+    border-radius: 20px;
+    background: var(--c-panel-2);
+    color: var(--cg-fg);
+    font-size: 12px;
+    line-height: 1.2;
+    cursor: default;
+}
+
+/* 头部：标题 + 条数 */
+#app .xcat-lora-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    height: 20px;
+}
+#app .xcat-lora-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--cg-fg);
+}
+#app .xcat-lora-count {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--cg-muted);
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 列表：超出滚动（滚动条沿用项目统一的那套） */
+#app .xcat-lora-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-right: -4px;
+    padding-right: 4px;
+}
+#app .xcat-lora-hint {
+    padding: 8px 2px;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+#app .xcat-lora-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    height: 38px;
+    padding: 0 6px 0 8px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+}
+#app .xcat-lora-row.is-off { opacity: 0.45; }
+
+/* 选文件按钮 */
+#app .xcat-lora-pick {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+#app .xcat-lora-pick:hover { background: var(--cg-accent); }
+#app .xcat-lora-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+#app .xcat-lora-name.is-empty { color: var(--cg-muted-fg); }
+#app .xcat-lora-caret {
+    flex: 0 0 auto;
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+
+/* 强度：−  1.00  +（每次 0.01，两位小数；数值本身也可直接输入） */
+#app .xcat-lora-stepper {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    overflow: hidden;
+}
+/* 两侧按钮比底槽亮一档，读起来是一枚嵌在槽里的胶囊 */
+#app .xcat-lora-step {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 20px;
+    margin: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: var(--cg-muted);
+    color: var(--cg-muted-fg);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+}
+#app .xcat-lora-step:hover { background: var(--cg-accent); color: var(--cg-fg); }
+#app .xcat-lora-num {
+    flex: 0 0 auto;
+    width: 52px;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+#app .xcat-lora-num:focus {
+    outline: 1px solid var(--cg-primary);
+    outline-offset: -1px;
+    background: var(--cg-accent);
+}
+
+/* 启用开关：一条胶囊 + 一个圆点 */
+#app .xcat-lora-toggle {
+    position: relative;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: var(--cg-muted);
+    cursor: pointer;
+    transition: background 120ms ease;
+}
+#app .xcat-lora-toggle::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--cg-muted-fg);
+    transition: transform 120ms ease, background 120ms ease;
+}
+#app .xcat-lora-toggle.is-on { background: color-mix(in srgb, var(--cg-primary) 35%, var(--cg-muted)); }
+#app .xcat-lora-toggle.is-on::after { transform: translateX(12px); background: var(--cg-primary); }
+
+/* 删除 */
+#app .xcat-lora-del {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+#app .xcat-lora-del:hover { background: var(--cg-muted); color: var(--cg-fg); }
+
+/* 添加 */
+#app .xcat-lora-add {
+    flex: 0 0 auto;
+    height: 30px;
+    border: 1px dashed var(--cg-border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+#app .xcat-lora-add:hover:not(:disabled) {
+    border-color: var(--cg-primary);
+    color: var(--cg-primary);
+}
+#app .xcat-lora-add:disabled { opacity: 0.4; cursor: default; }
+
+#app .xcat-lora-foot {
+    flex: 0 0 auto;
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+/* ---------------------------------------------------------------- 下拉菜单 */
+#app .xcat-lora-menu {
+    position: fixed;
+    z-index: 60;
+    width: 320px;
+    max-height: 340px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+}
+#app .xcat-lora-search {
+    flex: 0 0 auto;
+    height: 30px;
+    box-sizing: border-box;
+    margin-bottom: 6px;
+    padding: 0 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+}
+#app .xcat-lora-search:focus { border-color: var(--cg-primary); outline: 1px solid var(--cg-primary); }
+#app .xcat-lora-options {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+#app .xcat-lora-option {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+#app .xcat-lora-option:hover { background: var(--cg-accent); }
+#app .xcat-lora-option.is-on { background: var(--cg-muted); }
+#app .xcat-lora-option-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+#app .xcat-lora-option-dir {
+    flex: 0 0 auto;
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+}
+#app .xcat-lora-empty {
+    padding: 12px 8px;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    text-align: center;
+}
+
+/* ================================================== 工作流分类（六类）
+   导入的工作流按用途分六类（文生图像 / 图像编辑 / 文生视频 / 参考生视频 /
+   图像放大 / 图像反推），左栏列表按分类分节，节点上的工作流药丸也按分类分段。
+   分类存在 canvas_settings.json 的 workflow_categories 里，没存过的按节点类名推断。 */
+
+/* 分节标题行：复用 .wf-item 的盒模型（图标 + 名称 + 计数），但不可点、不 hover。
+   图钉是 v-for 里复用的静态 vnode，这里直接藏掉。 */
+#app .float-window .wf-item.xcat-wf-group {
+    padding: 12px 12px 4px;
+    border-radius: 0;
+    background: transparent;
+    cursor: default;
+    pointer-events: none;
+}
+
+#app .float-window .wf-item.xcat-wf-group .wf-item-icon {
+    display: none;
+}
+
+#app .float-window .wf-item.xcat-wf-group .wf-item-name {
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+/* 「N 个工作流」：全局把 .wf-item-meta 藏了，分组行要放出来 */
+#app .float-window .wf-item.xcat-wf-group .wf-item-meta {
+    display: inline;
+    flex: 0 0 auto;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+}
+
+/* 分节第一行与上一节之间留点呼吸（用 :not 起头那项不方便判断，这里用组内首项处理） */
+#app .float-window .wf-item.xcat-wf-group + .wf-item {
+    margin-top: 2px;
+}
+
+/* 节点工作流选择器里的分类标签：不是按钮，只是一段小字 */
+#app .panel-workflows .wf-pill.xcat-wf-pill-g {
+    padding: 6px 2px 6px 6px;
+    border: 0;
+    background: transparent;
+    color: var(--c-muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: default;
+}
+
+#app .panel-workflows .wf-pill.xcat-wf-pill-g:hover {
+    border: 0;
+    background: transparent;
+    color: var(--c-muted);
+}
+
+/* 分类弹层：跟「重命名」同款遮罩 + 卡片（原生 DOM 注入，不走 Vue vnode） */
+#app .xcat-wfcat-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: inherit;
+    background: color-mix(in srgb, #000 42%, transparent);
+}
+
+#app .xcat-wfcat {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 280px;
+    padding: 16px;
+    border: 1px solid var(--cg-line);
+    border-radius: 12px;
+    background: var(--cg-secondary);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 45%);
+    color: var(--cg-fg);
+}
+
+#app .xcat-wfcat-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#app .xcat-wfcat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#app .xcat-wfcat-item {
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+#app .xcat-wfcat-item:hover {
+    background: var(--cg-accent);
+}
+
+#app .xcat-wfcat-item.is-active {
+    background: var(--cg-muted);
+    font-weight: 600;
+}
+
+#app .xcat-wfcat-hint {
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    line-height: 1.5;
+}
