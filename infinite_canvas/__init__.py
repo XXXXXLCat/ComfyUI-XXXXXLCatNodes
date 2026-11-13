@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import uuid
@@ -873,6 +874,200 @@ def _save_input_images(data_urls):
     return [_save_input_file("", data_url) for data_url in data_urls]
 
 
+# ---------------------------------------------------------------- 音频处理
+# 画布音频节点的「截取 / 变速」：源文件一定在 input 目录里，处理结果也写回
+# input 目录（新文件名，不覆盖原素材），前端拿到 filename 后用 itemsFromRefs
+# 构造媒体项并生成新节点。所有时间参数由前端按真实 duration 限制，这里再做
+# 一次独立校验，避免直接调用 API 时把任意数值拼进 filter_complex。
+_FFMPEG_CACHE = {}
+_AUDIO_PROCESS_TIMEOUT = 300  # 秒
+
+
+def _ffmpeg_bin(kind="ffmpeg"):
+    if kind in _FFMPEG_CACHE:
+        return _FFMPEG_CACHE[kind]
+    exe = shutil.which(kind)
+    if not exe:
+        try:
+            import imageio_ffmpeg
+
+            bundled = imageio_ffmpeg.get_ffmpeg_exe()
+            # imageio 只带 ffmpeg；同目录若有 ffprobe 也可以复用
+            if kind == "ffmpeg":
+                exe = bundled
+            else:
+                candidate = os.path.join(os.path.dirname(bundled), kind + ".exe")
+                exe = candidate if os.path.isfile(candidate) else None
+        except Exception:
+            exe = None
+    _FFMPEG_CACHE[kind] = exe
+    return exe
+
+
+def _subprocess_flags():
+    """Windows 下禁止 ffmpeg 弹控制台窗口（其它平台返回 0）"""
+    if os.name != "nt":
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+
+
+async def _run_media_cmd(cmd, timeout=_AUDIO_PROCESS_TIMEOUT):
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        **_subprocess_flags(),
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise RuntimeError("音频处理超时，请缩短片段或降低变速倍数")
+    if proc.returncode != 0:
+        detail = (err or b"").decode("utf-8", "replace").strip().splitlines()
+        raise RuntimeError(detail[-1] if detail else f"FFmpeg 退出码 {proc.returncode}")
+    return (out or b"").decode("utf-8", "replace").strip()
+
+
+async def _probe_duration(path):
+    probe = _ffmpeg_bin("ffprobe")
+    if not probe:
+        return None
+    try:
+        text = await _run_media_cmd(
+            [
+                probe, "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path,
+            ],
+            timeout=30,
+        )
+        value = float(text.splitlines()[0])
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
+def _resolve_media_path(filename, subfolder="", source_type="input"):
+    """把画布媒体引用解析成本地文件；只允许落在对应媒体目录内。"""
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError("文件名非法")
+    if any(ord(ch) < 32 for ch in filename):
+        raise ValueError("文件名非法")
+    base = os.path.realpath(_dir_for_type(source_type))
+    folder = str(subfolder or "").replace("\\", "/")
+    if folder.startswith("/") or ".." in folder.split("/") or any(ord(ch) < 32 for ch in folder):
+        raise ValueError("子目录非法")
+    path = os.path.realpath(os.path.join(base, folder, filename))
+    if os.path.commonpath([base, path]) != base or not os.path.isfile(path):
+        raise ValueError("音频文件不存在或路径非法")
+    return path
+
+
+def _audio_output_name():
+    return f"infinite_canvas_{uuid.uuid4().hex}.m4a"
+
+
+def _atempo_chain(speed):
+    """每级限制在 0.5–2，避免 atempo 越界；链式相乘等于目标速度。"""
+    tempo = speed
+    parts = []
+    while tempo < 0.5:
+        parts.append("atempo=0.5")
+        tempo /= 0.5
+    while tempo > 2:
+        parts.append("atempo=2")
+        tempo /= 2
+    parts.append("atempo=%.6f" % tempo)
+    return ",".join(parts)
+
+
+def _clip_filter(segments):
+    parts = [
+        "[0:a:0]atrim=start=%.6f:end=%.6f,asetpts=PTS-STARTPTS[p%d]" % (s, e, i)
+        for i, (s, e) in enumerate(segments)
+    ]
+    parts.append(
+        "%sconcat=n=%d:v=0:a=1[out]" % ("".join("[p%d]" % i for i in range(len(segments))), len(segments))
+    )
+    return ";".join(parts)
+
+
+# ---------------------------------------------------------------- 视频处理
+# 与 process_audio 共用 _ffmpeg_bin / _run_media_cmd / _resolve_media_path，
+# 编码参数对齐参考项目 Toonflow 的 videoProcessing.ts：
+#   m4a = aac 192k / ipod / +faststart
+#   mp4 = libx264 preset fast crf 18 / pad 到偶数边 / yuv420p / aac 192k / +faststart
+#   png = image2 -update 1 单帧
+# 产物一律 UUID 命名落在 input 目录，绝不覆盖源文件。
+_VIDEO_PROCESS_TIMEOUT = 600
+_AUDIO_OUT_ARGS = [
+    "-map", "0:a:0", "-vn", "-c:a", "aac", "-b:a", "192k",
+    "-f", "ipod", "-movflags", "+faststart",
+]
+_VIDEO_OUT_ARGS = [
+    "-map", "0:V:0", "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-pix_fmt", "yuv420p",
+    "-f", "mp4", "-movflags", "+faststart",
+]
+_FRAME_LABELS = {"current": "当前帧", "first": "首帧", "last": "尾帧"}
+
+
+def _video_output_name(ext):
+    return f"infinite_canvas_{uuid.uuid4().hex}.{ext}"
+
+
+async def _probe_video(path):
+    """ffprobe 取时长 / 分辨率 / 是否有音轨；不可用或解析失败返回 None。
+
+    与 _probe_duration 不同，这里必须知道「有没有音轨」和「有没有画面」，
+    否则提取音轨会在 FFmpeg 阶段才失败，用户只看到一行英文报错。
+    """
+    probe = _ffmpeg_bin("ffprobe")
+    if not probe:
+        return None
+    try:
+        text = await _run_media_cmd(
+            [
+                probe, "-v", "error", "-show_entries",
+                "format=duration:stream=index,codec_type,width,height",
+                "-of", "json", path,
+            ],
+            timeout=30,
+        )
+        info = json.loads(text)
+        try:
+            duration = float((info.get("format") or {}).get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        streams = info.get("streams") or []
+        video = next(
+            (s for s in streams
+             if s.get("codec_type") == "video"
+             and not (s.get("disposition") or {}).get("attached_pic")),
+            None,
+        )
+        return {
+            "duration": duration if duration > 0 else None,
+            "width": (video or {}).get("width"),
+            "height": (video or {}).get("height"),
+            "has_audio": any(s.get("codec_type") == "audio" for s in streams),
+            "has_video": video is not None,
+            "video_index": (video or {}).get("index", 0),
+        }
+    except Exception:
+        return None
+
+
+def _cleanup_outputs(made):
+    for item in made:
+        try:
+            if os.path.isfile(item["path"]):
+                os.remove(item["path"])
+        except OSError:
+            pass
+
+
 def _dir_for_type(source_type):
     if source_type == "output":
         return _output_dir()
@@ -1556,6 +1751,235 @@ def register_routes(app):
             }
         )
 
+    async def process_audio(request):
+        """音频截取 / 变速：FFmpeg 导出 m4a 到 input 目录，返回新文件引用。
+
+        body: {ref: {filename, subfolder, type}, action: "clip"|"speed",
+               segments?: [{start,end}], speed?: number}
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+
+        ref = payload.get("ref") or {}
+        filename = str(ref.get("filename") or payload.get("filename") or "")
+        try:
+            src = _resolve_media_path(
+                filename, ref.get("subfolder", ""), ref.get("type", "input")
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        action = payload.get("action")
+        if action not in ("clip", "speed"):
+            return web.json_response({"error": "未知操作，须为 clip 或 speed"}, status=400)
+
+        duration = await _probe_duration(src)
+        if duration is not None and duration <= 0:
+            return web.json_response({"error": "源音频没有有效音轨"}, status=400)
+
+        cmd = [
+            _ffmpeg_bin("ffmpeg") or "ffmpeg",
+            "-hide_banner", "-loglevel", "error", "-y", "-i", src,
+            "-vn", "-c:a", "aac", "-b:a", "192k", "-f", "ipod",
+            "-movflags", "+faststart",
+        ]
+        label = ""
+        if action == "clip":
+            raw = payload.get("segments")
+            if not isinstance(raw, list) or not (1 <= len(raw) <= 64):
+                return web.json_response({"error": "片段数量须在 1 至 64 之间"}, status=400)
+            segments = []
+            for item in raw:
+                try:
+                    start = float(item["start"])
+                    end = float(item["end"])
+                except (TypeError, ValueError, KeyError):
+                    return web.json_response({"error": "片段时间格式错误"}, status=400)
+                if not (0 <= start < end) or not all(map(lambda v: v == v and abs(v) != float("inf"), (start, end))):
+                    return web.json_response({"error": "片段须满足 0 ≤ 开始 < 结束"}, status=400)
+                if duration is not None and end > duration + 0.05:
+                    return web.json_response({"error": "片段结束时间超出音频时长"}, status=400)
+                segments.append((start, end))
+            cmd += ["-filter_complex", _clip_filter(segments), "-map", "[out]"]
+            label = "截取"
+            out_duration = sum(e - s for s, e in segments)
+        else:
+            try:
+                speed = float(payload.get("speed"))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "变速倍数格式错误"}, status=400)
+            if not (0.1 <= speed <= 4) or speed != speed or speed == float("inf"):
+                return web.json_response({"error": "变速倍数须在 0.1 至 4 之间"}, status=400)
+            cmd += ["-filter:a", _atempo_chain(speed), "-map", "0:a:0"]
+            label = "%.2f×" % speed
+            out_duration = (duration / speed) if duration else None
+
+        out_name = _audio_output_name()
+        out_path = os.path.join(_input_dir(), out_name)
+        cmd.append(out_path)
+        try:
+            await _run_media_cmd(cmd)
+            if not os.path.isfile(out_path) or os.path.getsize(out_path) < 1024:
+                raise RuntimeError("生成的音频文件为空")
+        except Exception as exc:
+            try:
+                if os.path.isfile(out_path):
+                    os.remove(out_path)
+            except OSError:
+                pass
+            return web.json_response({"error": f"音频处理失败: {exc}"}, status=500)
+
+        return web.json_response({
+            "filename": out_name,
+            "name": f"{os.path.splitext(filename)[0]} · {label}.m4a",
+            "subfolder": "",
+            "type": "input",
+            "duration": round(out_duration, 3) if out_duration else None,
+        })
+
+    async def process_video(request):
+        """视频节点：提取音轨 / 分离音视频 / 截取片段 / 截取视频帧。
+
+        body: {ref: {filename, subfolder, type},
+               action: "extractAudio"|"separate"|"trim"|"frame",
+               start?, end?, frame?: "current"|"first"|"last", time?}
+        返回 {action, files: [{filename, name, subfolder, type, role, duration}]}
+        role 告诉前端该建哪种素材节点；一个 action 可能产出多个文件。
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+
+        ref = payload.get("ref") or {}
+        filename = str(ref.get("filename") or payload.get("filename") or "")
+        try:
+            src = _resolve_media_path(
+                filename, ref.get("subfolder", ""), ref.get("type", "input")
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        action = payload.get("action")
+        if action not in ("extractAudio", "separate", "trim", "frame"):
+            return web.json_response({"error": "未知操作"}, status=400)
+
+        info = await _probe_video(src)
+        if info is not None and not info["has_video"]:
+            return web.json_response({"error": "文件不包含视频画面"}, status=400)
+        duration = (info or {}).get("duration")
+
+        ffmpeg = _ffmpeg_bin("ffmpeg") or "ffmpeg"
+        base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+        out_dir = _input_dir()
+        stem = os.path.splitext(filename)[0]
+        made = []
+
+        def add_out(ext, role, label, out_duration=None):
+            name = _video_output_name(ext)
+            item = {
+                "path": os.path.join(out_dir, name),
+                "name": name,
+                "ext": ext,
+                "role": role,
+                "label": label,
+                "duration": out_duration,
+            }
+            made.append(item)
+            return item["path"]
+
+        cmd = None
+        if action in ("extractAudio", "separate"):
+            if info is not None and not info["has_audio"]:
+                return web.json_response({"error": "该视频没有音轨"}, status=400)
+            audio_path = add_out("m4a", "asset-audio", "音轨", duration)
+            cmd = base + ["-i", src] + _AUDIO_OUT_ARGS + [audio_path]
+            if action == "separate":
+                # 一条命令两个输出：第二个输出用 -an 去掉音轨，得到静音视频
+                video_path = add_out("mp4", "asset-video", "静音视频", duration)
+                cmd += ["-an"] + _VIDEO_OUT_ARGS + [video_path]
+        elif action == "trim":
+            try:
+                start = float(payload.get("start"))
+                end = float(payload.get("end"))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "起止时间格式错误"}, status=400)
+            if not all(v == v and abs(v) != float("inf") for v in (start, end)):
+                return web.json_response({"error": "起止时间格式错误"}, status=400)
+            if not (0 <= start < end):
+                return web.json_response({"error": "片段须满足 0 ≤ 开始 < 结束"}, status=400)
+            if duration and end > duration + 0.05:
+                return web.json_response({"error": "片段结束时间超出视频时长"}, status=400)
+            label = f"{start:.2f}–{end:.2f} 秒"
+            video_path = add_out("mp4", "asset-video", label, end - start)
+            # -map 0:a:0? 的问号表示音轨可选：无音轨视频也能截取
+            cmd = base + [
+                "-ss", "%.6f" % start, "-i", src, "-t", "%.6f" % (end - start),
+                "-map", "0:V:0", "-map", "0:a:0?",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                "-f", "mp4", "-movflags", "+faststart", video_path,
+            ]
+        else:  # frame
+            which = str(payload.get("frame") or "current")
+            if which not in _FRAME_LABELS:
+                return web.json_response({"error": "未知的截帧位置"}, status=400)
+            try:
+                t = float(payload.get("time") or 0)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "截帧时间格式错误"}, status=400)
+            is_last = which == "last"
+            if which == "first":
+                t = 0.0
+            if not (t == t and abs(t) != float("inf")) or t < 0:
+                return web.json_response({"error": "截帧时间格式错误"}, status=400)
+            if duration and not is_last:
+                # 输入侧 -ss 会丢弃早于 t 的帧，贴着末尾取会「一帧都没有」；
+                # 当前帧最多也只能贴到最后一帧之前。
+                t = min(t, max(0.0, duration - 0.001))
+            png_path = add_out("png", "asset-image", _FRAME_LABELS[which])
+            if is_last:
+                # 尾帧不能用 -ss duration-ε：最后一帧通常早于那个时间点。
+                # 从末尾 1 秒开始逐帧覆盖同一文件，留下的就是真正的最后一帧。
+                # 短于 1 秒的视频 -sseof 会从头开始，同样成立。
+                cmd = base + [
+                    "-sseof", "-1", "-i", src,
+                    "-map", "0:V:0", "-c:v", "png",
+                    "-f", "image2", "-update", "1", png_path,
+                ]
+            else:
+                cmd = base + [
+                    "-ss", "%.6f" % t, "-i", src,
+                    "-map", "0:V:0", "-frames:v", "1", "-c:v", "png",
+                    "-f", "image2", "-update", "1", png_path,
+                ]
+
+        try:
+            await _run_media_cmd(cmd, timeout=_VIDEO_PROCESS_TIMEOUT)
+            for item in made:
+                if not os.path.isfile(item["path"]) or os.path.getsize(item["path"]) < 128:
+                    raise RuntimeError("生成的媒体文件为空")
+        except Exception as exc:
+            _cleanup_outputs(made)
+            return web.json_response({"error": f"视频处理失败: {exc}"}, status=500)
+
+        return web.json_response({
+            "action": action,
+            "files": [
+                {
+                    "filename": item["name"],
+                    "name": f"{stem} · {item['label']}.{item['ext']}",
+                    "subfolder": "",
+                    "type": "input",
+                    "role": item["role"],
+                    "duration": round(item["duration"], 3) if item["duration"] else None,
+                }
+                for item in made
+            ],
+        })
+
     async def list_canvases(request):
         return web.json_response({"canvases": _list_canvases()})
 
@@ -1903,6 +2327,8 @@ def register_routes(app):
             web.get(f"{API_PREFIX}/workflows/{{name}}/fields", get_fields),
             web.put(f"{API_PREFIX}/workflows/{{name}}/fields", save_fields),
             web.post(f"{API_PREFIX}/media", upload_media),
+            web.post(f"{API_PREFIX}/audio/process", process_audio),
+            web.post(f"{API_PREFIX}/video/process", process_video),
             web.delete(f"{API_PREFIX}/media/{{filename}}", delete_media),
             web.post(f"{API_PREFIX}/package", package_media),
             web.get(f"{API_PREFIX}/canvases", list_canvases),

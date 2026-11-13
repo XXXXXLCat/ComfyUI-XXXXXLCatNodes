@@ -2272,6 +2272,317 @@ ComfyUI-Infinite-Canvas/
 | POST            | `/infinite_canvas/api/execute`                 | 提交工作流执行        |
 | GET             | `/infinite_canvas/api/prompts/{id}`            | 查询执行结果         |
 | POST            | `/infinite_canvas/api/free`                    | 卸载模型并释放显存 / 内存（转发 ComfyUI 的 `/free`） |
+| POST            | `/infinite_canvas/api/audio/process`           | 音频截取 / 变速（FFmpeg，见下节） |
+
+## 音频节点：截取与变速（2026-11-13）
+
+参考 `Toonflow-app` 的 `packages/nodes/audioNode`。素材音频 `asset-audio` 与生成音频
+`gen-audio` **都可用**：只要节点当前素材是音频，上方操作行就多出「截取」「变速」两枚
+按钮（与删除按钮同款 `.fan-btn`，非音频节点自动隐藏）。
+
+**交互**
+- 截取弹窗：真实波形（`fetch` + `OfflineAudioContext.decodeAudioData`，解码失败退化为
+  `<audio>` 时长 + 占位波形）+ 6 格时间刻度 + 片段轨道 + 红色播放头。点刻度 / 片段定位，
+  拖播放头微调；「分割」按播放头切两段，「粘合」与相邻片段合并，「删除片段」留下缺口；
+  撤销 Ctrl+Z / 重做 Ctrl+Y，←/→ 每次 0.1 秒，空格试听。试听会按片段跳过被删掉的区间。
+- 变速弹窗：0.1×–4× 滑块 + 数字输入 + 6 个预设，实时显示原时长与预计时长。
+- 两者导出后**在原节点右侧新建一个 `asset-audio` 节点**（自动向下避让已有节点），
+  原音频不变。关闭只走右上 × / 取消 / Esc，遮罩不关闭。
+
+**后端** `POST /infinite_canvas/api/audio/process`（`__init__.py` 的 `process_audio`）：
+
+```json
+{"ref": {"filename": "...", "subfolder": "", "type": "input"},
+ "action": "clip", "segments": [{"start": 0, "end": 2}, {"start": 4, "end": 6}]}
+{"ref": {"filename": "...", "type": "output"}, "action": "speed", "speed": 1.5}
+```
+
+- 源用 `_resolve_media_path()` 按 `type` 解析到 input / output / temp 目录，逐段校验文件名、
+  子目录与 `..`，`os.path.commonpath` 兜住越界；结果写回 input 目录，文件名带 uuid，
+  **不覆盖原素材**。返回 `{filename, name, subfolder:"", type:"input", duration}`。
+- 变速用分级 `atempo`（每级 0.5–2，链式相乘等于目标速度，保持音调）；截取用
+  `atrim=start=..:end=..,asetpts=PTS-STARTPTS` + `concat=n=N:v=0:a=1`；统一
+  `-vn -c:a aac -b:a 192k -f ipod -movflags +faststart` 导出 m4a。
+- FFmpeg 走 `asyncio.create_subprocess_exec`（Windows 加 `CREATE_NO_WINDOW`），300 秒超时，
+  失败删掉半成品；`shutil.which` 找不到时回退 `imageio_ffmpeg.get_ffmpeg_exe()`。
+- 校验：action 白名单、speed 0.1–4、segments 1–64 且 `0 ≤ start < end ≤ 时长`。
+  实测 1.5× → 4.00s、0.1× → 59.80s、4× → 1.50s、`0–2 + 4–6` → 4.00s；
+  7 组非法参数全部 400。
+
+**前端** `assets/xcat-audio-edit.js`（`?v=20261113c`）+ `xcat-overrides.css` 的
+`.xcat-ae-*` 段（`?v=20261113o`）。片段模型与参考一致：`groups` 是「片段 → 源时间区间」
+的二维数组，导出时展开成一维 `segments`。弹窗挂在 `#app` 内才能拿到 `--cg-*` 令牌；
+亮色单独抬成白卡片。
+
+三个必须注意的坑：
+1. `addNodes` 后 `appendItems` 要等 ~120ms（Vue Flow store 同步延迟），否则静默返回 false，
+   留下空节点；失败时回滚删掉新节点。
+2. 模态期间在 **window 捕获阶段**吞掉 `dblclick`：否则双击遮罩第一击关窗、第二击落到画布，
+   被 `xcat-new-node.js` 的 document 捕获当成「双击空白新建节点」。`keydown` 不能无差别
+   `stopPropagation`（会连输入框自己的按键一起吞），只挡 Delete / 剪辑快捷键。
+3. `xcat-paste.js` 的 paste 捕获也在 document 上，弹窗非输入区要挡；输入框内放行。
+
+限制：处理中取消只中止前端 fetch，后端 FFmpeg 会跑完并留下一个无人引用的文件；
+没有 PCM 裸流参数面板、没有波形内片段级重绘、没有导出格式选择（固定 m4a/AAC 192k）。
+
+### 节点上方操作按钮改成文字按钮（2026-11-13）
+
+用户「将上面的按钮都改成文字按钮」，并明确是**节点上方那一排原本显示图标的
+`.fan-btn`**（不是截取 / 变速弹窗里的按钮，那些本来就是文字）。整行 9 枚
+（上游 6 枚 + 删除 / 截取 / 变速）全部改成文字，圆角矩形替代圆形。
+
+| 按钮 | 做法 |
+|---|---|
+| 上游 6 枚（裁切 / 扩图 / 预览 / 宫格 / 下载 / 全部下载） | **不动 bundle**：上游模板把 label 只放在 `title` 里、子节点只有 svg。CSS 隐藏 `svg`，用 `.fan-btn:not([data-xcat-text])::after{content:attr(title)}` 显示文字。Vue 每次 hover 重建按钮也不会失效。 |
+| 自注入 3 枚（删除 / 截取 / 变速） | JS 直接写 `textContent`，打 `data-xcat-text` 跳过伪元素；`title` 缩成「删除」「截取」「变速」，全称留在 `aria-label`。 |
+
+样式（`xcat-overrides.css` 末尾）：宽高交给内容 / `height:28px` /
+`padding:0 11px` / `border-radius:8px` / **13px 字号**（画布默认 zoom .7，
+11px 会被压到 7.7px 读不清）/ gap 6px / `flex-wrap:wrap` 兜底。
+三枚注入按钮补 `is-enabled` class，才能和上游 6 枚同款强调色描边；
+`.fan-btn.is-enabled` 的文字色统一回 `--cg-fg`（上游把「可用」染成
+`--c-accent` 黄绿，亮色下文字糊），hover 用 `--cg-primary`（删除按钮用
+`:not(.xcat-act-delete)` 排除，保留自己的 hover 规则）。上游 `.is-enabled`
+是 10% 强调色的半透明底，亮色画布的密集网格会透到字底下，所以
+`.is-enabled` / hover 统一改成 `var(--c-surface-3)` **实底**。
+
+版本号：`xcat-node-actionbar.js?v=20261113b`、
+`xcat-audio-edit.js?v=20261113e`、`xcat-overrides.css?v=20261113s`。
+
+验证（8198 干净实例 + CDP 真鼠标）：音频节点行 = 预览 / 下载 / 删除 /
+截取 / 变速；图片节点行 = 裁切 / 扩图 / 预览 / 宫格 / 下载 / 删除；
+全部 `svg display:none`、13px、8px 圆角、单行不换行、总宽 199 / 240px
+（节点屏幕宽 336px）、无重复文字；真点「截取」「变速」弹窗正常、
+Esc / 取消可关、真点「删除」节点被删；亮色文字 `rgb(9,9,10)`、
+实底 `rgb(247,247,250)`，暗 / 亮两套截图确认。
+
+> 上面 2026-11-12 几个小节里「按钮 32×32 / svg 16×16 / `title=删除节点`」
+> 是改文字按钮之前的旧状态，以本节为准。
+> 本节记录的是**刚改完文字按钮时**的顺序；随后又按下节调整过，顺序以新节为准。
+
+### 音频节点去掉预览 + 操作行固定顺序（2026-11-13）
+
+用户「音频节点不需要预览，截取和变速放在下载和删除前面，下载和删除永远放在后面」。
+
+| 项 | 做法 |
+|---|---|
+| 不要「预览」 | 改 bundle 里我们自己的 `xcatFanActions()` 过滤：角色为 `asset-audio` / `gen-audio`，或当前素材 `kind === "audio"` 时，`a.key === "preview"` 直接 `return !1`。按角色命中，所以**还没生成结果的 gen-audio 空节点也没有预览**；图片 / 视频 / 空节点不受影响。同一个函数也供预览面板左侧工具列使用，音频节点那列自然同步。 |
+| 固定顺序 | **不用 JS 搬节点**：上游 6 枚由 Vue 每次 hover 重建，删除 / 截取 / 变速 是三个脚本各自 `appendChild` 的，DOM 顺序随加载与 patch 时机变。`.node-actions` 是 flex，直接给子项定 `order`（`xcat-overrides.css` 末尾）：`截取 -2` → `变速 -1` → 其余操作 `0` → `下载 90` / `全部下载 91` → `删除 99`。`flex-wrap` 下同样生效，Vue 重建后也无需重排，也不会闪。 |
+
+```css
+#app .demo-node .node-actions .fan-btn.xcat-ae-clip  { order: -2; }
+#app .demo-node .node-actions .fan-btn.xcat-ae-speed { order: -1; }
+#app .demo-node .node-actions .fan-btn[title="下载"]     { order: 90; }
+#app .demo-node .node-actions .fan-btn[title="全部下载"] { order: 91; }
+#app .demo-node .node-actions .fan-btn.xcat-act-delete   { order: 99; }
+```
+
+DOM 里注入按钮仍 append 在末尾（实测 `下载 / 删除 / 截取 / 变速`），**视觉顺序**
+靠 order 纠正。`xcat-node-actionbar.js` 的注释已同步（不再声称「append 即排最后」）。
+
+版本号：`index-BXU58XDe.js?v=20261113p`（预览过滤）、
+`xcat-overrides.css?v=20261113t`（order）、
+`xcat-node-actionbar.js?v=20261113c`（注释）。
+
+验证（8198 干净实例 + CDP 真鼠标，按屏幕坐标读视觉顺序）：
+素材音频 = **截取 / 变速 / 下载 / 删除**（`order -2/-1/90/99`，无「预览」）；
+空 gen-audio = **删除**（无预览、截取变速因无音频隐藏）；
+素材图片 = 裁切 / 扩图 / 预览 / 宫格 / 下载 / 删除（下载 90、删除 99 仍在末尾；
+**这是当时的结果，图片 / 视频的「预览」已在后面「视频 / 图片节点也去掉预览」一节一并去掉**）。
+全部单行、总宽 158 / 240px < 节点 336px；真点「截取」弹窗正常、Esc 可关、
+真点「删除」节点真的被删；暗 / 亮两套截图 `barorder-clean-{dark,light}.png`。
+本包限制「一个节点一个素材」，`appendItems` 同一 ref 会去重，多素材的
+「全部下载」实际不出现，但 order 91 已为它留好位置。
+
+### 节点内强调色 #F2FF59 → #0B8CE9（2026-11-13）
+
+用户「节点中的 #F2FF59 改成 #0B8CE9」。这个黄绿不是某处硬编码，而是上游
+`index-5rMw4exW.css` 暗色 `:root` 的 `--accent-yellow:#f2ff59`
+（亮色 `html[data-theme=light]` 是一整套橄榄黄 `#c6d300 / #6f7a00 / #1f2200`），
+`--c-accent` 直接指向它。左侧栏 `.library-dock` 与浮窗 `.float-window` 早前
+已被我们重映射成中性前景色，所以黄绿只剩在**节点区域**：音频进度/音量滑块
+`.xaw-*`、fan-btn 描边、选中描边、进度环、素材点、参数滑块与开关、
+运行按钮 `.panel-run`、上传入口等。
+
+做法：在 `xcat-overrides.css` 末尾按「节点」作用域重定义变量，**不改上游
+CSS 字面量**（dist 保持纯净，升级上游 / 重新 build 后照本文件重做）：
+
+```css
+#app .vue-flow__node,
+#app .flow-wrap .node-panel {
+    --accent-yellow: #0b8ce9;
+    --c-accent: #0b8ce9;
+    --c-accent-weak: color-mix(in srgb, #0b8ce9 12%, transparent);
+    --c-accent-ink: #0b8ce9;
+    --c-on-accent: #ffffff;   /* 原 #14140f 深墨字是配亮黄底的，蓝底要白字 */
+}
+```
+
+暗 / 亮两套主题统一成同一个蓝。`#0b8ce9` 就是本包 `--cg-primary`
+（ComfyUI `--primary` = azure-600），与弹窗、工具条里的蓝一致。
+端口圆点 `.node-port::before` 不受影响：它早已按 ComfyUI
+`getSlotColor` 改成中性灰 `--xcat-slot`(#AAA)，不是这个黄绿。
+**菜单栏 `Infinite Canvas` 按钮**（`web/monitor.js` 的 `CANVAS_BG`）仍是
+`#F2FF59`，它不在节点里，本轮未改。
+
+版本号：`xcat-overrides.css?v=20261113v`。
+
+验证（8198 干净实例 + CDP）：节点上 `--accent-yellow / --c-accent` 解析为
+`#0b8ce9`，`.xaw-seek-thumb / .xaw-seek-fill / .xaw-vol-fill`、
+fan-btn 描边全部 `rgb(11,140,233)`；带 scoped 属性临时造的 `.panel-run` /
+`.panel-slider-thumb` 也是 `rgb(11,140,233)`、文字 `rgb(255,255,255)`
+（隔离实例没有工作流，真实运行按钮渲染不出来，用合成元素验 CSS 解析）；
+遍历节点全部后代的 color / background / border / fill / stroke / 伪元素，
+暗色与亮色均**没有任何 `242,255,89` 残留**；上一节的按钮顺序仍为
+「截取 变速 下载 删除」。截图 `bluenode-{dark,light}.png`。
+
+### 后端未重启防呆 + 节点媒体编辑公共内核（2026-11-13）
+
+用户实测音频「截取 / 变速」点击后报 `JSONDecodeError 第1行第4列 出现意外非空白字符`。
+原因不是 JSON，是**后端 Python 新路由没重启**：旧进程把
+`POST /infinite_canvas/api/audio/process` 落到静态文件路由，返回 `text/plain`
+的 `405: Method Not Allowed`（`405` 三字符后第 4 位正是 `:`），前端直接
+`res.json()` 就炸。**改后端 Python 必须完全重启 ComfyUI，刷新浏览器无效。**
+
+做法（现抽成 `assets/xcat-media-core.js`，音频与视频共用）：
+
+- `createProbe(api)`：用 `POST {}` 看 `content-type` 是否 JSON，判后端是否就绪；
+  失败不缓存，重启后重开窗口即恢复。
+- `request(api, payload, signal, label)`：`res.text()` → `JSON.parse`，非 JSON 抛
+  「后端 Python 尚未重启，请完全重启 ComfyUI 后重试（只刷新浏览器无效）」。
+- `setWarn()` / `.xcat-ae-warn` 横幅：未就绪时禁用导出并给出可操作提示。
+- `makeButton()` / `installButtons()` / `activeMedia()` / `warnHtml()` /
+  `buildResultNodes()`。
+
+版本号：`xcat-media-core.js?v=20261113e`、`xcat-audio-edit.js?v=20261113g`、
+`xcat-video-edit.js?v=20261113a`、`xcat-overrides.css?v=20261113x`。
+
+### 视频节点：提取音轨 / 分离音视频 / 截取片段 / 截取视频帧（2026-11-13）
+
+用户要求参考 Toonflow 项目，交互按用户三项选择定稿：
+
+| 工具 | 交互 | 产物 |
+| --- | --- | --- |
+| 提取音轨 | 点击直接执行 + 进度弹窗（可取消） | 1 个 `asset-audio`（m4a） |
+| 分离音视频 | 同上 | 2 个：`asset-audio` + 静音 `asset-video` |
+| 截取片段 | 单段起止：视频预览 + 10 张缩略图条 + 双拖拽手柄 + 数字输入 | 1 个 `asset-video`（mp4） |
+| 截取视频帧 | 点击弹三选一：当前帧 / 首帧 / 尾帧 | 1 个 `asset-image`（png） |
+
+四者都**保留原视频、产物是右侧新节点**。操作行按钮用 CSS flex `order` 固定：
+`-6 提取音轨 / -5 分离音视频 / -4 截取片段 / -3 截取视频帧`，下载 `90`、
+全部下载 `91`、删除 `99` 永远在末尾。缩略图固定 10 张，用离屏 `<video>` +
+canvas `160×96` JPEG，不随视频时长增长。
+
+后端 `POST /infinite_canvas/api/video/process`：请求
+`{ref:{filename,subfolder,type}, action, start, end, frame, time}`，返回
+`{action, files:[{filename,name,subfolder,type,role,duration}]}`。FFmpeg 参数照
+Toonflow：音频 `-map 0:a:0 -vn -c:a aac -b:a 192k -f ipod -movflags +faststart`；
+视频 `libx264 -preset fast -crf 18 -vf pad=ceil(iw/2)*2:ceil(ih/2)*2
+-pix_fmt yuv420p -f mp4`；截帧 `-frames:v 1 -c:v png -f image2 -update 1`。
+**尾帧不能用 `-ss duration-0.001`**（最后一帧通常早于该时间点，会输出空文件），
+改用 `-sseof -1 -i src` + `-update 1` 逐帧覆盖同一 PNG，留下真正最后一帧。
+
+#### 产物节点「toast 成功但凭空消失」：视口外的节点根本加不进去
+
+本轮最费时的坑，别再走回头路。`buildResultNodes()` 先后试过四种写法都失败：
+
+1. `addNodes` + 延迟 80ms `appendItems` —— `appendItems` 操作的是上游
+   `useGraph` 自己的 `t=te([])`，而 `__xcatFlow` 是 Vue Flow 实例，两侧靠
+   watch + nextTick 双向同步，延迟期间新节点已被旧快照覆盖。
+2. `setNodes(旧.concat(新))` 整体赋值 —— 触发正/反向 watch 的 pause/resume
+   竞争；hook 日志显示 `setNodes` 后 `after:"1,2,3,4,5"`，下一拍
+   `appendItems` 的 `before` 又退回 `"1,2,3,4"`。
+3. 上游 `spawnDetachedNode()` —— 虽改真源 `t.value`，但用闭包自增计数器 `r`
+   （初始 0）分配 id，和 `xcat-new-node.js` 的 `nextId()`（按现有节点 max+1）
+   不同步，菜单建的节点 id 为 `"1"` 时会撞出重复 id。
+4. 同一个 tick 内 `setNodes` + `appendItems` —— 仍被异步同步清掉。
+
+真正根因（用 `video-debug7/9/10/12` 四组对照 + hook 定位）：**视口外的节点会
+被 Vue Flow / 上游丢弃**。`zoom .7`、窗口 1424×805 时可见 flow 区域仅约
+`2034×1150`；实测 `y=2000` 的节点 `addNodes` 后 `getNodes` 里直接没有，
+`y=200` 的则正常。老 `placeClear()` 只会无限向下累加 `y`，连续第 4 个产物
+（`y≈1395`）必然掉出可见区，于是「前 3 个成功、第 4 个起 toast 成功但节点不见」。
+
+正解（照上游 `spawnItemsNodeAt`）：**节点自带 `data.media`，一次 `addNodes`
+增量添加，完全不经过 `appendItems`；`placeClear()` 改成在当前视口的可见区网格
+里找离期望点最近的空位**，不再累加 y。`visibleRect()` 从
+`__xcatFlow.viewport.value` 与 `innerWidth/innerHeight` 反算 flow 矩形，
+`cols/rows` 按 `NODE_W+GAP_X` / `NODE_H+GAP_Y` 铺网格，候选点按曼哈顿距离排序。
+
+验证（8198 干净实例 + CDP 9333）：`video-debug11.js` 连续 6 次
+`buildResultNodes` 全部落盘；`verify-video-tools.js` 四工具端到端得到 6 个节点
+（`asset-video` 源 + `asset-audio`×2 + 静音 `asset-video` + 截取 `asset-video`
++ 首帧 `asset-image`），媒体文件名与角色均正确；`verify-audiofix-ok.js`
+音频回归通过（预检正常、真点导出生成新音频节点、变速预检正常）。
+四处（工作区 + Main/Lab/TTS）哈希一致。
+
+#### 截取片段：预览必须与选区联动（2026-11-13 补齐）
+
+初版只做了「静态时间轴 + 起止输入」，用户反馈「截取片段没有做到位」。对照
+`Toonflow/packages/nodes/videoNode/src/components/videoActions.vue` 的 trim
+分支逐条补齐，缺的是这些：
+
+| 能力 | Toonflow 真源 | 本包落地 |
+| --- | --- | --- |
+| 播放只在选区内 | `@play` → `playSelection` 越界跳回 start；`@timeupdate` → `readTime` 到 end 暂停 | `onPlaySelection` / `onTimeUpdate` |
+| 拖边界时预览跟随 | `beginDrag` / `setBoundary` 里 `seekPreview` | `setBoundary` 末尾 `seekPreview(edge==='start'?start:end)` |
+| 改输入框时预览跟随 | `@input="seekPreview(valueAsNumber)"` | `onTimeInput` 按触发源跳 start 或 end（原来一律跳 start） |
+| 点击时间轴定位 | `@pointerdown="seekTrack"` | `seekTrack`，clamp 在 `[start,end]` |
+| 播放头 | `.playhead` 随 `currentTime` 移动 | `.xcat-ve-playhead` + `paintPlayhead` |
+| 时间刻度尺 | 5 个 `formatTime(d*i/4)` | `.xcat-ve-ruler` + `buildRuler` |
+| 边界约束 | `clipLimit=floor(d*100)/100`、`minimumLength=min(0.01,clipLimit)`、`start<=end-minLen` | `S.limit` / `S.minLen` / `setBoundary`；`valid()` 不再放宽 `+0.05` |
+| 键盘微调 | 方向键 ±0.1 / Shift ±1 / Home / End，`role=slider` + aria | `changeBoundary` + `aria-valuenow/min/max` |
+| 手柄拖拽 | pointer capture + **相对位移**换算 | `bindHandle` 记 `x0/t0`，避免抓边缘先跳一下 |
+| 处理中冻结 | `:disabled="processing"` | `lockTrim` 禁用输入/手柄 + `.is-busy` 半透明 |
+| 缩略图不变形 | cover 等比居中绘制 | `scale=max(160/vw,96/vh)` 居中 `drawImage` |
+
+样式同时对齐参考：弹窗 760px、时间轴头部「原视频 mm:ss.cc」、选中区上下
+3px 主色边 + 10% 主色底、16px 实色手柄（白竖条 / hover / 聚焦描边）、
+10 张缩略图带分隔线、5 点刻度尺。**轨道必须 `overflow:visible`**，否则贴在
+100% 的结束手柄右半边会被切掉抓不住；圆角改由 `.xcat-ve-strip` 自己裁。
+`fmt()` 补成 `mm:ss.cc`（分钟两位）。`buildThumbs()` 增加 `alive()` 回调，
+弹窗关闭后立刻停止后台解码；`close()` 主动暂停预览视频。
+
+验证 `verify-trim-parity.js`（8198 + CDP 真鼠标 / 真键盘，6 秒带音轨素材）：
+结构 10 缩略图 / 5 刻度 / 播放头 / role=slider 全部到位；输入 start=1 →
+预览 1.000、输入 end=3.5 → 预览 3.500、点轨道 45% → 2.697、拖结束手柄
++90px → end 3.5→4.28 且预览 4.28、ArrowLeft → 0.9、Shift+ArrowRight
+→ 1.9、从 0 播放跳回 1 并在 2.199 自动暂停、真点执行生成带时间段的视频节点。
+暗 / 亮截图 `trim-parity-{dark,light}.png`；`verify-video-tools.js` 四工具
+回归 6 个节点全通过。
+
+### 视频 / 图片节点也去掉「预览」（2026-11-13）
+
+用户「视频的预览也不需要，图片也不需要」—— 接上一节音频去预览的「也」。
+改 bundle 里我们自己的 `xcatFanActions()`，把原来只针对音频的条件扩成
+音频 / 视频 / 图片三类，各自按角色（`asset-*` / `gen-*`）命中，并保留当前
+素材 `kind` 兜底：
+
+```js
+if(a.key==="preview"&&(
+  xnr==="asset-audio"||xnr==="gen-audio"||kind==="audio"||
+  xnr==="asset-video"||xnr==="gen-video"||kind==="video"||
+  xnr==="asset-image"||xnr==="gen-image"||kind==="image"
+))return!1;
+```
+
+按角色命中，所以**还没生成结果的 gen-* 空节点也没有预览**；文本节点早前已被
+同一函数整体排除。无素材、且不属于这三类的节点仍保留预览（本次没动）。
+
+版本号 `index-BXU58XDe.js?v=20261113q`（上一版 `p` 只过滤音频）。
+
+验证（8198 + CDP 真鼠标 hover，脚本 `verify-no-preview.js`，暗 / 亮截图
+`nopreview-{dark,light}.png`）：
+
+| 节点 | 操作行 |
+| --- | --- |
+| 素材图片 | 裁切 / 扩图 / 宫格 / 下载 / 删除 |
+| 素材视频 | 提取音轨 / 分离音视频 / 截取片段 / 截取视频帧 / 下载 / 删除 |
+| 素材音频 | 截取 / 变速 / 下载 / 删除（回归） |
+| gen-image / gen-video / gen-audio 空节点 | 删除 |
+
+六类节点**均无「预览」**，下载 `90`、删除 `99` 仍在末尾，视频四工具
+`-6/-5/-4/-3`、音频 `-2/-1` 顺序不变。只改前端 bundle，四处同步后刷新即可。
 
 ## 常见问题
 

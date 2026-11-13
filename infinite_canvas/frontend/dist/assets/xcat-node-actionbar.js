@@ -14,8 +14,16 @@
      · 原按钮若因 hover 状态不存在，退回 __xcatFlow.removeNodes([id])
 
    注入元素补上 Actions 组件的 scoped id data-v-abbe9e2b，才能命中上游
-   .fan-btn / .node-actions.is-open .fan-btn 的样式；尺寸由
-   xcat-overrides.css 的一行规则统一成 32×32 / svg 16×16。
+   .fan-btn / .node-actions.is-open .fan-btn 的样式。
+
+   2026-11-13：视觉顺序改由 xcat-overrides.css 的 flex order 保证
+   （下载 / 全部下载 = 90 / 91，删除 = 99，永远在行尾；截取 / 变速 = -2 / -1）。
+   这里仍 appendChild，只是把节点放进容器，不再依赖 DOM 顺序。
+
+   2026-11-13：节点上方操作行整体改成文字按钮（用户要求），所以这里不再
+   注入 svg，直接放文字「删除」；data-xcat-text 告诉覆盖层 CSS 这是自带
+   文字的按钮，不要再补 ::after（上游 6 枚图标按钮靠 ::after attr(title)
+   显示文字）。尺寸统一由 xcat-overrides.css 控制。
    ================================================================== */
 (function () {
   'use strict';
@@ -23,11 +31,6 @@
 
   var SCOPE = 'data-v-abbe9e2b';
   var CLS = 'xcat-act-delete';
-  var ICON =
-    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
-    '<path d="M4 7h16M9 7V5h6v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12' +
-    'M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-    'stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   function remove(btn) {
     var host = btn.closest('.demo-node');
@@ -47,11 +50,13 @@
       if (bar.querySelector('.' + CLS)) continue;
       var btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'fan-btn ' + CLS + ' nodrag';
-      btn.title = '删除节点';
+      /* is-enabled 是上游给「可用按钮」的标记，补上才能和另外 6 枚同款描边 */
+      btn.className = 'fan-btn is-enabled ' + CLS + ' nodrag';
+      btn.title = '删除';
       btn.setAttribute('aria-label', '删除节点');
+      btn.setAttribute('data-xcat-text', '');
       btn.setAttribute(SCOPE, '');
-      btn.innerHTML = ICON;
+      btn.textContent = '删除';
       ['pointerdown', 'mousedown', 'dblclick'].forEach(function (t) {
         btn.addEventListener(t, function (e) { e.stopPropagation(); });
       });
@@ -59,7 +64,7 @@
         e.stopPropagation();
         remove(e.currentTarget);
       });
-      bar.appendChild(btn);          /* 永远排最后 */
+      bar.appendChild(btn);          /* 视觉顺序由 CSS order 固定为末尾 */
     }
   }
 

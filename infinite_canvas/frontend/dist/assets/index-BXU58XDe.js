@@ -46,6 +46,12 @@ function xcatFanActions(){
   const media=o.media||[],cur=w.value,kind=cur&&cur.kind?cur.kind:"";
   return L.filter(function(a){
     var xnr=xcatNodeRole(o.nodeId);if(xnr==="asset-text"||xnr==="gen-text")return!1;
+    /*xcat: 音频/视频/图片节点都不需要「预览」（按角色命中，生成空节点也算；再按当前素材兜底）*/
+    if(a.key==="preview"&&(
+      xnr==="asset-audio"||xnr==="gen-audio"||kind==="audio"||
+      xnr==="asset-video"||xnr==="gen-video"||kind==="video"||
+      xnr==="asset-image"||xnr==="gen-image"||kind==="image"
+    ))return!1;
     if(a.key==="crop"||a.key==="expand"||a.key==="grid")return kind==="image";
     if(a.key==="download")return!!cur;
     if(a.key==="downloadAll")return media.length>=2;

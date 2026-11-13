@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Infinite-Canvas</title>
-  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js?v=20261113n"></script>
+  <script type="module" crossorigin src="/infinite_canvas/app/assets/index-BXU58XDe.js?v=20261113q"></script>
   <link rel="stylesheet" crossorigin href="/infinite_canvas/app/assets/index-5rMw4exW.css?v=20261112o">
   <!-- 本包本地调整，必须排在上面这个样式之后 -->
-  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css?v=20261113n">
+  <link rel="stylesheet" href="/infinite_canvas/app/assets/xcat-overrides.css?v=20261113y">
   <script defer src="/infinite_canvas/app/assets/xcat-audio-wave.js?v=20261112d"></script>
   <script defer src="/infinite_canvas/app/assets/xcat-media-controls.js?v=20261112g"></script>
   <script defer src="/infinite_canvas/app/assets/xcat-node-names.js"></script>
-  <script defer src="/infinite_canvas/app/assets/xcat-node-actionbar.js"></script>
+  <script defer src="/infinite_canvas/app/assets/xcat-node-actionbar.js?v=20261113c"></script>
   <!-- 选中节点 ⇒ 相连的线一起变白（ComfyUI highlightedLinks 语义） -->
   <script defer src="/infinite_canvas/app/assets/xcat-edge-hot.js?v=20261112a"></script>
   <!-- 连线中点圆点，点击断开（ComfyUI drawCenterMarker） -->
@@ -26,6 +26,12 @@
   <script defer src="/infinite_canvas/app/assets/xcat-text-edit.js?v=20261113j"></script>
   <!-- 文本节点：平时按 Markdown 渲染显示，双击编辑原始源码 -->
   <script defer src="/infinite_canvas/app/assets/xcat-markdown.js?v=20261113b"></script>
+  <!-- 节点媒体编辑公共内核：按钮注入 / 后端就绪预检 / 请求 / 产物建节点 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-media-core.js?v=20261113e"></script>
+  <!-- 音频节点：截取（多段剪辑拼接）与变速（0.1–4×），处理后生成新音频节点 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-audio-edit.js?v=20261113g"></script>
+  <!-- 视频节点：提取音轨 / 分离音视频 / 截取片段 / 截取视频帧 -->
+  <script defer src="/infinite_canvas/app/assets/xcat-video-edit.js?v=20261113b"></script>
 </head>
 <body>
   <!-- 连线描边滤镜：复刻 ComfyUI litegraph 的 render_connections_border

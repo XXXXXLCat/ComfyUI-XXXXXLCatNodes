@@ -4288,3 +4288,825 @@ html[data-theme="light"] .xcat-nodemenu.is-canvas {
     color: var(--cg-muted-fg);
     opacity: 0.75;
 }
+
+
+/* ==================================================================
+   音频节点「截取 / 变速」（2026-11-13）
+   参考 Toonflow-app audioNode：节点顶部两枚 fan-btn 打开模态；截取是
+   波形时间轴上的多段剪辑，变速是 0.1–4× 滑块。配色全部走 --cg-* 令牌，
+   弹窗挂在 #app 内（令牌定义在 #app 上），亮色单独抬成白卡片。
+   ================================================================== */
+.xcat-ae-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: grid;
+    place-items: center;
+    color: var(--cg-fg);
+    font-size: 13px;
+}
+
+.xcat-ae-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(0 0 0 / 55%);
+    backdrop-filter: blur(2px);
+}
+
+.xcat-ae-dialog {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 760px;
+    max-width: calc(100vw - 32px);
+    max-height: 84vh;
+    border: 1px solid var(--cg-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--cg-secondary) 88%, #ffffff 12%);
+    box-shadow: 0 20px 60px var(--cg-shadow-color), 0 4px 14px rgb(0 0 0 / 25%);
+    animation: xcat-ae-in .14s ease-out;
+}
+
+html[data-theme="light"] .xcat-ae-dialog {
+    background: var(--cg-input);
+}
+
+@keyframes xcat-ae-in {
+    from { opacity: 0; transform: translateY(6px) scale(.99); }
+    to   { opacity: 1; transform: none; }
+}
+
+.xcat-ae-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid var(--cg-line);
+}
+
+.xcat-ae-head > div:first-child { flex: 1; min-width: 0; }
+
+.xcat-ae-title {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.xcat-ae-sub {
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.xcat-ae-x {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.xcat-ae-x:hover { background: var(--cg-accent); color: var(--cg-fg); }
+
+.xcat-ae-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 18px;
+}
+
+.xcat-ae-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--cg-line);
+}
+
+.xcat-ae-status {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.xcat-ae-status.is-error { color: var(--cg-destructive); }
+
+.xcat-ae-btn {
+    flex: 0 0 auto;
+    min-width: 72px;
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.xcat-ae-btn:hover:not(:disabled) { background: var(--cg-accent); }
+
+.xcat-ae-btn.is-primary {
+    border-color: transparent;
+    background: var(--cg-primary);
+    color: var(--cg-primary-fg);
+}
+
+.xcat-ae-btn.is-primary:hover:not(:disabled) { filter: brightness(1.1); }
+
+.xcat-ae-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---------------------------------------------------------- 截取：时间轴 */
+.xcat-ae-timeline {
+    position: relative;
+    box-sizing: border-box;
+    height: 176px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cg-bg) 60%, transparent);
+    overflow: hidden;
+}
+
+.xcat-ae-canvas {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 28px;
+    width: 100%;
+    height: 148px;
+    pointer-events: none;
+}
+
+.xcat-ae-ruler {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 28px;
+    border-bottom: 1px solid var(--cg-line);
+    cursor: crosshair;
+}
+
+.xcat-ae-ruler span {
+    position: absolute;
+    top: 5px;
+    transform: translateX(-50%);
+    color: var(--cg-muted-fg);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.xcat-ae-ruler span::after {
+    content: "";
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    height: 6px;
+    border-left: 1px solid var(--cg-border);
+}
+
+.xcat-ae-ruler span:first-child { transform: none; }
+.xcat-ae-ruler span:last-child { transform: translateX(-100%); }
+
+.xcat-ae-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 28px;
+    height: 148px;
+}
+
+.xcat-ae-segment {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    padding: 8px 10px;
+    border: 1px solid var(--cg-primary);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--cg-primary) 12%, transparent);
+    color: var(--cg-fg);
+    text-align: left;
+    cursor: pointer;
+}
+
+.xcat-ae-segment.is-selected {
+    border-width: 2px;
+    background: color-mix(in srgb, var(--cg-primary) 26%, transparent);
+}
+
+.xcat-ae-segname, .xcat-ae-seglen {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.xcat-ae-seglen { color: var(--cg-muted-fg); font-variant-numeric: tabular-nums; }
+
+.xcat-ae-playhead {
+    position: absolute;
+    top: 22px;
+    bottom: 0;
+    z-index: 3;
+    width: 1px;
+    background: var(--cg-destructive);
+    pointer-events: none;
+}
+
+.xcat-ae-playhead::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    width: 9px;
+    height: 9px;
+    background: inherit;
+    clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+}
+
+/* 只有游标附近的 thumb 接收拖动，轨道其余区域留给片段 / 刻度点击 */
+.xcat-ae-cursor {
+    position: absolute;
+    inset: 0 -6px;
+    z-index: 4;
+    box-sizing: border-box;
+    width: calc(100% + 12px);
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+    touch-action: none;
+}
+
+.xcat-ae-cursor::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 176px;
+    pointer-events: auto;
+    cursor: ew-resize;
+}
+
+.xcat-ae-cursor::-moz-range-thumb {
+    width: 12px;
+    height: 176px;
+    border: 0;
+    pointer-events: auto;
+    cursor: ew-resize;
+}
+
+/* ---------------------------------------------------------- 截取：工具与播放 */
+.xcat-ae-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.xcat-ae-tools button {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.xcat-ae-tools button:hover:not(:disabled) { background: var(--cg-accent); }
+.xcat-ae-tools button:disabled { opacity: .4; cursor: default; }
+.xcat-ae-tools button.is-danger { color: var(--cg-destructive); }
+.xcat-ae-sep { width: 1px; height: 18px; background: var(--cg-line); }
+.xcat-ae-tools-hint { margin-left: auto; color: var(--cg-muted-fg); font-size: 10px; }
+
+.xcat-ae-player {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--cg-line);
+}
+
+.xcat-ae-play {
+    display: grid;
+    place-items: center;
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--cg-border);
+    border-radius: 50%;
+    background: var(--cg-secondary);
+    color: var(--cg-primary);
+    cursor: pointer;
+}
+
+.xcat-ae-play:hover { background: var(--cg-accent); }
+
+.xcat-ae-time {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.xcat-ae-time b { font-weight: 600; }
+.xcat-ae-time span { color: var(--cg-muted-fg); }
+.xcat-ae-hint { color: var(--cg-muted-fg); font-size: 10px; line-height: 1.5; }
+
+/* ---------------------------------------------------------- 变速 */
+.xcat-ae-speedinfo {
+    padding: 14px 16px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cg-bg) 60%, transparent);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xcat-ae-speedrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.xcat-ae-limit { color: var(--cg-muted-fg); font-size: 11px; white-space: nowrap; }
+.xcat-ae-slider { flex: 1; min-width: 80px; accent-color: var(--cg-primary); }
+
+.xcat-ae-number {
+    box-sizing: border-box;
+    width: 84px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xcat-ae-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.xcat-ae-chip {
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--cg-border);
+    border-radius: 999px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.xcat-ae-chip:hover { background: var(--cg-accent); }
+
+.xcat-ae-chip.is-active {
+    border-color: var(--cg-primary);
+    background: color-mix(in srgb, var(--cg-primary) 18%, transparent);
+    color: var(--cg-primary);
+}
+
+.xcat-ae-note {
+    margin: 18px 0 0;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    line-height: 1.7;
+}
+
+/* ---------------------------------------------------------- 轻提示 */
+.xcat-ae-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    z-index: 10000;
+    transform: translateX(-50%);
+    padding: 9px 16px;
+    border: 1px solid var(--cg-border);
+    border-radius: 8px;
+    background: var(--cg-secondary);
+    color: var(--cg-fg);
+    box-shadow: 0 8px 24px var(--cg-shadow-color);
+    font-size: 12px;
+    pointer-events: none;
+    animation: xcat-ae-in .14s ease-out;
+}
+
+.xcat-ae-toast.is-error { border-color: var(--cg-destructive); color: var(--cg-destructive); }
+
+
+/* ==================================================================
+   节点上方操作行：图标按钮 → 文字按钮（2026-11-13）
+   上游 6 枚 .fan-btn 只渲染 svg，label 存在 title 属性里；这里隐藏 svg，
+   用 ::after attr(title) 把 label 直接显示成文字。自注入的 3 枚
+   （删除 / 截取 / 变速）带 data-xcat-text，DOM 里已有文字节点，跳过伪元素
+   避免重复。圆形图标按钮改成圆角矩形文字按钮，宽度交给内容。
+   ================================================================== */
+#app .demo-node .node-actions {
+    gap: 6px;
+    flex-wrap: wrap;
+    align-content: flex-end;
+}
+
+#app .demo-node .node-actions .fan-btn {
+    width: auto !important;
+    min-width: 0 !important;
+    height: 28px !important;
+    padding: 0 11px !important;
+    border-radius: 8px !important;
+    flex: 0 0 auto !important;
+    /* 画布默认 zoom .7，11px 会被压到 7.7px；13px 才勉强够读 */
+    font-size: 13px;
+    line-height: 1;
+    letter-spacing: .2px;
+    white-space: nowrap;
+}
+
+#app .demo-node .node-actions .fan-btn svg {
+    display: none !important;
+}
+
+#app .demo-node .node-actions .fan-btn:not([data-xcat-text])::after {
+    content: attr(title);
+    white-space: nowrap;
+}
+
+/* 上游把所有「可用」按钮都标成 .is-enabled 并染成 --c-accent（黄绿），
+   图标时代没事，文字在亮色下会糊。统一回主题前景色，hover 才用主色。
+   删除按钮有自己的 .xcat-act-delete:hover（特异性更高），不受影响。 */
+#app .demo-node .node-actions .fan-btn.is-enabled {
+    color: var(--cg-fg);
+}
+
+#app .demo-node .node-actions .fan-btn.is-enabled:not(.xcat-act-delete):hover {
+    color: var(--cg-primary);
+}
+
+/* 上游 .is-enabled 用 10% 强调色的半透明底：图标时代没事，换成文字后
+   亮色画布的密集网格会透到字底下，对比度塌掉。统一改成不透明实底，
+   描边仍沿用上游强调色。 */
+#app .demo-node .node-actions .fan-btn.is-enabled,
+#app .demo-node .node-actions .fan-btn.is-enabled:hover,
+#app .demo-node .node-actions .fan-btn.xcat-act-delete:hover {
+    background: var(--c-surface-3);
+}
+
+
+/* ==================================================================
+   节点上方操作行：固定视觉顺序（2026-11-13）
+   用户要求：音频节点不要「预览」（bundle 的 xcatFanActions 已按角色过滤掉）；
+   「截取 / 变速」排在「下载 / 删除」前面，「下载 / 删除」永远在行尾。
+   上游 6 枚由 Vue 每次 hover 重建，删除 / 截取 / 变速 是三个脚本各自
+   appendChild 注入的，DOM 顺序取决于加载与 patch 时机，用 JS 反复搬节点
+   既容易和 Vue 打架也会闪。这里直接给 flex 子项定 order：
+     -2 / -1  截取 / 变速（最前）
+      0       其余操作（裁切 / 扩图 / 预览 / 宫格，音频节点已无预览）
+     90 / 91  下载 / 全部下载
+     99       删除（永远最后）
+   flex-wrap 下 order 依然生效，Vue 重建按钮后也无需重新排序。
+   ================================================================== */
+#app .demo-node .node-actions .fan-btn.xcat-ae-clip  { order: -2; }
+#app .demo-node .node-actions .fan-btn.xcat-ae-speed { order: -1; }
+#app .demo-node .node-actions .fan-btn[title="下载"]     { order: 90; }
+#app .demo-node .node-actions .fan-btn[title="全部下载"] { order: 91; }
+#app .demo-node .node-actions .fan-btn.xcat-act-delete   { order: 99; }
+
+
+/* ==================================================================
+   节点内强调色：#F2FF59 → ComfyUI azure #0B8CE9（2026-11-13）
+   上游 index-5rMw4exW.css 的暗色 :root 写死
+     --accent-yellow:#f2ff59; --c-accent:var(--accent-yellow);
+     --c-accent-ink:#f2ff59;  --c-on-accent:#14140f;
+   亮色 html[data-theme=light] 则是一整套橄榄黄（#c6d300 / #6f7a00 / #1f2200）。
+   左侧栏 .library-dock 与浮窗 .float-window 早已把 accent 重映射成中性
+   前景色，所以这里只在「节点」作用域改色，不动上游 CSS 字面量（dist 保持
+   纯净，升级上游 / 重新 build 后照本文件重做即可）。
+
+   命中：选中描边、进度环、素材点、参数滑块与开关、运行按钮 .panel-run、
+   fan-btn 描边、音频条进度/音量滑块 (.xaw-*)、上传入口 / 拖拽幽灵等。
+   端口圆点不受影响：它早已被本文件按 ComfyUI getSlotColor 改成中性灰
+   `--xcat-slot`(#AAA)，不是这个黄绿，也不该改成蓝色。
+   暗/亮两套主题统一成同一个蓝，避免只改暗色后亮色仍是黄绿。
+   --c-on-accent 必须跟着换成白：原值 #14140f 深色墨字是配亮黄底的，
+   放到蓝底上会看不清。
+   ================================================================== */
+#app .vue-flow__node,
+#app .flow-wrap .node-panel {
+    --accent-yellow: #0b8ce9;
+    --c-accent: #0b8ce9;
+    --c-accent-weak: color-mix(in srgb, #0b8ce9 12%, transparent);
+    --c-accent-ink: #0b8ce9;
+    --c-on-accent: #ffffff;
+}
+
+
+/* ==================================================================
+   音频弹窗：后端接口未就绪的横幅（2026-11-13）
+   后端 Python 加了 /audio/process 但 ComfyUI 没重启时，POST 会落到静态
+   文件路由，返回纯文本 405/404。preflight() 探测到这种情况会显示本横幅
+   并禁用导出按钮，避免用户只看到一个 JSONDecodeError 而不知道要重启。
+   ================================================================== */
+#app .xcat-ae-warn {
+    margin: 12px 18px 0;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--cg-destructive) 55%, transparent);
+    border-left: 3px solid var(--cg-destructive);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cg-destructive) 12%, transparent);
+    color: var(--cg-fg);
+    font-size: 13px;
+    line-height: 1.6;
+}
+#app .xcat-ae-warn[hidden] { display: none; }
+#app .xcat-ae-warn strong { color: var(--cg-destructive); font-weight: 700; }
+
+
+/* ==================================================================
+   视频节点四个工具（2026-11-13）
+   提取音轨 / 分离音视频 / 截取片段 / 截取视频帧；按钮排在音频的
+   截取(-2) / 变速(-1) 之前，下载(90) / 删除(99) 永远在行尾。
+   弹窗复用 .xcat-ae-* 骨架，这里只补视频时间轴与菜单。
+   ================================================================== */
+#app .demo-node .node-actions .fan-btn.xcat-ve-audio    { order: -6; }
+#app .demo-node .node-actions .fan-btn.xcat-ve-separate { order: -5; }
+#app .demo-node .node-actions .fan-btn.xcat-ve-trim     { order: -4; }
+#app .demo-node .node-actions .fan-btn.xcat-ve-frame    { order: -3; }
+
+#app .xcat-ve-dialog { width: 760px; }
+#app .xcat-ve-dialog.is-compact { width: 440px; }
+
+#app .xcat-ve-body {
+    padding: 0 18px 16px;
+    overflow-y: auto;
+    scrollbar-width: auto;
+}
+#app .xcat-ve-body::-webkit-scrollbar { display: block; width: 10px; }
+#app .xcat-ve-body::-webkit-scrollbar-button { display: none; }
+#app .xcat-ve-body::-webkit-scrollbar-track { background: transparent; }
+#app .xcat-ve-body::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--cg-scroll);
+    background-clip: padding-box;
+}
+
+#app .xcat-ve-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    min-height: 148px;
+    padding: 22px 18px;
+    color: var(--cg-muted-fg);
+    font-size: 13px;
+}
+#app .xcat-ve-spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--cg-line);
+    border-top-color: var(--cg-primary);
+    border-radius: 50%;
+    animation: xcat-ve-spin .8s linear infinite;
+}
+@keyframes xcat-ve-spin { to { transform: rotate(360deg); } }
+
+/* 截取视频帧：三选一下拉 */
+#app .xcat-ve-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 180px;
+    padding: 6px;
+    border: 1px solid var(--cg-border);
+    border-radius: 10px;
+    background: var(--cg-secondary);
+    box-shadow: 0 12px 32px var(--cg-shadow-color);
+}
+html[data-theme="light"] #app .xcat-ve-menu { background: var(--cg-input); }
+#app .xcat-ve-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--cg-fg);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+#app .xcat-ve-menu button:hover { background: var(--cg-accent); }
+#app .xcat-ve-menu button span { color: var(--cg-muted-fg); font-size: 11px; }
+
+/* 截取片段：预览 + 缩略图时间轴 + 起止输入 */
+#app .xcat-ve-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 260px;
+    margin: 14px 0 12px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: var(--cg-bg);
+    overflow: hidden;
+}
+/* 照上游 .cmp-side video：绝对定位 + contain，grid/flex 的 auto 行里
+   max-height:100% 会退化成 none，竖向视频会被裁。 */
+#app .xcat-ve-preview video {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+#app .xcat-ve-preview { position: relative; }
+
+/* 时间轴容器：头部说明 + 轨道 + 5 点刻度尺（照参考 clipTimeline） */
+#app .xcat-ve-tl {
+    margin-top: 14px;
+    padding: 12px 14px 10px;
+    border: 1px solid var(--cg-line);
+    border-radius: 8px;
+    background: var(--cg-input);
+}
+#app .xcat-ve-tl.is-busy { opacity: .55; pointer-events: none; }
+#app .xcat-ve-tl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: var(--cg-muted-fg);
+    font-size: 12px;
+}
+#app .xcat-ve-tl-dur { font-variant-numeric: tabular-nums; }
+
+#app .xcat-ve-track {
+    position: relative;
+    height: 64px;
+    border: 1px solid var(--cg-line);
+    border-radius: 6px;
+    background: var(--cg-bg);
+    /* 不能裁：结束手柄贴 100% 时有半边在轨道外，会被切掉抓不住。
+       圆角改由缩略图条自己裁。 */
+    overflow: visible;
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+}
+#app .xcat-ve-strip { position: absolute; inset: 0; display: flex; overflow: hidden; border-radius: 5px; }
+#app .xcat-ve-strip img,
+#app .xcat-ve-strip i {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    object-fit: cover;
+    opacity: .72;
+    border-right: 1px solid rgb(255 255 255 / 12%);
+}
+#app .xcat-ve-strip i { background: var(--cg-accent); }
+#app .xcat-ve-mask {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgb(9 12 20 / 70%);
+    pointer-events: none;
+}
+#app .xcat-ve-sel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    border-top: 3px solid var(--cg-primary);
+    border-bottom: 3px solid var(--cg-primary);
+    background: color-mix(in srgb, var(--cg-primary) 10%, transparent);
+    pointer-events: none;
+}
+/* 播放头：白色竖线 + 顶部小方块，随 timeupdate 移动 */
+#app .xcat-ve-playhead {
+    position: absolute;
+    z-index: 3;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #fff;
+    box-shadow: 0 0 3px rgb(0 0 0 / 70%);
+    pointer-events: none;
+}
+#app .xcat-ve-playhead::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -3px;
+    width: 8px;
+    height: 7px;
+    border-radius: 2px;
+    background: #fff;
+}
+/* 手柄：16px 实色主色块 + 白色竖条，hover / 拖拽 / 聚焦有反馈 */
+#app .xcat-ve-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 4;
+    width: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 0 6px 6px 0;
+    background: var(--cg-primary);
+    cursor: ew-resize;
+    touch-action: none;
+}
+#app .xcat-ve-handle.is-start { transform: translateX(-100%); border-radius: 6px 0 0 6px; }
+#app .xcat-ve-handle::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 22px;
+    border-radius: 2px;
+    background: #fff;
+    opacity: .9;
+}
+#app .xcat-ve-handle:hover,
+#app .xcat-ve-handle.is-dragging {
+    filter: brightness(1.15);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cg-primary) 30%, transparent);
+}
+#app .xcat-ve-handle:focus-visible { outline: 2px solid var(--cg-fg); outline-offset: 2px; }
+#app .xcat-ve-handle:disabled { cursor: not-allowed; }
+#app .xcat-ve-ruler {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 9px;
+    color: var(--cg-muted-fg);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+#app .xcat-ve-times { display: flex; align-items: center; gap: 14px 24px; flex-wrap: wrap; margin-top: 14px; }
+#app .xcat-ve-times label { display: flex; align-items: center; gap: 8px; color: var(--cg-muted-fg); font-size: 12px; white-space: nowrap; }
+#app .xcat-ve-times label span { color: var(--cg-muted-fg); }
+#app .xcat-ve-times input {
+    box-sizing: border-box;
+    width: 96px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--cg-border);
+    border-radius: 6px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+#app .xcat-ve-times input:focus { border-color: var(--cg-primary); outline: 1px solid var(--cg-primary); }
+#app .xcat-ve-times input:disabled { opacity: .6; cursor: not-allowed; }
+#app .xcat-ve-length {
+    margin-left: auto;
+    color: var(--cg-fg);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+#app .xcat-ve-hint { margin: 14px 0; color: var(--cg-muted-fg); font-size: 12px; line-height: 1.6; }
