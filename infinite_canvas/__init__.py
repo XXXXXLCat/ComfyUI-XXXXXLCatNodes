@@ -1156,7 +1156,14 @@ def _public_fields(name, workflow):
     result = []
     for field in fields:
         node = workflow.get(field["nodeId"]) or {}
-        value = _resolution_value((node.get("inputs") or {}).get(field["key"]))
+        inputs = node.get("inputs") or {}
+        value = _resolution_value(inputs.get(field["key"]))
+        # 音频保存格式：码率存在「format.quality」这个扁平键里，
+        # 合成一个字符串返回（flac / mp3:320k / opus:96k），前端只认这一个值。
+        if field["key"] == "format" and isinstance(value, str):
+            quality = inputs.get("format.quality")
+            if isinstance(quality, str) and quality:
+                value = f"{value}:{quality}"
         field["default"] = value if isinstance(value, (str, int, float, bool, list)) else ""
         result.append(field)
     # 把「关闭自动填入」的记录也返回，配置页保存时会原样带回；
@@ -1625,6 +1632,23 @@ def _apply_params(workflow, params):
         if not isinstance(inputs, dict):
             continue
         for key, value in values.items():
+            # SaveAudioAdvanced 的 format 是 DynamicCombo：主值是 flac / mp3 / opus，
+            # 码率在 API 提示词里是**扁平的「format.quality」键**（不是嵌套对象）。
+            # 画布上收成一个字符串（flac、mp3:320k、opus:96k），这里拆开写回。
+            if (
+                key == "format"
+                and isinstance(value, str)
+                and "filename_prefix" in inputs
+                and "audio" in inputs
+            ):
+                file_format, _, quality = value.partition(":")
+                if file_format:
+                    inputs["format"] = file_format
+                    if quality:
+                        inputs["format.quality"] = quality
+                    else:
+                        inputs.pop("format.quality", None)
+                continue
             if key not in inputs:
                 continue
             current = inputs[key]

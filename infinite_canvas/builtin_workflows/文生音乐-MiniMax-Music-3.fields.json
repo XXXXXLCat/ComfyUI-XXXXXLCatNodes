@@ -13,13 +13,39 @@
       "label": "歌词"
     },
     {
+      "nodeId": "37:13",
+      "key": "max_duration",
+      "type": "number",
+      "label": "最大时长",
+      "min": 5,
+      "max": 600,
+      "step": 5
+    },
+    {
       "nodeId": "37:38",
       "key": "seed",
       "type": "random",
-      "label": "种子",
+      "label": "随机种子",
       "min": 0,
       "max": 9007199254740991,
       "step": 1
+    },
+    {
+      "nodeId": "35",
+      "key": "format",
+      "type": "select",
+      "label": "保存音频类型",
+      "options": [
+        "flac",
+        "mp3:V0",
+        "mp3:128k",
+        "mp3:320k",
+        "opus:64k",
+        "opus:96k",
+        "opus:128k",
+        "opus:192k",
+        "opus:320k"
+      ]
     }
   ]
 }

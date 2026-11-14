@@ -3626,7 +3626,9 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 ## 内置文生音乐工作流（2026-11-14，分支 `feat/gen-audio-builtin`）
 
 用户给了两份自己调好的 ComfyUI API 工作流，要求「作为内置生成音频工作流，暴露风格提示词、
-歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 运行期只读加载 + 只暴露三个字段**。
+歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 运行期只读加载 + 只暴露必要字段**。
+（字段数后来由 3 个扩到 5 个：补上「最大时长」「保存音频类型」，见本章之后的
+「生成音频节点：对话式面板」一节。）
 
 ### 随包内容（`infinite_canvas/builtin_workflows/`）
 
@@ -3635,7 +3637,7 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 | `manifest.json` | 版本号 + 清单（名字 / 分类 / 文件名） |
 | `文生音乐-YuE2.json` | 16 节点：`CheckpointLoaderSimple(yue2_3b_int8_convrot)` → `YuE2GenerateABC` → `YuE2GenerateMusic` → `KSampler` → `VAEDecodeAudio` → `SaveAudioAdvanced`，`ComfySwitchNode` 的 `switch` 由 `PrimitiveBoolean(True)` 驱动（full 模式走 ABC） |
 | `文生音乐-MiniMax-Music-3.json` | 12 节点：`UNETLoader(minimax_music3_dit_fp16)` + `CLIPLoader(type=minimax)` → `MiniMaxMusic3TextEncode` → `KSampler` → `VAEDecodeAudio` / `VAEDecodeAudioTiled`（`ComfySwitchNode` 字面量 `True` 选 tiled）→ `SaveAudioAdvanced` |
-| `<名>.fields.json` | 三条字段，见下 |
+| `<名>.fields.json` | 五条字段（风格提示词 / 歌词 / 最大时长 / 随机种子 / 保存音频类型），见下 |
 
 两个工作流里 `SeedNode` 的初始种子被改成 `0`：原文件是 `9223372036854776000`
 （ComfyUI 前端「随机」上限的表示），画布侧种子默认就是随机的，留这个大数只会让
@@ -3682,22 +3684,25 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 2. 把内置名从 `workflow_order` / `workflow_categories` 里摘掉（顺序改由 `manifest.items` 决定）。
 3. 写 `settings.builtin_migrated = manifest.version`，同版本不再重复扫。
 
-### 暴露的三个字段
+### 暴露的五个字段
 
-| 字段 | YuE2 | MiniMax Music 3 | 控件 |
+| 字段 | YuE2 | MiniMax Music 3 | 控件（对话式面板） |
 | --- | --- | --- | --- |
-| 风格提示词 | `33:36.value`（Text (Style)） | `37:13.caption` | 节点底部主输入框（第一条 textarea 自动被当成提示词） |
-| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 字段面板多行框（与提示词左右并排） |
-| 种子 | `33:34.seed`（SeedNode） | `37:38.seed` | 字段面板数字框 + 骰子按钮 |
+| 风格提示词 | `33:36.value`（Text (Style)） | `37:13.caption` | 上半部分左输入区 |
+| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 上半部分右输入区 |
+| 最大时长 | `33:25.max_duration` | `37:13.max_duration` | 设置浮层数字框（5~600，步长 5） |
+| 随机种子 | `33:34.seed`（SeedNode） | `37:38.seed` | 设置浮层数字框 + 骰子 |
+| 保存音频类型 | `10.format`（SaveAudioAdvanced） | `35.format` | 设置浮层「格式 + 码率」两个下拉 |
 
-「风格提示词」不额外加一行，是因为画布节点本来就把**第一条 text/textarea 字段**当主输入框
-（`Ln` → `Ds()` / `ui()`）：写在这里，节点上直接显示、能直接改，运行时进 `params`。
+「风格提示词」在画布内部仍是**第一条 text/textarea 字段**（`Ln` → `Ds()` / `ui()`，
+上游把它当主输入框），所以合成器里左输入区写回的是隐藏的 `.panel-prompt textarea`。
+另外四个字段挂在隐藏的 `.panel-fields` 里，合成器只把它们搬进新 UI，不复制一份数据。
 
 ### 默认值：提示词与歌词都是空的
 
 两套工作流里四个文本输入（`33:36.value` / `33:37.value` / `37:13.caption` / `37:13.lyrics`）
-**默认都是空串**，节点上是空的输入框 + 占位文案（主框「请输入提示词内容」、歌词框「歌词」），
-由用户自己写。
+**默认都是空串**，节点上是空的输入框 + 占位文案（左「必填，请输入您想要的音乐类型、情绪、
+BPM、乐器等」、右「必填，在此输入或粘贴歌词…」），由用户自己写。
 
 注意默认值只能落在**工作流 JSON** 上：`_public_fields()` 把 `default` 取成工作流里的当前值，
 `.fields.json` 里写 `default` 会被覆盖。清空 JSON 后仍然要保留这两条字段——`_clean_fields()`
@@ -3710,7 +3715,11 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
 > `manifest.json` 的 `version` 升到 `2`。已装过 `1` 的用户不会被覆盖（见上面的安装策略）——
 > 本人实例 8188 之前没装过，重启即装 v2；预览用的 8198 目录是手工覆盖的。
 
-### 面板布局：歌词与提示词左右并排
+### 面板布局（历史）：歌词与提示词左右并排
+
+> ⚠️ 本节记录的是 2026-11-14 **上午**的实现，下午已被「对话式面板」取代（见下一节）。
+> `xcat-panel-split.js` 仍留在包里，但显式排除了 `gen-audio`，对音频节点不再命中；
+> 本节的价值是说明「不改 Vue 渲染结构、只重排布局」这个思路和踩过的 CSS 坑。
 
 上游面板是竖排的（主提示词整行 → 其余字段一行 200×60 → 运行按钮）。两套音乐工作流都只有
 「风格提示词 + 歌词」两个文本字段，竖排会把歌词压成小框、提示词区还空着半屏，所以加了一层
@@ -3732,6 +3741,8 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
   也**不监听 attributes**：自己写的 class 会把它自激。
 - 不命中的节点原样不动：生成图像节点字段是 `select` / `number`（无文本字段），生成文本节点
   有两个文本字段，素材节点没有字段面板 —— 都保持上游竖排。
+- 下午新增「最大时长 / 保存音频类型」后，上游字段列表的首项变成了 `select`，
+  命中条件本来就不会再满足；合成器接管后又加了一道显式排除，两处都不会重排。
 
 ### 种子的「固定 / 随机」
 
@@ -3760,7 +3771,8 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
 ### 验证（`verify-gen-audio.js` 34 项）
 
 列表里两个内置工作流都在且分类正确 → 新建生成音频节点默认挂 MiniMax、药丸只有「文生音乐」
-一组两条、当前项高亮唯一 → 风格提示词是工作流原值、字段面板有「歌词」「种子」、
+一组两条、当前项高亮唯一 → 风格提示词为空（v2 起）、字段面板含「歌词 / 最大时长 /
+随机种子 / 保存音频类型」、
 种子只读 + 骰子 `is-on`、范围 0~2^53-1 → 运行 payload：`workflow` / `37:13.caption` /
 `37:13.lyrics` / `37:38.seed` 四样齐全，种子是范围内的整数，**新节点的随机种子与上一次不同** →
 点骰子固定、手输 424242 进 `params`、改文案进 payload、再点回随机并换值 →
@@ -3771,13 +3783,15 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
 > 8198 是 `--cpu` 实例，真跑 3B 音乐模型会占满一天。每次「运行」场景都先 `Page.reload`
 > 重建节点——点一次运行后节点进入 running，上游组件没有对外的复位口。
 
-并排布局单独验（`verify-panel-split.js` 22 项）：音频节点挂上 `.xcat-panel-split` →
-两列顶部 / 底部 / 宽度 / 高度四项都在 ±1px 内对齐、左列标题是「提示词」、右列标题是「歌词」、
-歌词的 `left` 大于提示词的 `right` → 切到 YuE2 后仍并排且仍齐平 → 生成图像 / 生成文本 /
-素材节点都不带并排类（图像面板字段级文本框数为 0）→ 重载后类能自动恢复、控制台无 error。
+布局单独验（`verify-panel-split.js` 26 项，断言已按新语义改写）：音频节点挂
+`.xcat-audio`、由合成器提供两栏且**不带** `.xcat-panel-split` → 两列顶部 / 底部 /
+宽度 / 高度四项都在 ±1px 内对齐、左「风格提示词」右「歌词」、底部工具条四块顺序正确 →
+切到 YuE2 后仍由合成器接管且仍齐平 → 生成图像 / 生成文本 / 素材节点都不带并排类
+（图像面板字段级文本框数为 0）→ 重载后类能自动恢复、控制台无 error。
 
 空默认值同样单独验（`verify-empty-default.js` 20 项）：两个工作流的 fields 接口
-`default` 全是空串 → 主框 / 歌词框 `value` 为空且各自显示占位文案 → 并排仍在、种子是随机值 →
+`default`（文本字段）全是空串 → 主框 / 歌词框 `value` 为空且各自显示占位文案 →
+合成器接管且仍是左右两个输入区、种子是随机值 →
 运行 payload 里 `37:13.caption` / `37:13.lyrics` 是空串、种子仍是数字 → 切 YuE2 仍是空、
 `33:36.value` / `33:37.value` 空串 → 改过的文本切工作流仍会带过去（旧行为不变）。
 
@@ -3788,8 +3802,113 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
 导入 / 改分类 / 改名 / 删除仍然 200 → 「工作流配置」里 `.wf-item-name` 不含两个内置名、
 没有「文生音乐」分组、条数等于用户工作流数 → 生成音频节点的药丸仍是
 「MiniMax / YuE2」两条（顺序按 `manifest.items`）、默认挂 MiniMax、能切到 YuE2、
-字段（歌词 + 种子）与并排两栏都正常 → 拖拽排序只改用户项顺序，内置仍压尾 →
+五项字段与合成器并排两栏都正常 → 拖拽排序只改用户项顺序，内置仍压尾 →
 全程零 console error。
+
+
+## 生成音频节点：对话式面板（2026-11-14 下午，分支 `feat/audio-composer`）
+
+需求是「参考 MiniMax 音乐输入框的样子，但又和它不一样」：
+
+- **上半部分两个输入区**：左「风格提示词」、右「歌词」。
+- **底部一行从左到右**：音乐 / 语音切换 → 工作流选择 → 设置 →（贴最右）运行按钮。
+- **点设置**弹出三项：最大时长、随机种子、保存音频类型。
+- 选语音时**暂时与音乐完全一致**（只记录 `data.audioMode`，界面不变），留待以后接 TTS。
+
+### 影子控件：不复制上游逻辑
+
+`assets/xcat-audio-composer.js` 只在 `role === "gen-audio"` 的面板上接管：
+
+1. 给 `.node-panel` 挂 `.xcat-audio`，`xcat-overrides.css` 把上游的
+   `.panel-workflows` / `.panel-prompt` / `.panel-fields` / `.panel-row` 全部
+   `display:none`。**隐藏不是销毁** —— `pn()` / `cl()` / `ct()` 这些绑定都还在。
+2. 在面板里追加一套 `.xcat-ac-*` 新 UI（两个 textarea、分段按钮、工作流下拉、
+   设置浮层、运行按钮）。
+3. 新控件的输入写回隐藏控件并派发 `input` / `change` / `click`，Vue 当成用户输入
+   自己更新 `params`；反过来，隐藏控件里的值（切工作流后的默认值、种子刷新、
+   运行按钮文案「运行 / 中断」）由 `MutationObserver`（`childList`）+ 400ms 轮询同步回新 UI。
+
+这样上游升级时只要控件类名不变就还能用，不用跟着复制一遍工作流与执行逻辑。
+`xcat-panel-split.js` 里也显式排除了 `gen-audio`，两套布局不会打架。
+
+### 底部工具条
+
+| 位置 | 控件 | 行为 |
+| --- | --- | --- |
+| 最左 | `.xcat-ac-seg` 音乐 / 语音 | 只写 `node.data.audioMode`，界面暂不变 |
+| 其次 | `.xcat-ac-wf` 工作流下拉 | 列表读隐藏的 `.panel-workflows .wf-pill`，点击派发到原药丸；名称去掉分组前缀显示短名 |
+| 再次 | `.xcat-ac-gear` 设置 | 打开 `.xcat-ac-pop` 浮层 |
+| 最右 | `.xcat-ac-run` 运行 | `dispatchEvent(click)` 给隐藏的 `.panel-run` |
+
+浮层三项的顺序是合成器自己排的：上游字段列表按控件类型分组（`select` 会排到最前），
+直接渲染会得到「保存音频类型 / 最大时长 / 随机种子」。合成器按
+`max_duration → seed → format` 重排，才与需求描述一致。
+
+### 样式：改用 ComfyUI 官方控件语言（同日第二版）
+
+第一版是「大圆角聊天输入框」的自绘外观（999px 胶囊、合并大卡 + 中间竖分隔线、
+半透明灰块浮层），和 ComfyUI 原生界面不搭。第二版整体对齐官方前端：
+
+| 项目 | 第一版（自绘） | 第二版（官方） |
+| --- | --- | --- |
+| 面板 | `--c-panel-2` #333、20px 圆角 | `--cg-secondary` #262729（`--node` / `--card`）、8px 圆角、`--cg-border` 实线 |
+| 输入区 | 一整张合并卡 + 竖线 | 两个独立 widget 框：`--cg-input` #313235、1px `--cg-border`、8px 圆角，标签在框外上方 |
+| 底栏控件 | 999px 胶囊 | 28px 高、8px 圆角方块；选中 `bg-muted` + 前景字、hover `bg-accent` |
+| 运行 | 亮色胶囊 | `--cg-primary` #0b8ce9 方角按钮（官方 `.comfyui-button` 的 primary 变体） |
+| 设置浮层 | 与面板同色的半透明灰块 | `--cg-bg` #171718（`--popover`）+ 实线边 + 「设置」标题 + 属性行分隔线 |
+
+数值取自 `comfyui_frontend_package/static/assets/main-*.css` 的 `:root`
+（`--color-charcoal-*` / `--color-azure-600`）与 `.comfy-menu` / `.comfyui-button` /
+`.comfy-multiline-input`；本文件顶部早就有一套 `--cg-*` 令牌（暗 / 亮两套主题）
+把官方色阶映射进来，这次只是**改用它**，没有新造颜色。蓝色 `--cg-primary` 只留给
+运行按钮，选中 / 聚焦一律走中性灰白（官方 `--ring` 本身就是 `muted-foreground`）。
+
+浮层定位也顺手改了：`.xcat-ac-settings` 设为 `position: static`，浮层改以
+`.node-panel`（absolute）为基准 `right: 12px; bottom: 48px`。原来贴着齿轮展开，
+正好横跨两个输入框的接缝、把左右各切掉一角；现在整体落在右侧歌词框上，
+观感像「点设置把右栏换成属性面板」。DOM 上浮层仍是 settings 的子元素，
+所以「点击外部关闭」的 `setWrap.contains(target)` 判断不用改。
+
+### 保存音频类型：DynamicCombo 的扁平键
+
+`SaveAudioAdvanced.format` 是 `IO.DynamicCombo`。**API 提示词里它不是嵌套对象**，
+而是两个扁平键：`format`（`flac` / `mp3` / `opus`）+ `format.quality`（码率）。
+执行时 `execution.py` 调 `build_nested_inputs()`，按 `v3_data["dynamic_paths"]`
+（`format → format.format`、`format.quality → format.quality`）重建成
+`{"format": "mp3", "quality": "320k"}` 再传给 `execute()`。
+
+画布侧收成一个字符串，两端各做一次转换：
+
+- `_apply_params()`：`"mp3:320k"` 拆成 `inputs["format"]="mp3"` +
+  `inputs["format.quality"]="320k"`；切回 `flac` 时 `pop("format.quality")`，
+  避免残留码率。守卫条件是 `key === "format"` 且该节点同时有
+  `filename_prefix` / `audio` 输入（防止误伤别的 `format` 字段）。
+- `_public_fields()`：反方向把 `format` + `format.quality` 合成 `"mp3:320k"`
+  作为字段 `default`，前端只认这一个值。
+- 前端 `splitOptions()` 把 `options`（`flac` / `mp3:V0` / …）拆成「格式」+「码率」
+  两个下拉；选 `flac` 时码率下拉隐藏，选 mp3 出现 `V0 / 128k / 320k`，
+  选 opus 出现 `64k / 96k / 128k / 192k / 320k`。
+
+8198 上用真实 `/prompt`（`LoadAudio → SaveAudioAdvanced`）跑过三种组合：
+`flac` / `mp3:320k` / `opus:96k` 分别产出 `.flac` / `.mp3` / `.opus`，无执行错误。
+
+### 验证
+
+- `verify-audio-composer.js` **49 项**：字段接口五项与选项、面板接管与上游隐藏、
+  两输入区四项 ±1px 对齐、工具条四块顺序与左右贴边、音乐/语音切换、
+  工作流下拉两项可切换（切 YuE2 后最大时长变 360）、设置三项顺序与码率联动、
+  骰子固定/随机、文本与设置值回写影子控件、运行 payload 五类参数、
+  `gen-image` / `gen-text` / `asset-image` 不被接管、重载恢复、零 console error。
+- `verify-audio-format.py` **7 项**：从 `__init__.py` 摘出 `_apply_params` 单独执行，
+  验证五种格式值拆分、`mp3 → flac` 不留残留、普通字面量覆盖而连线不覆盖。
+- 旧回归按新语义更新断言后全绿：`verify-gen-audio` 34、`verify-empty-default` 20、
+  `verify-panel-split` 26、`verify-builtin-readonly` 36、`verify-wf-scope` 23、
+  `verify-wf-category` 31、`verify-wf-category2` 17。
+- 版本号：`xcat-overrides.css?v=20261115a`、新增
+  `xcat-audio-composer.js?v=20261114b`。
+
+> 后端 `__init__.py` 改了 `_apply_params` / `_public_fields`，**8188 需要重启一次**；
+> 纯前端改动刷新即可。
 
 
 ## 常见问题

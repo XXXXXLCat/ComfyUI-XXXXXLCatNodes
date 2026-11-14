@@ -45,6 +45,12 @@
     }
 
     function sync(panel) {
+        /* 生成音频节点由 xcat-audio-composer.js 整体接管（两列布局是它自己画的），
+           这里先让路：带 .xcat-audio 就清掉并排类 */
+        if (panel.classList.contains('xcat-audio')) {
+            if (panel.classList.contains(CLS)) panel.classList.remove(CLS);
+            return;
+        }
         var on = false;
         var prompt = panel.querySelector(':scope > .panel-prompt');
         var fields = panel.querySelector(':scope > .panel-fields');
