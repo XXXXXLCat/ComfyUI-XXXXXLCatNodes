@@ -6,7 +6,9 @@
  * 节点数据契约（与 bundle 内 xcatRole 对齐）：
  *   data.role = asset-image | asset-video | asset-audio | asset-text
  *             | gen-image   | gen-video   | gen-audio   | gen-text
- * 素材类 workflow 恒为空；生成类取第一个工作流。
+ * 素材类 workflow 恒为空；生成类按节点类别取第一个匹配的工作流
+ * （图片节点 → 文生图像 / 图像编辑，视频节点 → 文生视频 / 参考生视频，
+ *   与 bundle 里节点面板的药丸过滤保持一致）。
  *
  * 双击画布：上游 zoomOnDoubleClick 会缩放，这里在捕获阶段拦掉，
  * 改成在鼠标位置弹出节点类型面板，选中的节点以双击点为中心落下。
@@ -85,12 +87,28 @@
     return String(max + 1)
   }
 
-  async function defaultWorkflow () {
+  /* 生成节点只挂对应类别的工作流：图片 → 文生图像 / 图像编辑，
+     视频 → 文生视频 / 参考生视频。映射真源在 bundle 的 window.__xcatWFScopeFor，
+     这里留一份回退，避免脚本先于 bundle 执行时取不到。 */
+  function scopeFor (role) {
+    var fn = window.__xcatWFScopeFor
+    if (typeof fn === 'function') return fn(role)
+    if (role === 'gen-image') return ['文生图像', '图像编辑']
+    if (role === 'gen-video') return ['文生视频', '参考生视频']
+    return null
+  }
+
+  async function defaultWorkflow (role) {
     try {
       var r = await fetch('/infinite_canvas/api/workflows')
       var d = await r.json()
       var list = (d && d.workflows) || []
-      return (list[0] && list[0].name) || ''
+      var scope = scopeFor(role)
+      if (!scope) return (list[0] && list[0].name) || ''
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && scope.indexOf(list[i].category) >= 0) return list[i].name || ''
+      }
+      return ''
     } catch (e) {
       return ''
     }
@@ -103,7 +121,7 @@
     var id = nextId()
     var gen = role.indexOf('gen-') === 0
     var isLora = role === 'lora'
-    var wf = gen ? await defaultWorkflow() : ''
+    var wf = gen ? await defaultWorkflow(role) : ''
     var pos = at || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     if (!at) {
       pos = flow.screenToFlowCoordinate

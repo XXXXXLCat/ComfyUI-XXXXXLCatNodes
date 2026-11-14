@@ -6028,3 +6028,18 @@ html[data-theme="light"] #app .xcat-ve-menu { background: var(--cg-input); }
     font-size: 11px;
     line-height: 1.5;
 }
+
+/* ---------------------------------------------------------- 药丸：越类提示
+   生成节点现在只列出本节点对应类别的工作流（图片：文生图像/图像编辑，
+   视频：文生视频/参考生视频）。旧画布上已经挂着越类工作流的节点，仍把当前项
+   显示在最前面，但改成虚线灰底，title 上写明「不属于此节点的类别」，
+   避免节点看起来「没有选中任何工作流」。 */
+#app .panel-workflows .wf-pill.xcat-wf-pill-off,
+#app .panel-workflows .wf-pill.xcat-wf-pill-off:hover,
+#app .panel-workflows .wf-pill.xcat-wf-pill-off.is-active {
+    border-style: dashed;
+    border-color: var(--c-muted);
+    background: transparent;
+    color: var(--c-muted);
+    opacity: .9;
+}

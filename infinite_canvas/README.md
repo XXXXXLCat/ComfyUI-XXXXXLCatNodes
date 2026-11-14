@@ -3539,6 +3539,9 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 - **拖拽排序改成按名称**（原来是数组下标，加了组标题就错位）：`q/y/F/g` 四个函数
   改成传工作流名，`F()` 先 `findIndex` 出源/目标位置再 splice；**跨组拖拽会顺带改分类**
   （拖到别的类别上＝归到那一类），最后照旧 `PUT /workflows/order`。
+  ⚠️ 目标对象必须在 `splice` **之前**取（`const tgt=Le[ti]`），插入位置按
+  `si<ti ? ti-1 : ti` 折算——先删再取 `Le[ti]`，往下拖时会拿到目标后面那条，
+  跨组拖拽就归错类（2026-11-14 修）。
 - 右栏动作条多一枚 `分类 · <当前类>`（`key:3`，夹在「保存配置」与「重命名」之间）。
   点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），六类单选、当前项
   `is-active`，选中后 `POST .../category` → `B()` 重取列表 → 提示条「已归类为 X」。
@@ -3547,6 +3550,39 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
   摊成「类别标签 + 该类药丸」，标签带 `xcat-wf-pill-g`（无边框、10px、muted、点了
   不选中工作流）。
 - 导入提示从「已保存 X」变成「已保存 X（分类）」，一眼能看出被归到哪。
+
+### 生成节点只接对应类别的工作流（2026-11-14 补充）
+
+用户要求「生成节点分开对应不同的工作流」：
+
+| 节点 | 可用类别 |
+| --- | --- |
+| `gen-image`（生成图片） | 文生图像 · 图像编辑 |
+| `gen-video`（生成视频） | 文生视频 · 参考生视频 |
+| 其余（`gen-audio` / `gen-text` / 素材节点） | 不限制（六类全列） |
+
+三处一起改，缺一处就会「列表过滤了、默认值还挂着别类」：
+
+1. **药丸过滤**：`xcatWFPills(names, role, current)`——渲染处传 `e.data.role` 与
+   `e.data.workflow`，按 `xcatWFScope(role)` 过滤；类别取自 `window.__xcatWfCats`。
+2. **默认值**：`Qs()` → `Qs(role)`。`qi` 从「名字数组」改成 `/workflows` 的原始对象
+   数组（带 category），`xcatWFDefaultFor(qi, role)` 取**该类别下的第一条**（保持后端
+   顺序）。原来的 `Qs()` 恒返回 `qi[0]`，等于新建生成视频节点也挂文生图工作流。
+   `w(v)` → `w(v, role)`，`data:{...w(`${r}`,"gen-image")}` 显式传；派生节点用
+   `Qs(W.data.role)`。
+3. **新建菜单**：`xcat-new-node.js` 的 `defaultWorkflow(role)` 同样按类别挑，
+   真源是 bundle 暴露的 `window.__xcatWFScopeFor`（脚本先于 bundle 执行时有内嵌回退）。
+
+**越类怎么办**：旧画布上已经挂着越类工作流的节点，不是静默隐藏——`xcatWFPills` 会把
+当前项 `unshift` 到列表最前并打 `off:true`，渲染成 `xcat-wf-pill-off`：虚线边框、
+去色、`opacity:.9`，`title` 写「<名字> · 不属于此节点的类别」。这样节点看起来仍是
+「有选中工作流」的状态，用户点一下同组的就换掉了；**不自动改用户数据**。
+
+`__xcatWFScopeFor` 是唯一真源，新增/调整映射只改这里（+ `xcat-new-node.js` 的回退副本）。
+
+验证：`verify-wf-scope.js` **22 项**——映射与 scope 函数、图片节点只出两类且默认值属
+图片类、视频节点同理、越类项置顶/带 off/title 有提示/不算分组标签、其余仍只有两类、
+点药丸能切换且选中态唯一、左栏「工作流配置」仍列全部六类不受影响。
 
 ### 坑
 
