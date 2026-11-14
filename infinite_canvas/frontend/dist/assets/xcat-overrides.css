@@ -6043,3 +6043,77 @@ html[data-theme="light"] #app .xcat-ve-menu { background: var(--cg-input); }
     color: var(--c-muted);
     opacity: .9;
 }
+
+/* ------------------------------------------------- 生成节点：字段与提示词并列
+   上游把面板做成竖排：主提示词整行 → 其余字段一行 → 运行按钮。文生音乐
+   这类工作流只有「风格提示词 + 歌词」两个文本字段，竖排会把歌词压成
+   200×60 的小框，提示词区还空着半屏。xcat-panel-split.js 在「字段列表
+   第一项是文本字段、且没有第二个文本字段」时挂类，这里用两列 grid 把
+   歌词摆到提示词右侧，两列等高。 */
+#app .node-panel.xcat-panel-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    column-gap: 12px;
+    row-gap: 8px;
+}
+
+#app .node-panel.xcat-panel-split > .panel-prompt {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+}
+
+#app .node-panel.xcat-panel-split > .panel-prompt > .panel-text {
+    height: auto;
+    min-height: 120px;
+    flex: 1 1 auto;
+}
+
+/* 左侧补一个与右侧字段同款的标题（文案由 xcat-panel-split.js 写进 data 属性），
+   否则右列有「歌词」一行、左列没有，两列文本框上边缘会错开 20px */
+#app .node-panel.xcat-panel-split > .panel-prompt::before {
+    content: attr(data-xcat-label);
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 字段列表本身不占位：让每个 .panel-field 直接成为外层 grid 的项 */
+#app .node-panel.xcat-panel-split > .panel-fields {
+    display: contents;
+}
+
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:first-child {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:first-child > .panel-text {
+    width: 100%;
+    height: auto;
+    min-height: 120px;
+    flex: 1 1 auto;
+}
+
+/* 其余字段（种子等）与运行按钮各占整行，排在两列之下；
+   字段本身按内容宽度靠左、底部对齐（与原 flex 行的观感一致，不被 grid 拉伸） */
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:nth-child(n + 2) {
+    justify-self: start;
+    align-self: end;
+}
+
+#app .node-panel.xcat-panel-split > .panel-row,
+#app .node-panel.xcat-panel-split > .panel-hint,
+#app .node-panel.xcat-panel-split > .panel-error {
+    grid-column: 1 / -1;
+}

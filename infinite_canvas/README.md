@@ -3656,12 +3656,35 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 | 字段 | YuE2 | MiniMax Music 3 | 控件 |
 | --- | --- | --- | --- |
 | 风格提示词 | `33:36.value`（Text (Style)） | `37:13.caption` | 节点底部主输入框（第一条 textarea 自动被当成提示词） |
-| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 字段面板多行框 |
+| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 字段面板多行框（与提示词左右并排） |
 | 种子 | `33:34.seed`（SeedNode） | `37:38.seed` | 字段面板数字框 + 骰子按钮 |
 
 「风格提示词」不额外加一行，是因为画布节点本来就把**第一条 text/textarea 字段**当主输入框
 （`Ln` → `Ds()` / `ui()`）：写在这里，节点上直接显示、能直接改，运行时进 `params`。
 `caption` 前面那段 `Global Metadata: …` 是 MiniMax 这个节点自己的格式，原样保留了示范。
+
+### 面板布局：歌词与提示词左右并排
+
+上游面板是竖排的（主提示词整行 → 其余字段一行 200×60 → 运行按钮）。两套音乐工作流都只有
+「风格提示词 + 歌词」两个文本字段，竖排会把歌词压成小框、提示词区还空着半屏，所以加了一层
+**布局重排**（`assets/xcat-panel-split.js` + `xcat-overrides.css`）：
+
+- **命中条件**（只重排布局，不碰数据、不改 Vue 渲染结构）：面板有主提示词，字段列表的第一项是
+  文本字段（`textarea.panel-text` / `input.panel-input-wide`），且**其余字段里没有第二个文本字段**。
+- 命中后给 `.node-panel` 挂 `.xcat-panel-split`，用两列 grid 把「主提示词」和「第一个字段」
+  放到同一行的左右两列：两列等宽（各占一半，`minmax(0,1fr)`）、`min-height:120px` 且底部对齐。
+  其余字段（种子）和运行按钮各占整行，排在两列下方；字段按内容宽度靠左（`justify-self:start`），
+  不被 grid 拉伸。
+- **左列补标题**：主提示词框自己不带标签（上游只用 placeholder），右列有「歌词」小标题，
+  直接并排会让两列文本域上边缘错开 20px。脚本给 `.panel-prompt` 写
+  `data-xcat-label="提示词"`，CSS 用 `::before { content: attr(...) }` 画同款小标题
+  （`font-size:11px` / `--c-muted` / `margin-bottom:4px`，不设 `line-height` — 设成 `1` 会比
+  右侧 `.panel-field-label` 矮 5px）。
+- **刷新方式**：`MutationObserver` 盯 `#app .vue-flow` 的 `childList`（面板是 `v-if` 渲染的，
+  选中节点 / 切工作流都会重建子树），`setTimeout 0` 合并。**不用 rAF**：页面不可见时会被暂停；
+  也**不监听 attributes**：自己写的 class 会把它自激。
+- 不命中的节点原样不动：生成图像节点字段是 `select` / `number`（无文本字段），生成文本节点
+  有两个文本字段，素材节点没有字段面板 —— 都保持上游竖排。
 
 ### 种子的「固定 / 随机」
 
@@ -3700,6 +3723,11 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 > 验收脚本拦截 `POST /infinite_canvas/api/execute` 只取 payload、返回假 `prompt_id`：
 > 8198 是 `--cpu` 实例，真跑 3B 音乐模型会占满一天。每次「运行」场景都先 `Page.reload`
 > 重建节点——点一次运行后节点进入 running，上游组件没有对外的复位口。
+
+并排布局单独验（`verify-panel-split.js` 22 项）：音频节点挂上 `.xcat-panel-split` →
+两列顶部 / 底部 / 宽度 / 高度四项都在 ±1px 内对齐、左列标题是「提示词」、右列标题是「歌词」、
+歌词的 `left` 大于提示词的 `right` → 切到 YuE2 后仍并排且仍齐平 → 生成图像 / 生成文本 /
+素材节点都不带并排类（图像面板字段级文本框数为 0）→ 重载后类能自动恢复、控制台无 error。
 
 
 ## 常见问题
