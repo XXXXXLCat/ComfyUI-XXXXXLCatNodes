@@ -1,0 +1,25 @@
+{
+  "fields": [
+    {
+      "nodeId": "33:36",
+      "key": "value",
+      "type": "textarea",
+      "label": "风格提示词"
+    },
+    {
+      "nodeId": "33:37",
+      "key": "value",
+      "type": "textarea",
+      "label": "歌词"
+    },
+    {
+      "nodeId": "33:34",
+      "key": "seed",
+      "type": "random",
+      "label": "种子",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1
+    }
+  ]
+}

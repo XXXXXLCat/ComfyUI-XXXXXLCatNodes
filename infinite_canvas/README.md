@@ -2538,7 +2538,7 @@ ComfyUI-Infinite-Canvas/
 | POST            | `/infinite_canvas/api/settings`                | 保存画布设置         |
 | GET/POST        | `/infinite_canvas/api/workflows`               | 工作流列表 / 上传     |
 | PUT             | `/infinite_canvas/api/workflows/order`         | 拖动排序           |
-| POST            | `/infinite_canvas/api/workflows/{name}/category` | 改分类（六类，见「工作流分类」节） |
+| POST            | `/infinite_canvas/api/workflows/{name}/category` | 改分类（七类，见「工作流分类」节） |
 | POST            | `/infinite_canvas/api/workflows/{name}/rename` | 重命名            |
 | GET/PUT         | `/infinite_canvas/api/workflows/{name}/fields` | 字段配置读写         |
 | GET/POST        | `/infinite_canvas/api/canvases`                | 画布列表 / 新建      |
@@ -3504,11 +3504,15 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 - 节点的 target（左侧）端口对非 `gen-` 角色是 `xcat-port-hidden`（`pointer-events:none`），
   所以 LoRA 节点**只能作为上游**（右侧 source 口）连到生成节点，方向是对的。
 
-## 工作流分类：六类（2026-11-14，同一分支）
+## 工作流分类：七类（2026-11-14，同一分支）
 
-导入的工作流按用途分**六类**，顺序就是界面顺序：
+导入的工作流按用途分类，顺序就是界面顺序：
 
-`文生图像 · 图像编辑 · 文生视频 · 参考生视频 · 图像放大 · 图像反推`
+`文生图像 · 图像编辑 · 文生视频 · 参考生视频 · 图像放大 · 图像反推 · 文生音乐`
+
+> 第七类「文生音乐」是随内置文生音乐工作流一起加的（见下一节），排序放在最后——
+> 它是唯一按「产物类型」而非「输入方式」归的类，放在图像/视频之后不至于打断前六类的
+> 阅读顺序。
 
 分类**只影响列表分组，不改工作流本身**（JSON 文件一个字节都不动），存在
 `user/<id>/ComfyUI-Infinite-Canvas/canvas_settings.json` 的 `workflow_categories`
@@ -3517,8 +3521,10 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 ### 后端（`__init__.py`）
 
 - 常量 `WORKFLOW_CATEGORIES` / `_DEFAULT_WORKFLOW_CATEGORY`；`_normalize_category()`
-  只放行六类，其余（含空、乱写）返回空串。
+  只放行这七类，其余（含空、乱写）返回空串。
 - **自动识别** `_detect_workflow_category()`：只看 `class_type`（小写子串），顺序是
+  ⓪ 音频（`saveaudio|yue2|minimaxmusic|stableaudio|acestep|ace_step|musicgen|audiogen|texttoaudio|latentaudio`）
+  → **文生音乐**（放最前：音乐工作流也可能带 `PreviewImage` 之类的节点，晚判会被误归成图像）；
   ① 取标题/打标签（`caption|tagger|interrogat|florence|blip|joytag|wd14|promptgen|reverseprompt`）
   → 图像反推；② 放大（`upscale|imagescale|resizeimagemask|imageresize|seedvr|esrgan|swinir|superresolution`
   等）→ 图像放大；③ 有视频产物（`savevideo|videocombine|savewebm|animatedwebp|createvideo`）
@@ -3532,7 +3538,7 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 
 ### 前端（bundle 补丁 + CSS）
 
-- 左栏列表从「扁平 v-for」改成 `xcatWFGrouped(l.value)`：按六类顺序摊成
+- 左栏列表从「扁平 v-for」改成 `xcatWFGrouped(l.value)`：按七类顺序摊成
   「组标题行 + 组内条目」，组标题复用 `.wf-item` 的盒模型、加 `xcat-wf-group`
   类（藏图标、字 11px/600、右侧显示「N 个工作流」、`pointer-events:none`）。
   没有条目的类别不出现。
@@ -3543,7 +3549,7 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
   `si<ti ? ti-1 : ti` 折算——先删再取 `Le[ti]`，往下拖时会拿到目标后面那条，
   跨组拖拽就归错类（2026-11-14 修）。
 - 右栏动作条多一枚 `分类 · <当前类>`（`key:3`，夹在「保存配置」与「重命名」之间）。
-  点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），六类单选、当前项
+  点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），七类单选、当前项
   `is-active`，选中后 `POST .../category` → `B()` 重取列表 → 提示条「已归类为 X」。
 - 节点底部的工作流药丸（`.panel-workflows`）也按分类分段：`xcatWFRemember()` 在
   `ul()` 拉列表时把 `name→category` 记进 `window.__xcatWfCats`，`xcatWFPills()`
@@ -3559,7 +3565,8 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 | --- | --- |
 | `gen-image`（生成图片） | 文生图像 · 图像编辑 |
 | `gen-video`（生成视频） | 文生视频 · 参考生视频 |
-| 其余（`gen-audio` / `gen-text` / 素材节点） | 不限制（六类全列） |
+| `gen-audio`（生成音频） | 文生音乐 |
+| 其余（`gen-text` / 素材节点） | 不限制（七类全列） |
 
 三处一起改，缺一处就会「列表过滤了、默认值还挂着别类」：
 
@@ -3582,7 +3589,7 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 
 验证：`verify-wf-scope.js` **22 项**——映射与 scope 函数、图片节点只出两类且默认值属
 图片类、视频节点同理、越类项置顶/带 off/title 有提示/不算分组标签、其余仍只有两类、
-点药丸能切换且选中态唯一、左栏「工作流配置」仍列全部六类不受影响。
+点药丸能切换且选中态唯一、左栏「工作流配置」仍列全部七类不受影响。
 
 ### 坑
 
@@ -3598,9 +3605,9 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 
 ### 验证（`verify-wf-category.js` 31 项 + `verify-wf-category2.js` 17 项）
 
-`verify-wf-category.js`：API 每条带合法 category 且六类齐 → 左栏 6 个分组标题按序、
+`verify-wf-category.js`：API 每条带合法 category 且七类齐 → 左栏 7 个分组标题按序、
 每组条目与后端一致、标题带条数、标题不可点/无图标 → 动作条「分类 · X」文案与顺序 →
-弹层 6 项按序、仅当前项高亮、挂在浮窗内 → 改到另一类后后端生效、列表重新分组、
+弹层 7 项按序、仅当前项高亮、挂在浮窗内 → 改到另一类后后端生效、列表重新分组、
 条目落到新组、按钮文案跟着变、提示条出现 → 非法分类 400 / 不存在 404 → 重载后保持
 → 节点药丸：分类标签与有内容的类别一致、顺序＝分组顺序、标签不参与选中、点标签不改
 工作流、点药丸能选中并高亮。
@@ -3611,6 +3618,89 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 一起清掉。
 
 回归：`verify-selborder`（17）、`verify-lora-node`（27）、`verify-multi-hide`（19）全 PASS。
+
+## 内置文生音乐工作流（2026-11-14，分支 `feat/gen-audio-builtin`）
+
+用户给了两份自己调好的 ComfyUI API 工作流，要求「作为内置生成音频工作流，暴露风格提示词、
+歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 首次打开时装进用户目录 + 只暴露三个字段**。
+
+### 随包内容（`infinite_canvas/builtin_workflows/`）
+
+| 文件 | 说明 |
+| --- | --- |
+| `manifest.json` | 版本号 + 清单（名字 / 分类 / 文件名） |
+| `文生音乐-YuE2.json` | 16 节点：`CheckpointLoaderSimple(yue2_3b_int8_convrot)` → `YuE2GenerateABC` → `YuE2GenerateMusic` → `KSampler` → `VAEDecodeAudio` → `SaveAudioAdvanced`，`ComfySwitchNode` 的 `switch` 由 `PrimitiveBoolean(True)` 驱动（full 模式走 ABC） |
+| `文生音乐-MiniMax-Music-3.json` | 12 节点：`UNETLoader(minimax_music3_dit_fp16)` + `CLIPLoader(type=minimax)` → `MiniMaxMusic3TextEncode` → `KSampler` → `VAEDecodeAudio` / `VAEDecodeAudioTiled`（`ComfySwitchNode` 字面量 `True` 选 tiled）→ `SaveAudioAdvanced` |
+| `<名>.fields.json` | 三条字段，见下 |
+
+两个工作流里 `SeedNode` 的初始种子被改成 `0`：原文件是 `9223372036854776000`
+（ComfyUI 前端「随机」上限的表示），画布侧种子默认就是随机的，留这个大数只会让
+「切到固定」时输入框显示一个超范围值。
+
+### 安装策略：只装一次，不覆盖、不复活
+
+`_ensure_builtin_workflows()` 在 **`GET /workflows`** 里调用（不是 import 时，避免副作用）：
+
+1. 读 `manifest.json` 的 `version` 与 `items`；`canvas_settings.json` 里的
+   `builtin_installed` 记 `{名字: 版本}`。
+2. 已记过同版本 → 跳过。**目标文件已存在**（用户导入过同名 / 自己改过）→ 只记版本，不动文件。
+3. 否则 `copyfile` 工作流 + 字段配置，并 `_set_workflow_category(name, "文生音乐")`。
+4. 用户后来删掉这两个工作流，`builtin_installed` 里仍记着，**不会再被塞回来**；
+   想重装就删掉 settings 里的对应键。`_builtin_state["done"]` 是同进程内的短路标志。
+
+装好后的文件在 `user/<id>/ComfyUI-Infinite-Canvas/workflows/`，和手导的工作流完全一样，
+可以改、可以删、可以改名（改名后就是一条普通工作流，不再受管理）。
+
+### 暴露的三个字段
+
+| 字段 | YuE2 | MiniMax Music 3 | 控件 |
+| --- | --- | --- | --- |
+| 风格提示词 | `33:36.value`（Text (Style)） | `37:13.caption` | 节点底部主输入框（第一条 textarea 自动被当成提示词） |
+| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 字段面板多行框 |
+| 种子 | `33:34.seed`（SeedNode） | `37:38.seed` | 字段面板数字框 + 骰子按钮 |
+
+「风格提示词」不额外加一行，是因为画布节点本来就把**第一条 text/textarea 字段**当主输入框
+（`Ln` → `Ds()` / `ui()`）：写在这里，节点上直接显示、能直接改，运行时进 `params`。
+`caption` 前面那段 `Global Metadata: …` 是 MiniMax 这个节点自己的格式，原样保留了示范。
+
+### 种子的「固定 / 随机」
+
+前端本来就有 `random` 字段类型（`_FIELD_TYPES` 里已有，一直没人用），语义正好：
+`se(field)` = `data.randomFields[field.id] !== false`，**默认就是随机**。
+
+- **随机**（默认）：每次点运行，`tt(field)` 生成 `min..max` 的整数、`pn()` 写回 `params`，
+  输入框 `readonly`、骰子 `is-on`（蓝色）；节点上的数值会随着每次运行跳动。
+- **固定**：点骰子 → `randomFields["37:38.seed"] = false`，输入框解除只读，可手输；
+  以后每次运行都用这个值。再点一次回到随机，并立刻换一个新随机数。
+- 范围给的是 `0 ~ 9007199254740991`（`Number.MAX_SAFE_INTEGER`）：前端用
+  `Math.random()` 取整，超过 2^53 会丢精度、`JSON.stringify` 也会变成浮点写法。
+
+### 顺带修的一处：切工作流不再把「没动过的提示词」带过去
+
+`cl(S)`（切换工作流）原来是「把当前节点的文本写进新工作流的第一个文本字段」。
+这在图像 / 视频节点上是想要的（换工作流保留提示词），但两套音乐工作流的风格描述格式不同——
+把 MiniMax 的 `Global Metadata: …` 带进 YuE2 毫无意义。现在加了一层判断：
+
+> 旧文本 === 旧字段的 `default`（说明用户没改）→ **不带过去**，新工作流显示自己的默认；
+> 改过 → 照旧带过去。
+
+注意比较的是 `field.default` 而不是 `Bt(field)`：`Bt` 优先取 `params`，用户一改就相等了，
+会把「改过的」误判成「没改过」（第一版就栽在这）。
+
+### 验证（`verify-gen-audio.js` 34 项）
+
+列表里两个内置工作流都在且分类正确 → 新建生成音频节点默认挂 MiniMax、药丸只有「文生音乐」
+一组两条、当前项高亮唯一 → 风格提示词是工作流原值、字段面板有「歌词」「种子」、
+种子只读 + 骰子 `is-on`、范围 0~2^53-1 → 运行 payload：`workflow` / `37:13.caption` /
+`37:13.lyrics` / `37:38.seed` 四样齐全，种子是范围内的整数，**新节点的随机种子与上一次不同** →
+点骰子固定、手输 424242 进 `params`、改文案进 payload、再点回随机并换值 →
+切到 YuE2：未改动的提示词换成 YuE2 原值、种子回到随机、payload 里是 `33:36` / `33:37` / `33:34` →
+改过的提示词切工作流后仍保留。
+
+> 验收脚本拦截 `POST /infinite_canvas/api/execute` 只取 payload、返回假 `prompt_id`：
+> 8198 是 `--cpu` 实例，真跑 3B 音乐模型会占满一天。每次「运行」场景都先 `Page.reload`
+> 重建节点——点一次运行后节点进入 running，上游组件没有对外的复位口。
+
 
 ## 常见问题
 

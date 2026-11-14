@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "name": "文生音乐-YuE2",
+      "category": "文生音乐",
+      "file": "文生音乐-YuE2.json"
+    },
+    {
+      "name": "文生音乐-MiniMax-Music-3",
+      "category": "文生音乐",
+      "file": "文生音乐-MiniMax-Music-3.json"
+    }
+  ]
+}

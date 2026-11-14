@@ -120,6 +120,7 @@ WORKFLOW_CATEGORIES = (
     "参考生视频",
     "图像放大",
     "图像反推",
+    "文生音乐",
 )
 _DEFAULT_WORKFLOW_CATEGORY = WORKFLOW_CATEGORIES[0]
 
@@ -150,6 +151,18 @@ _CATEGORY_HINTS = {
         "superresolution",
     ),
 }
+_AUDIO_OUTPUT_HINTS = (
+    "saveaudio",
+    "yue2",
+    "minimaxmusic",
+    "stableaudio",
+    "acestep",
+    "ace_step",
+    "musicgen",
+    "audiogen",
+    "texttoaudio",
+    "latentaudio",
+)
 _VIDEO_OUTPUT_HINTS = (
     "savevideo",
     "videocombine",
@@ -169,7 +182,7 @@ def _normalize_category(value):
 
 
 def _detect_workflow_category(workflow):
-    """按节点类名猜分类：取标题/打标签 → 放大 → 视频（有无参考图）→ 图像（有无参考图）"""
+    """按节点类名猜分类：音频 → 取标题/打标签 → 放大 → 视频（有无参考图）→ 图像（有无参考图）"""
     classes = []
     if isinstance(workflow, dict):
         for node in workflow.values():
@@ -180,6 +193,10 @@ def _detect_workflow_category(workflow):
 
     def has(hints):
         return any(hint in name for name in classes for hint in hints)
+
+    # 音频优先：文生音乐工作流也可能带 PreviewImage 之类的节点
+    if has(_AUDIO_OUTPUT_HINTS):
+        return "文生音乐"
 
     for category in ("图像反推", "图像放大"):
         if has(_CATEGORY_HINTS[category]):
@@ -239,6 +256,7 @@ def _load_settings():
         "workflow_order": [],
         "fab_position": None,
         "workflow_categories": {},
+        "builtin_installed": {},
     }
     path = _settings_path()
     if os.path.isfile(path):
@@ -269,11 +287,24 @@ def _load_settings():
                     for name, category in categories.items()
                     if name and str(category) in WORKFLOW_CATEGORIES
                 }
+            installed = data.get("builtin_installed")
+            if isinstance(installed, dict):
+                clean = {}
+                for name, version in installed.items():
+                    try:
+                        clean[str(name)] = int(version)
+                    except (TypeError, ValueError):
+                        continue
+                settings["builtin_installed"] = clean
     return settings
 
 
 def _save_settings(
-    address=None, workflow_order=None, fab_position=None, workflow_categories=None
+    address=None,
+    workflow_order=None,
+    fab_position=None,
+    workflow_categories=None,
+    builtin_installed=None,
 ):
     settings = _load_settings()
     if address is not None:
@@ -284,6 +315,8 @@ def _save_settings(
         settings["fab_position"] = fab_position
     if workflow_categories is not None:
         settings["workflow_categories"] = dict(workflow_categories)
+    if builtin_installed is not None:
+        settings["builtin_installed"] = dict(builtin_installed)
     os.makedirs(_data_dir(), exist_ok=True)
     with open(_settings_path(), "w", encoding="utf-8") as handle:
         json.dump(settings, handle, ensure_ascii=False, indent=2)
@@ -299,6 +332,70 @@ def _set_workflow_category(name, category):
         categories.pop(name, None)
     _save_settings(workflow_categories=categories)
     return categories
+
+
+# ---------------------------------------------------------------- 内置工作流
+# 随插件分发的现成工作流（目前是两套文生音乐）在第一次打开画布时装进用户
+# 工作流目录，之后完全归用户所有：用户在画布上改过、删过都不会被覆盖或复活。
+# 装过哪些记在 canvas_settings.json 的 builtin_installed（{名字: 版本}）。
+_BUILTIN_DIR = os.path.join(_NODE_ROOT, "builtin_workflows")
+_builtin_state = {"done": False}
+
+
+def _builtin_manifest():
+    path = os.path.join(_BUILTIN_DIR, "manifest.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _ensure_builtin_workflows():
+    """把内置工作流装进用户目录；装过一次就不再碰（幂等，失败下轮重试）"""
+    if _builtin_state["done"]:
+        return
+    manifest = _builtin_manifest()
+    if not manifest:
+        _builtin_state["done"] = True
+        return
+    try:
+        version = int(manifest.get("version") or 1)
+    except (TypeError, ValueError):
+        version = 1
+    items = [item for item in (manifest.get("items") or []) if isinstance(item, dict)]
+    installed = dict(_load_settings().get("builtin_installed") or {})
+    changed = False
+    for item in items:
+        name = _safe_name(str(item.get("name") or ""))
+        if not name or installed.get(name) == version:
+            continue
+        source = os.path.join(_BUILTIN_DIR, f"{name}.json")
+        if not os.path.isfile(source):
+            continue
+        target = _workflow_path(name)
+        if not os.path.isfile(target):
+            try:
+                os.makedirs(_workflow_dir(), exist_ok=True)
+                shutil.copyfile(source, target)
+                fields_source = os.path.join(_BUILTIN_DIR, f"{name}.fields.json")
+                if os.path.isfile(fields_source):
+                    shutil.copyfile(fields_source, _fields_path(name))
+            except Exception as exc:  # pragma: no cover - 只可能是磁盘权限问题
+                print(f"[XXXXXLCat] 安装内置工作流失败 {name}: {exc}")
+                continue
+            category = _normalize_category(item.get("category"))
+            if category:
+                _set_workflow_category(name, category)
+        # 名字已存在（用户自己导入过同名工作流）就只记版本，不动文件
+        installed[name] = version
+        changed = True
+    if changed:
+        _save_settings(builtin_installed=installed)
+    _builtin_state["done"] = True
 
 
 def _comfy_base(request):
@@ -1871,6 +1968,7 @@ def register_routes(app):
         )
 
     async def list_workflows(request):
+        _ensure_builtin_workflows()
         return web.json_response({"workflows": _list_workflows()})
 
     async def reorder_workflows(request):

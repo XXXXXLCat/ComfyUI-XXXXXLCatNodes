@@ -95,6 +95,7 @@
     if (typeof fn === 'function') return fn(role)
     if (role === 'gen-image') return ['文生图像', '图像编辑']
     if (role === 'gen-video') return ['文生视频', '参考生视频']
+    if (role === 'gen-audio') return ['文生音乐']
     return null
   }
 
