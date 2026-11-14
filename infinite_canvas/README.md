@@ -3518,6 +3518,10 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 `user/<id>/ComfyUI-Infinite-Canvas/canvas_settings.json` 的 `workflow_categories`
 里（`{工作流名: 类别}`）；重命名时跟着搬、删除时清掉。
 
+> 「工作流配置」列表按类别分组，**只列用户自己导入的工作流**。内置工作流（目前就是
+> 文生音乐那两套）是只读的、不进配置面板，所以某一类如果只有内置工作流，配置面板里
+> 就没有这个分组——上面七类是分类体系的全集，不是列表里必然出现的七行。
+
 ### 后端（`__init__.py`）
 
 - 常量 `WORKFLOW_CATEGORIES` / `_DEFAULT_WORKFLOW_CATEGORY`；`_normalize_category()`
@@ -3622,7 +3626,7 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 ## 内置文生音乐工作流（2026-11-14，分支 `feat/gen-audio-builtin`）
 
 用户给了两份自己调好的 ComfyUI API 工作流，要求「作为内置生成音频工作流，暴露风格提示词、
-歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 首次打开时装进用户目录 + 只暴露三个字段**。
+歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 运行期只读加载 + 只暴露三个字段**。
 
 ### 随包内容（`infinite_canvas/builtin_workflows/`）
 
@@ -3637,19 +3641,46 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 （ComfyUI 前端「随机」上限的表示），画布侧种子默认就是随机的，留这个大数只会让
 「切到固定」时输入框显示一个超范围值。
 
-### 安装策略：只装一次，不覆盖、不复活
+### 两种工作流：内置（只读）+ 用户自建（可改）
 
-`_ensure_builtin_workflows()` 在 **`GET /workflows`** 里调用（不是 import 时，避免副作用）：
+| | 内置 | 用户自建 |
+| --- | --- | --- |
+| 存放位置 | 插件目录 `infinite_canvas/builtin_workflows/`，**不复制进用户目录** | `user/<id>/ComfyUI-Infinite-Canvas/workflows/` |
+| 出现在「工作流配置」 | **否** | 是 |
+| 画布节点上可选 | 是（音频节点只列这一类） | 是 |
+| 改名 / 删除 / 改分类 / 改暴露字段 | **一律 403** | 允许 |
+| 升级方式 | 换插件里的 JSON 即生效（直接读文件，没有版本比较） | 用户自己管 |
 
-1. 读 `manifest.json` 的 `version` 与 `items`；`canvas_settings.json` 里的
-   `builtin_installed` 记 `{名字: 版本}`。
-2. 已记过同版本 → 跳过。**目标文件已存在**（用户导入过同名 / 自己改过）→ 只记版本，不动文件。
-3. 否则 `copyfile` 工作流 + 字段配置，并 `_set_workflow_category(name, "文生音乐")`。
-4. 用户后来删掉这两个工作流，`builtin_installed` 里仍记着，**不会再被塞回来**；
-   想重装就删掉 settings 里的对应键。`_builtin_state["done"]` 是同进程内的短路标志。
+#### 后端
 
-装好后的文件在 `user/<id>/ComfyUI-Infinite-Canvas/workflows/`，和手导的工作流完全一样，
-可以改、可以删、可以改名（改名后就是一条普通工作流，不再受管理）。
+- `_read_workflow()`：先找用户目录，没有再找内置目录 —— 所以画布运行、工作流预览、
+  字段读取走的还是同一套代码。
+- `_load_fields()`：`_field_file_candidates()` 决定顺序 —— **用户目录存在同名工作流时只读用户的**，
+  否则先读内置 `.fields.json`、再退回用户目录（兼容旧版复制出去的那份）。
+- `_list_workflows()`：每项多一个 `builtin` 布尔。**用户工作流按 `workflow_order` 排在前面，
+  内置固定压在最后、顺序按 `manifest.items`** —— 不这么排会把「不限类别」的节点
+  （生成文本等）的默认工作流（`qi[0]`）带成音乐工作流。
+- 写接口守卫：`POST /workflows`（同名导入）、`DELETE`、`/rename`、`/category`、
+  `PUT /fields` 命中内置名一律 `403`「是内置工作流，只读」。`PUT /workflows/order`
+  只记用户项，内置名不写进 `workflow_order`。
+- `_builtin_manifest()` 按文件 mtime 缓存，改插件目录里的 JSON 立刻生效，不用重启。
+
+#### 前端（`index-BXU58XDe.js` 两处补丁）
+
+「工作流配置」的列表数据只有两个入口：`GET /workflows` 首次加载、拖拽排序后回填。
+两处都加了 `.filter(x => !x.builtin)`，所以内置**既不出现在列表里，也不会在拖完顺序后突然冒出来**。
+画布节点左侧的选择器（`.panel-workflows`）不做过滤，音频节点照常能选到这两套。
+
+#### 旧版本留下的副本怎么处理
+
+老实现是「首次打开时 `copyfile` 进用户目录」，那份副本既能改也能删，和「内置不可更改」冲突。
+`_ensure_builtin_workflows()` 现在只做迁移（`GET /workflows` 里调用，进程内短路）：
+
+1. `settings.builtin_installed` 里记过的名字，才认为是我们当年装的 → 删掉用户目录里的
+   `<名>.json` 与 `<名>.fields.json`；**用户自己导入的同名工作流没有这条记录，保留不动**
+   （这种情况下列表以内置为准，用户那份不列，避免同名打架）。
+2. 把内置名从 `workflow_order` / `workflow_categories` 里摘掉（顺序改由 `manifest.items` 决定）。
+3. 写 `settings.builtin_migrated = manifest.version`，同版本不再重复扫。
 
 ### 暴露的三个字段
 
@@ -3749,6 +3780,16 @@ params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面
 `default` 全是空串 → 主框 / 歌词框 `value` 为空且各自显示占位文案 → 并排仍在、种子是随机值 →
 运行 payload 里 `37:13.caption` / `37:13.lyrics` 是空串、种子仍是数字 → 切 YuE2 仍是空、
 `33:36.value` / `33:37.value` 空串 → 改过的文本切工作流仍会带过去（旧行为不变）。
+
+内置只读单独验（`verify-builtin-readonly.js` 36 项）：`/workflows` 里内置项 `builtin:true`、
+**全部压在用户项之后**、用户项 `builtin:false`、分类都是「文生音乐」→ 内置的工作流内容与
+字段配置仍能读到（画布要用）、字段默认值仍是空串 → `DELETE` / `rename` / `category` /
+`PUT fields` / 同名导入 **五种写操作全 403**，被拒后列表与字段都没变化 → 用户工作流
+导入 / 改分类 / 改名 / 删除仍然 200 → 「工作流配置」里 `.wf-item-name` 不含两个内置名、
+没有「文生音乐」分组、条数等于用户工作流数 → 生成音频节点的药丸仍是
+「MiniMax / YuE2」两条（顺序按 `manifest.items`）、默认挂 MiniMax、能切到 YuE2、
+字段（歌词 + 种子）与并排两栏都正常 → 拖拽排序只改用户项顺序，内置仍压尾 →
+全程零 console error。
 
 
 ## 常见问题
