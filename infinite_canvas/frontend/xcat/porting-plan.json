@@ -1,0 +1,256 @@
+{
+  "meta": {
+    "title": "#21 整批源码化拆分方案",
+    "stage": 11,
+    "created": "2026-11-14",
+    "goal": "把 17 组构建期文本补丁逐步变成 src/ 下的可读源码，最终让 xcat/legacy/ 片段归零、vite-plugin-xcat-patches.js 退役。",
+    "hardConstraint": "#21 是 toEnd 替换，覆盖上游 App.vue 的整个 render 尾部 + mount('#app')（U[344795:415939] = 71 KB）。其余 16 组片段都引用这批压缩变量名；只要主 chunk 源码一改，esbuild 会重新分配 minified 标识符，所有片段引用立刻失效。",
+    "breakthrough": "#21 的替换文本是构建期纯文本注入（vite-plugin-xcat-patches.js 的 generateBundle），不参与 esbuild 编译。因此改写片段本身不会触发变量名重排 —— 这是当前混合态下唯一可安全推进的入口：按块把片段内容换成可读源码，逐块验证，最后再一次性把 App.vue / main.js 源码化并删掉插件。",
+    "acceptanceNet": [
+      "xcat/sync-frozen.py --check：4 个 XCAT-SOURCE 标记块与 src/xcat/logic/*.js 真源逐字符一致",
+      "xcat/verify-source-logic.mjs：69 例源码契约单测（标记一致性 + 模块导出 + role/分类/桥接语义）",
+      "xcat/verify-runtime-state.js：9 项 Vue Flow state 契约 + Delete/Backspace + 缩放边界 + 零 console error",
+      ".workbuddy/tmp/verify-p21-runtime.js：window 全局入口与 role / 七类 scope 运行时探针",
+      ".workbuddy/tmp/verify-canvas-tabs.js：tab 条 / 滚轮 120,-40 / Ctrl+S 弹窗运行时探针",
+      ".workbuddy/tmp/verify-save-dialog.js：官方 Dialog 外观、四项交互与按钮可读性",
+      ".workbuddy/tmp/verify-tool-shell.js：7 个工具弹窗 + 4 项交互 + 零 console error",
+      "npm run build:check + npm run build:panel：无补丁插件，产物完全由 src/ 编译"
+    ],
+    "distPolicy": "仓库 dist/ 三个主文件保持 md5 不变；8188/8198 旧部署副本不动；所有验证走 8202 构建产物预览。",
+    "finished": "2026-11-14",
+    "outcome": "batch 5 已完成：17 组构建期文本补丁与 vite-plugin-xcat-patches.js 全部退役；生产产物完全由 src/ 编译得到，工程内不再有任何构建期代码改写。",
+    "approach": "把「dist 的 index-BXU58XDe.js 经 batch 1~4 替换后的 expected」整体固化成 src/xcat/app/canvas-app.js（自包含 IIFE，与 dist CSS 同源 scoped hash），main.js 改为 import 它；上游 App.vue / components 保留为可读参考源码，不参与生产构建。02/03/05/06 四段加 XCAT-SOURCE 标记，由 xcat/sync-frozen.py 从 src/xcat/logic/*.js 真源同步，真源仍可生效。",
+    "keyFinding": "实测推翻了「改源码必然触发压缩变量名重排」：只把 App.vue 的 max-zoom 字面量 2 改成 10，编译产物 +1 B、17 组锚点全命中、归一化 md5 未变。重排只在新增模块级绑定时发生。但 #21 与其余 16 组共享同一压缩作用域的裸函数名，仍无法逐块渐进归零，故采用整体固化。",
+    "knownLimitation": "上游 6 个组件（TabBar / WorkflowPreview / CanvasManager / LibraryDock / Node / useCanvas）并未重写成 SFC：它们的 render 与闭包函数仍是固化模块里的压缩代码。完全 SFC 化需逐个翻译约 148 KB 内联 SVG 图标 vnode 与 6 组 store 闭包函数，属于另一个量级的工作。新 UI 与逻辑继续在 src/xcat/ 下以真源码开发。",
+    "archivedTo": ".workbuddy/tmp/stage11-batch5-archive/（43 个文件：插件、bundle-patches.json、legacy 片段、生成器、锁脚本、旧单测；不进 git）",
+    "lastLegacyProof": "归档前最后一次旧验收网全过：187 例契约单测、gen-p21/gen-p20 幂等、verify-bundle 归一化 md5 49b6263e211b1c4ff4ee2db302f8d53a PASS"
+  },
+  "layers": {
+    "A-pure-logic": "只依赖 window 全局桥接，零压缩变量名依赖 → 可立即写成 ES 模块真源 + 单测",
+    "B-dom-ui": "依赖 document/window 与少量压缩别名（qt/At/Ye/te），是运行时注入的自绘 UI → 可搬成独立 IIFE 模块（不进主 chunk）",
+    "C-app-render": "依赖大量压缩别名（P/f/Ze/Me/Nt/ag/BM/zM/Kt/_p/HS/_k/Ik/Mp/Rd…），本质是 App.vue 的编译产物 → 必须与 App.vue / main.js 一起重写，不能单独动"
+  },
+  "p21": {
+    "file": "legacy/p21.js.txt",
+    "bytes": 22845,
+    "md5": "0f1288c76d1b5daa5df9234bc6b169f8",
+    "originalBackup": "legacy/p21-original.js.txt",
+    "blocks": [
+      {
+        "n": 1,
+        "file": "01-canvas-persist-tail.js.txt",
+        "md5": "",
+        "bytes": 0,
+        "lines": "1",
+        "what": "画布删除 fetch 回调的收尾（97 B 半截语句）",
+        "layer": "B-dom-ui",
+        "dependsOn": [
+          "qt.list",
+          "qt.refresh",
+          "__xcatOpenTabs",
+          "setTimeout"
+        ],
+        "portable": "done",
+        "reason": "不再作为 #21 开头；与 #20 末尾 + 83 B 上游原文一起并入 #20 替换文本，#21 改为从 02 的完整函数声明开始",
+        "batch": 4,
+        "boundaryMovedTo": "legacy/p20.js.txt (gen-p20.py)"
+      },
+      {
+        "n": 2,
+        "file": "02-canvas-tabs-core.js.txt",
+        "md5": "8b148e75e1668e7869dfce80fb7934d5",
+        "bytes": 6402,
+        "lines": "2-8",
+        "what": "画布标签页持久化：xcatFlush / xcatPick / xcatAdd / xcatWheel / bootstrap 覆写 / Ctrl+S / xcatSaveCurrent",
+        "layer": "B-dom-ui",
+        "dependsOn": [
+          "qt",
+          "canvasTabBusy",
+          "window.__xcatOpenTabs",
+          "window.__xcatAddTab",
+          "localStorage"
+        ],
+        "portable": "done",
+        "reason": "2360 B 压缩单行已归零；可读真源 + 无参适配层，顶层函数名保持不变以兼容 #20 与 04 块的调用点",
+        "batch": 3,
+        "source": "src/xcat/logic/canvas-tabs.js + canvas-tabs-bridge.js"
+      },
+      {
+        "n": 3,
+        "file": "03-save-dialog.js.txt",
+        "md5": "02b709fd0560b0204d54f741543c9ac4",
+        "bytes": 1657,
+        "lines": "9-59",
+        "what": "xcatShowSaveDialog 桥接：保存画布交给 shadcn-vue 官方 Dialog（src/xcat/save-dialog/）",
+        "layer": "B-dom-ui",
+        "dependsOn": [
+          "document",
+          "qt.rename",
+          "qt.saveAsNew",
+          "window.__xcatAddTab"
+        ],
+        "portable": "done",
+        "reason": "历史 3345 B 手写 DOM 已归零；主 chunk 只留可读桥接，遮罩/标题/Input/Button/ESC/焦点/aria 全由官方组件提供",
+        "batch": 2,
+        "source": "src/xcat/logic/save-dialog.js"
+      },
+      {
+        "n": 4,
+        "file": "04-tabstrip-and-app-render.js.txt",
+        "md5": "ac26982692e3a7a5137a0396df71470f",
+        "bytes": 5695,
+        "lines": "60-62",
+        "what": "画布 tab 栏挂载 + sync() + 拖拽投放（fe/ie/_e）+ VueFlow render 尾部（双层网格 pattern / props）+ BM=Nt(zM) + ag(BM).mount('#app')",
+        "layer": "C-app-render",
+        "dependsOn": [
+          "At",
+          "Ye",
+          "te",
+          "P",
+          "f",
+          "Ze",
+          "Me",
+          "Nt",
+          "ag",
+          "BM",
+          "zM",
+          "Kt",
+          "_p",
+          "HS",
+          "_k",
+          "Ik",
+          "Mp",
+          "Rd",
+          "Fe",
+          "st",
+          "rt",
+          "OM",
+          "DM",
+          "LM",
+          "RM",
+          "Ul",
+          "I",
+          "J",
+          "R",
+          "Ge",
+          "k",
+          "b",
+          "x",
+          "wt",
+          "Pe",
+          "m",
+          "l",
+          "a",
+          "i",
+          "s",
+          "r",
+          "n",
+          "u",
+          "o",
+          "T",
+          "t",
+          "G",
+          "B",
+          "C",
+          "Y",
+          "q",
+          "L",
+          "Vc",
+          "ba",
+          "qt"
+        ],
+        "portable": "frozen-in-src",
+        "reason": "未重写成 SFC；随整个应用主体固化到 src/xcat/app/canvas-app.js，行为保持不变",
+        "batch": 5
+      },
+      {
+        "n": 5,
+        "file": "05-node-role.js.txt",
+        "md5": "37db761cf4d0195dad0d32ea6cc1a24d",
+        "bytes": 3923,
+        "lines": "63-67",
+        "what": "节点角色判定：xcatRole / xcatIsGen / xcatIsText / xcatNodeRole / xcatTextInput + window.__xcatRole / __xcatIsText",
+        "layer": "A-pure-logic",
+        "dependsOn": [
+          "window.__xcatFlow"
+        ],
+        "portable": "done",
+        "source": "src/xcat/logic/node-role.js",
+        "reason": "九种 role 表 + media.kind 回退 + 400ms 防抖写回，零压缩别名依赖；已写成可读 ES 模块并由契约单测锁定行为",
+        "batch": 1
+      },
+      {
+        "n": 6,
+        "file": "06-workflow-scope.js.txt",
+        "md5": "7b320ed99858c4ac527a2f22aa9ca2c1",
+        "bytes": 5168,
+        "lines": "68-81",
+        "what": "七类工作流分类：xcatWFCats / WFCatOf / WFGrouped / WFItemClick / WFRemember / WFScope / WFInScope / WFDefaultFor / WFPills / WFPillClick + window.__xcatWfCats / __xcatWFScopeFor",
+        "layer": "A-pure-logic",
+        "dependsOn": [
+          "window.__xcatWfCats"
+        ],
+        "portable": "done",
+        "source": "src/xcat/logic/workflow-scope.js",
+        "reason": "类别表、分组、role 接入范围、越类置顶等全是纯函数；已写成可读 ES 模块并由契约单测锁定行为",
+        "batch": 1
+      }
+    ]
+  },
+  "remainingPatches": {
+    "total": 0,
+    "status": "retired-in-stage-11-batch5",
+    "archived": ".workbuddy/tmp/stage11-batch5-archive/（43 个文件：插件、bundle-patches.json、legacy 片段、生成器、锁脚本、旧单测；不进 git）",
+    "note": "17 组补丁不再参与构建；最终应用文本已固化进 src/xcat/app/canvas-app.js，CSS 固化进 canvas-app.css + src/styles/xcat-overrides.css"
+  },
+  "roadmap": [
+    {
+      "batch": 1,
+      "status": "done-in-stage-11",
+      "what": "拆分 #21 为 6 块；把 05/06 纯逻辑写成 ES 模块真源 + 契约单测 + 生成器",
+      "runtimeChange": false
+    },
+    {
+      "batch": 2,
+      "status": "done-in-stage-11-batch2",
+      "what": "03 块缩成可读桥接 + XcatSaveDialog.vue（官方 Dialog/Input/Button/Label/DialogClose），挂进 xcat-panels.js",
+      "runtimeChange": true
+    },
+    {
+      "batch": 3,
+      "status": "done-in-stage-11-batch3",
+      "what": "02 块换成可读真源与适配层；#8/#17~#20 经查证是 useCanvas 闭包内函数体，改归 batch 5",
+      "runtimeChange": true,
+      "note": "原计划的 useCanvasTabs composable 不可行：这 5 组引用 c/d/h/p/M/w/t 等压缩局部别名，独立 IIFE 拿不到"
+    },
+    {
+      "batch": 4,
+      "status": "done-in-stage-11-batch4",
+      "what": "01 与 #20 的半截语句收进同一个替换文本；#21 从完整语句开始，最终注入字节顺序不变",
+      "runtimeChange": true
+    },
+    {
+      "batch": 5,
+      "status": "done-in-stage-11-batch5",
+      "what": "整批退役补丁机制：应用主体固化进 src/，删除 vite-plugin-xcat-patches.js 与全部片段/生成器，验收网改为纯源码契约 + CDP 行为回归",
+      "runtimeChange": false,
+      "requiresUserDecision": "这一步必须放弃「产物与 dist 逐字节一致」，改用行为回归作为唯一验收标准",
+      "delivered": "行为零变化（固化文本 == 旧带锁产物归一化后逐字节一致）+ 全套回归通过",
+      "notDone": "上游 6 个组件未重写成 SFC，见 meta.knownLimitation"
+    }
+  ],
+  "batch5": {
+    "branch": "feat/stage11-batch5-app-rewrite",
+    "frozenSource": "src/xcat/app/canvas-app.js",
+    "frozenUpstreamCss": "src/xcat/app/canvas-app.css",
+    "entry": "src/main.js",
+    "htmlOrder": "vite.config.js 内联 xcatEntryOrder()（纯 HTML 标签顺序，不改写代码）",
+    "syncTool": "xcat/sync-frozen.py",
+    "sourceBlocks": [
+      "02-canvas-tabs-core",
+      "03-save-dialog",
+      "05-node-role",
+      "06-workflow-scope"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Infinite-Canvas</title>
+  <!-- 覆盖样式 xcat-overrides.css 改由 src/main.js 在最后 import，由 Vite 保证层叠顺序；
+       下面这些是纯全局 DOM 补丁脚本，保持 defer + 原有加载顺序。 -->
+  <script defer src="/assets/xcat-audio-wave.js?v=20261112d"></script>
+  <script defer src="/assets/xcat-media-controls.js?v=20261112g"></script>
+  <script defer src="/assets/xcat-node-names.js"></script>
+  <script defer src="/assets/xcat-node-actionbar.js?v=20261113c"></script>
+  <!-- 选中节点 ⇒ 相连的线一起变白（ComfyUI highlightedLinks 语义） -->
+  <script defer src="/assets/xcat-edge-hot.js?v=20261112a"></script>
+  <!-- 连线中点圆点，点击断开（ComfyUI drawCenterMarker） -->
+  <script defer src="/assets/xcat-edge-mid.js?v=20261112d"></script>
+  <!-- 左栏「新建节点」九选一（素材：图片/视频/音频/文本 · 生成：图片/视频/音频/文本 · 控制：LoRA 栈） -->
+  <script defer src="/assets/xcat-new-node.js?v=20261114c"></script>
+  <!-- 生成类节点 / 素材文本节点不接受媒体导入（拖入 + 点击上传都拦） -->
+  <script defer src="/assets/xcat-no-media-import.js?v=20261113a"></script>
+  <!-- 画布内 Ctrl+V 粘贴 / 拖入图片 / 视频 / 音频 / 文字 / txt / md，直接建素材节点 -->
+  <script defer src="/assets/xcat-paste.js?v=20261113k"></script>
+  <!-- 文本节点：双击进入编辑，平时与普通节点一样可拖动 -->
+  <script defer src="/assets/xcat-text-edit.js?v=20261113j"></script>
+  <!-- 文本节点：平时按 Markdown 渲染显示，双击编辑原始源码 -->
+  <script defer src="/assets/xcat-markdown.js?v=20261113b"></script>
+  <!-- 节点媒体编辑公共内核：按钮注入 / 后端就绪预检 / 请求 / 产物建节点 -->
+  <script defer src="/assets/xcat-media-core.js?v=20261114a"></script>
+  <!-- 音频节点：截取（多段剪辑拼接）与变速（0.1–4×），处理后生成新音频节点 -->
+  <script defer src="/assets/xcat-audio-edit.js?v=20261113g"></script>
+  <!-- 视频节点：提取音轨 / 音视分离 / 截取 / 抽帧 -->
+  <script defer src="/assets/xcat-video-edit.js?v=20261114a"></script>
+  <!-- 图片节点：裁剪 / 宫格切分 / 镜像 / 调整。四者纯 Canvas 处理，产物复用 /api/media 落盘 -->
+  <script defer src="/assets/xcat-image-adjust-core.js?v=20261113a"></script>
+  <script defer src="/assets/xcat-image-tools.js?v=20261113g"></script>
+  <!-- 顶部标签栏右侧：ComfyUI 菜单栏同款状态条（RAM/VRAM Cleanup + CPU/RAM/GPU/VRAM/TEMP） -->
+  <script defer src="/assets/xcat-monitor.js?v=20261113b"></script>
+  <!-- 框选：Ctrl/Cmd+左键拖（空白或节点上都可），相交即选中、拖动中实时、
+       Shift 加选 / Alt 减选、Ctrl 单击切换选中 —— 语义全照 ComfyUI litegraph -->
+  <script defer src="/assets/xcat-marquee.js?v=20261113b"></script>
+  <!-- 多选包围框：选中 ≥2 个节点时画一圈虚线框（照 ComfyUI Comfy.SelectionBorder） -->
+  <script defer src="/assets/xcat-selborder.js?v=20261114b"></script>
+  <!-- 生成节点面板：唯一的文本字段（如歌词）与主提示词左右并排。
+       由 shadcn 面板接管的节点会带 .xcat-np，脚本自己让路。 -->
+  <script defer src="/assets/xcat-panel-split.js?v=20261114f"></script>
+  <!-- shadcn-vue 官方组件面板：音频 / 通用生成节点 / LoRA 栈 /
+       操作按钮行 / 资产弹层侧栏 / 7 个工具弹窗的通用控件。
+       由 vite.panel.config.js 单独构建成一个 IIFE，与固化的画布应用主体零耦合。 -->
+  <script defer src="/assets/xcat-panels.js?v=20261114j"></script>
+  <!-- 画布「LoRA 栈」节点（role=lora）：多行选模型 + 强度，连到生成节点后由后端
+       把整条链插到该工作流 MODEL 源头（UNet / Checkpoint 加载器）之后 -->
+  <script defer src="/assets/xcat-lora.js?v=20261114g"></script>
+</head>
+<body>
+  <!-- 连线描边滤镜：复刻 ComfyUI litegraph 的 render_connections_border
+       （先画 connections_width + 4 的 rgba(0,0,0,0.5) 外描边，再画 3px 本色线）。
+       SVG 一条 stroke 只能一层颜色，这里用 feMorphology dilate 把描边扩 2px
+       （3 + 2×2 = 7px，与 ComfyUI 完全同宽），再与原图合并。 -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+    <defs>
+      <filter id="xcat-link-halo" x="-50%" y="-50%" width="200%" height="200%"
+              filterUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="grow" />
+        <feFlood flood-color="#000000" flood-opacity="0.5" result="ink" />
+        <feComposite in="ink" in2="grow" operator="in" result="halo" />
+        <feMerge>
+          <feMergeNode in="halo" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  </svg>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

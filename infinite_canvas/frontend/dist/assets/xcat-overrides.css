@@ -6028,3 +6028,533 @@ html[data-theme="light"] #app .xcat-ve-menu { background: var(--cg-input); }
     font-size: 11px;
     line-height: 1.5;
 }
+
+/* ---------------------------------------------------------- 药丸：越类提示
+   生成节点现在只列出本节点对应类别的工作流（图片：文生图像/图像编辑，
+   视频：文生视频/参考生视频）。旧画布上已经挂着越类工作流的节点，仍把当前项
+   显示在最前面，但改成虚线灰底，title 上写明「不属于此节点的类别」，
+   避免节点看起来「没有选中任何工作流」。 */
+#app .panel-workflows .wf-pill.xcat-wf-pill-off,
+#app .panel-workflows .wf-pill.xcat-wf-pill-off:hover,
+#app .panel-workflows .wf-pill.xcat-wf-pill-off.is-active {
+    border-style: dashed;
+    border-color: var(--c-muted);
+    background: transparent;
+    color: var(--c-muted);
+    opacity: .9;
+}
+
+/* ------------------------------------------------- 生成节点：字段与提示词并列
+   上游把面板做成竖排：主提示词整行 → 其余字段一行 → 运行按钮。文生音乐
+   这类工作流只有「风格提示词 + 歌词」两个文本字段，竖排会把歌词压成
+   200×60 的小框，提示词区还空着半屏。xcat-panel-split.js 在「字段列表
+   第一项是文本字段、且没有第二个文本字段」时挂类，这里用两列 grid 把
+   歌词摆到提示词右侧，两列等高。 */
+#app .node-panel.xcat-panel-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    column-gap: 12px;
+    row-gap: 8px;
+}
+
+#app .node-panel.xcat-panel-split > .panel-prompt {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+}
+
+#app .node-panel.xcat-panel-split > .panel-prompt > .panel-text {
+    height: auto;
+    min-height: 120px;
+    flex: 1 1 auto;
+}
+
+/* 左侧补一个与右侧字段同款的标题（文案由 xcat-panel-split.js 写进 data 属性），
+   否则右列有「歌词」一行、左列没有，两列文本框上边缘会错开 20px */
+#app .node-panel.xcat-panel-split > .panel-prompt::before {
+    content: attr(data-xcat-label);
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--c-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 字段列表本身不占位：让每个 .panel-field 直接成为外层 grid 的项 */
+#app .node-panel.xcat-panel-split > .panel-fields {
+    display: contents;
+}
+
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:first-child {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:first-child > .panel-text {
+    width: 100%;
+    height: auto;
+    min-height: 120px;
+    flex: 1 1 auto;
+}
+
+/* 其余字段（种子等）与运行按钮各占整行，排在两列之下；
+   字段本身按内容宽度靠左、底部对齐（与原 flex 行的观感一致，不被 grid 拉伸） */
+#app .node-panel.xcat-panel-split > .panel-fields > .panel-field:nth-child(n + 2) {
+    justify-self: start;
+    align-self: end;
+}
+
+#app .node-panel.xcat-panel-split > .panel-row,
+#app .node-panel.xcat-panel-split > .panel-hint,
+#app .node-panel.xcat-panel-split > .panel-error {
+    grid-column: 1 / -1;
+}
+
+/* ------------------------------------------------- 生成音频：ComfyUI 风格面板
+   2026-11-14 改版：第一版是「大圆角聊天输入框」的自绘语言（999px 胶囊、
+   半透明灰块浮层），和 ComfyUI 原生控件不搭。这一版整体对齐官方前端的
+   控件体系，数值取自 main-*.css 的 :root / comfy-menu / comfyui-button /
+   comfy-multiline-input，并经 8199 实例 getComputedStyle 复核：
+
+     --cg-secondary #262729  节点 / 卡片底（= --node / --card）
+     --cg-input     #313235  widget 输入框底（= --input）
+     --cg-bg        #171718  浮层底（= --popover / --background）
+     --cg-border    #494a50  实线边（= --border）
+     --cg-line      半透明边（border/50）
+     --cg-primary   #0b8ce9  只给确认动作（= --primary / ExecuteButton）
+     --cg-radius-lg 8px      官方 rounded-lg
+
+   形状：28px 高、8px 圆角的方块控件，不再用胶囊；
+   层级：面板 --cg-secondary → 输入框 --cg-input → 浮层 --cg-bg，
+   一档一档拉开，不再靠半透明灰块叠在输入框上。
+   官方按钮的选中态是 bg-muted + text-foreground，hover 是 bg-accent，
+   这里照抄；蓝色一律不用于「选中」，只用于运行按钮。
+   ------------------------------------------------- */
+
+#app .node-panel.xcat-audio {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 12px;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-secondary);
+    box-shadow: var(--cg-shadow);
+}
+
+#app .node-panel.xcat-audio > .panel-workflows,
+#app .node-panel.xcat-audio > .panel-prompt,
+#app .node-panel.xcat-audio > .panel-fields,
+#app .node-panel.xcat-audio > .panel-row,
+#app .node-panel.xcat-audio > .panel-hint {
+    display: none;
+}
+
+#app .node-panel.xcat-audio > .panel-error {
+    margin-top: 8px;
+}
+
+/* ---- 两个输入区：两个独立的官方 widget 输入框（不再是合并大卡 + 竖分隔线） ---- */
+#app .xcat-ac {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+#app .xcat-ac-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+#app .xcat-ac-inputs.is-single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+#app .xcat-ac-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+#app .xcat-ac-label {
+    padding: 0 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--cg-muted-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* comfy-multiline-input：input 底 + 前景字 + 无系统字体回落 */
+#app .xcat-ac-text {
+    width: 100%;
+    min-height: 132px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    outline: none;
+    resize: none;
+}
+
+/* 官方 --ring 是 muted-foreground，不是强调色，聚焦也保持中性 */
+#app .xcat-ac-text:focus {
+    border-color: color-mix(in srgb, var(--cg-fg) 55%, transparent);
+}
+
+#app .xcat-ac-text::placeholder {
+    color: var(--cg-muted-fg);
+    opacity: 1;
+}
+
+/* ---- 底部工具条 ---- */
+#app .xcat-ac-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+}
+
+/* 音乐 / 语音：官方侧栏 tab 的形态（外框 + 选中 bg-muted） */
+#app .xcat-ac-seg {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    height: 28px;
+    padding: 2px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+}
+
+#app .xcat-ac-seg > button {
+    height: 22px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color .1s ease, background-color .1s ease;
+}
+
+#app .xcat-ac-seg > button:hover {
+    color: var(--cg-fg);
+    background: var(--cg-accent);
+}
+
+#app .xcat-ac-seg > button.is-on {
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* ---- 工作流下拉：官方 select 外观 ---- */
+#app .xcat-ac-wf {
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+#app .xcat-ac-wfbtn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 200px;
+    height: 28px;
+    padding: 0 8px 0 10px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font-family: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: background-color .1s ease, border-color .1s ease;
+}
+
+#app .xcat-ac-wfbtn:hover {
+    background: var(--cg-accent);
+}
+
+#app .xcat-ac-wf.is-open .xcat-ac-wfbtn {
+    border-color: color-mix(in srgb, var(--cg-fg) 45%, transparent);
+}
+
+#app .xcat-ac-wfname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#app .xcat-ac-wfchev {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--cg-muted-fg);
+}
+
+/* 官方 popover：--popover(= --background) 底 + --border 实线 + shadow-md */
+#app .xcat-ac-wfmenu {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    z-index: 6;
+    display: none;
+    min-width: 200px;
+    max-width: 280px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+}
+
+#app .xcat-ac-wf.is-open .xcat-ac-wfmenu {
+    display: block;
+}
+
+#app .xcat-ac-wfitem {
+    display: block;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--cg-muted-fg);
+    font-family: inherit;
+    font-size: 11.5px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+#app .xcat-ac-wfitem:hover {
+    background: var(--cg-accent);
+    color: var(--cg-fg);
+}
+
+#app .xcat-ac-wfitem.is-active {
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* ---- 设置按钮 + 属性浮层 ---- */
+/* settings 保持 static：让浮层以 .node-panel（absolute）为定位基准，
+   右对齐面板内容区；否则浮层贴着齿轮，会正好横跨两个输入框的接缝，
+   把左右两块各切掉一角。DOM 上浮层仍是它的子元素，点击外部关闭的判断不变。 */
+#app .xcat-ac-settings {
+    position: static;
+    flex: 0 0 auto;
+}
+
+#app .xcat-ac-gear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-input);
+    color: var(--cg-muted-fg);
+    cursor: pointer;
+    transition: color .1s ease, background-color .1s ease;
+}
+
+#app .xcat-ac-gear:hover {
+    color: var(--cg-fg);
+    background: var(--cg-accent);
+}
+
+#app .xcat-ac-gear.is-open {
+    color: var(--cg-fg);
+    background: var(--cg-muted);
+    border-color: color-mix(in srgb, var(--cg-fg) 45%, transparent);
+}
+
+#app .xcat-ac-pop {
+    position: absolute;
+    right: 12px;
+    left: auto;
+    /* 面板 padding 12 + 工具条 28 + 浮层底边离工具条 8 = 48 */
+    bottom: 48px;
+    z-index: 7;
+    display: none;
+    flex-direction: column;
+    width: 320px;
+    padding: 4px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-bg);
+    box-shadow: var(--cg-shadow);
+}
+
+#app .xcat-ac-pop.is-open {
+    display: flex;
+}
+
+/* 官方设置面板的属性行：细分隔线 + 标签左 / 控件右 */
+#app .xcat-ac-title {
+    padding: 5px 8px 6px;
+    border-bottom: 1px solid var(--cg-line);
+    color: var(--cg-fg);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+#app .xcat-ac-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 34px;
+    padding: 4px 8px;
+    box-sizing: border-box;
+}
+
+#app .xcat-ac-row + .xcat-ac-row {
+    border-top: 1px solid var(--cg-line);
+}
+
+#app .xcat-ac-rlabel {
+    font-size: 11.5px;
+    color: var(--cg-muted-fg);
+    white-space: nowrap;
+}
+
+#app .xcat-ac-rctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#app .xcat-ac-num,
+#app .xcat-ac-sel {
+    height: 26px;
+    padding: 0 6px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: 4px;
+    background: var(--cg-input);
+    color: var(--cg-fg);
+    font-family: inherit;
+    font-size: 11.5px;
+    outline: none;
+}
+
+#app .xcat-ac-num {
+    width: 96px;
+    -moz-appearance: textfield;
+}
+
+#app .xcat-ac-sel {
+    cursor: pointer;
+}
+
+#app .xcat-ac-num:focus,
+#app .xcat-ac-sel:focus {
+    border-color: color-mix(in srgb, var(--cg-fg) 55%, transparent);
+}
+
+#app .xcat-ac-num.is-random,
+#app .xcat-ac-num[readonly] {
+    color: var(--cg-muted-fg);
+    cursor: default;
+}
+
+#app .xcat-ac-dice {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-border);
+    border-radius: 4px;
+    background: var(--cg-input);
+    color: var(--cg-muted-fg);
+    cursor: pointer;
+    transition: color .1s ease, background-color .1s ease;
+}
+
+#app .xcat-ac-dice:hover {
+    color: var(--cg-fg);
+    background: var(--cg-accent);
+}
+
+#app .xcat-ac-dice.is-on {
+    border-color: color-mix(in srgb, var(--cg-fg) 45%, transparent);
+    background: var(--cg-muted);
+    color: var(--cg-fg);
+}
+
+/* ---- 运行：官方 .comfyui-button 的 primary 变体（8px 方角、蓝底白字） ---- */
+#app .xcat-ac-run {
+    margin-left: auto;
+    height: 28px;
+    padding: 0 14px;
+    box-sizing: border-box;
+    border: 1px solid var(--cg-primary);
+    border-radius: var(--cg-radius-lg);
+    background: var(--cg-primary);
+    color: var(--cg-primary-fg);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    cursor: pointer;
+    transition: filter .1s ease;
+}
+
+#app .xcat-ac-run:hover {
+    filter: brightness(1.08);
+}
+
+#app .xcat-ac-run:active {
+    box-shadow: inset 1px 1px 10px rgb(0 0 0 / .5);
+}
+
+#app .xcat-ac-run.is-stop {
+    border-color: var(--cg-destructive);
+    background: transparent;
+    color: var(--cg-destructive);
+}
+
+#app .xcat-ac-run.is-stop:hover {
+    background: color-mix(in srgb, var(--cg-destructive) 12%, transparent);
+}
+
+#app .xcat-ac-run:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}

@@ -2538,7 +2538,7 @@ ComfyUI-Infinite-Canvas/
 | POST            | `/infinite_canvas/api/settings`                | 保存画布设置         |
 | GET/POST        | `/infinite_canvas/api/workflows`               | 工作流列表 / 上传     |
 | PUT             | `/infinite_canvas/api/workflows/order`         | 拖动排序           |
-| POST            | `/infinite_canvas/api/workflows/{name}/category` | 改分类（六类，见「工作流分类」节） |
+| POST            | `/infinite_canvas/api/workflows/{name}/category` | 改分类（七类，见「工作流分类」节） |
 | POST            | `/infinite_canvas/api/workflows/{name}/rename` | 重命名            |
 | GET/PUT         | `/infinite_canvas/api/workflows/{name}/fields` | 字段配置读写         |
 | GET/POST        | `/infinite_canvas/api/canvases`                | 画布列表 / 新建      |
@@ -2734,7 +2734,10 @@ fan-btn 描边全部 `rgb(11,140,233)`；带 scoped 属性临时造的 `.panel-r
 版本号：`xcat-media-core.js?v=20261113e`、`xcat-audio-edit.js?v=20261113g`、
 `xcat-video-edit.js?v=20261113a`、`xcat-overrides.css?v=20261113x`。
 
-### 视频节点：提取音轨 / 音视分离 / 截取片段 / 截取帧（2026-11-13）
+### 视频节点：提取音轨 / 音视分离 / 截取 / 抽帧（2026-11-13）
+
+> 2026-11-14 按用户要求改名：原「截取片段」→「截取」，原「截取帧」→「抽帧」，
+> 抽帧菜单三项同步为「抽取当前帧 / 抽取首帧 / 抽取尾帧」。`action` 取值（`trim` / `frame`）不变。
 
 用户要求参考 Toonflow 项目，交互按用户三项选择定稿：
 
@@ -2742,11 +2745,11 @@ fan-btn 描边全部 `rgb(11,140,233)`；带 scoped 属性临时造的 `.panel-r
 | --- | --- | --- |
 | 提取音轨 | 点击直接执行 + 进度弹窗（可取消） | 1 个 `asset-audio`（m4a） |
 | 音视分离 | 同上 | 2 个：`asset-audio` + 静音 `asset-video` |
-| 截取片段 | 单段起止：视频预览 + 10 张缩略图条 + 双拖拽手柄 + 数字输入 | 1 个 `asset-video`（mp4） |
-| 截取帧 | 点击弹三选一：当前帧 / 首帧 / 尾帧 | 1 个 `asset-image`（png） |
+| 截取 | 单段起止：视频预览 + 10 张缩略图条 + 双拖拽手柄 + 数字输入 | 1 个 `asset-video`（mp4） |
+| 抽帧 | 点击弹三选一：当前帧 / 首帧 / 尾帧 | 1 个 `asset-image`（png） |
 
 四者都**保留原视频、产物是右侧新节点**。操作行按钮用 CSS flex `order` 固定：
-`-6 提取音轨 / -5 音视分离 / -4 截取片段 / -3 截取帧`，下载 `90`、
+`-6 提取音轨 / -5 音视分离 / -4 截取 / -3 抽帧`，下载 `90`、
 全部下载 `91`、删除 `99` 永远在末尾。缩略图固定 10 张，用离屏 `<video>` +
 canvas `160×96` JPEG，不随视频时长增长。
 
@@ -2793,9 +2796,9 @@ Toonflow：音频 `-map 0:a:0 -vn -c:a aac -b:a 192k -f ipod -movflags +faststar
 音频回归通过（预检正常、真点导出生成新音频节点、变速预检正常）。
 四处（工作区 + Main/Lab/TTS）哈希一致。
 
-#### 截取片段：预览必须与选区联动（2026-11-13 补齐）
+#### 截取：预览必须与选区联动（2026-11-13 补齐）
 
-初版只做了「静态时间轴 + 起止输入」，用户反馈「截取片段没有做到位」。对照
+初版只做了「静态时间轴 + 起止输入」，用户反馈「截取没有做到位」。对照
 `Toonflow/packages/nodes/videoNode/src/components/videoActions.vue` 的 trim
 分支逐条补齐，缺的是这些：
 
@@ -2854,7 +2857,7 @@ if(a.key==="preview"&&(
 | 节点 | 操作行 |
 | --- | --- |
 | 素材图片 | 裁切 / 扩图 / 宫格 / 下载 / 删除 |
-| 素材视频 | 提取音轨 / 音视分离 / 截取片段 / 截取帧 / 下载 / 删除 |
+| 素材视频 | 提取音轨 / 音视分离 / 截取 / 抽帧 / 下载 / 删除 |
 | 素材音频 | 截取 / 变速 / 下载 / 删除（回归） |
 | gen-image / gen-video / gen-audio 空节点 | 删除 |
 
@@ -2877,7 +2880,7 @@ if(a.key==="preview"&&(
 这一行改回 `return kind==="image"`。
 
 删除后**素材图片节点只剩「下载 / 删除」**；视频、音频、文本节点按钮行不受影响：
-视频 `提取音轨 / 音视分离 / 截取片段 / 截取帧 / 下载 / 删除`，音频
+视频 `提取音轨 / 音视分离 / 截取 / 抽帧 / 下载 / 删除`，音频
 `截取 / 变速 / 下载 / 删除`。`order` 规则没动（下载 `90`、删除 `99` 仍在末尾）。
 
 注意：右下浮动工具条的「九宫格」（网格吸附，15px 对齐）与这里的 `grid` 宫格
@@ -3501,21 +3504,31 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 - 节点的 target（左侧）端口对非 `gen-` 角色是 `xcat-port-hidden`（`pointer-events:none`），
   所以 LoRA 节点**只能作为上游**（右侧 source 口）连到生成节点，方向是对的。
 
-## 工作流分类：六类（2026-11-14，同一分支）
+## 工作流分类：七类（2026-11-14，同一分支）
 
-导入的工作流按用途分**六类**，顺序就是界面顺序：
+导入的工作流按用途分类，顺序就是界面顺序：
 
-`文生图像 · 图像编辑 · 文生视频 · 参考生视频 · 图像放大 · 图像反推`
+`文生图像 · 图像编辑 · 文生视频 · 参考生视频 · 图像放大 · 图像反推 · 文生音乐`
+
+> 第七类「文生音乐」是随内置文生音乐工作流一起加的（见下一节），排序放在最后——
+> 它是唯一按「产物类型」而非「输入方式」归的类，放在图像/视频之后不至于打断前六类的
+> 阅读顺序。
 
 分类**只影响列表分组，不改工作流本身**（JSON 文件一个字节都不动），存在
 `user/<id>/ComfyUI-Infinite-Canvas/canvas_settings.json` 的 `workflow_categories`
 里（`{工作流名: 类别}`）；重命名时跟着搬、删除时清掉。
 
+> 「工作流配置」列表按类别分组，**只列用户自己导入的工作流**。内置工作流（目前就是
+> 文生音乐那两套）是只读的、不进配置面板，所以某一类如果只有内置工作流，配置面板里
+> 就没有这个分组——上面七类是分类体系的全集，不是列表里必然出现的七行。
+
 ### 后端（`__init__.py`）
 
 - 常量 `WORKFLOW_CATEGORIES` / `_DEFAULT_WORKFLOW_CATEGORY`；`_normalize_category()`
-  只放行六类，其余（含空、乱写）返回空串。
+  只放行这七类，其余（含空、乱写）返回空串。
 - **自动识别** `_detect_workflow_category()`：只看 `class_type`（小写子串），顺序是
+  ⓪ 音频（`saveaudio|yue2|minimaxmusic|stableaudio|acestep|ace_step|musicgen|audiogen|texttoaudio|latentaudio`）
+  → **文生音乐**（放最前：音乐工作流也可能带 `PreviewImage` 之类的节点，晚判会被误归成图像）；
   ① 取标题/打标签（`caption|tagger|interrogat|florence|blip|joytag|wd14|promptgen|reverseprompt`）
   → 图像反推；② 放大（`upscale|imagescale|resizeimagemask|imageresize|seedvr|esrgan|swinir|superresolution`
   等）→ 图像放大；③ 有视频产物（`savevideo|videocombine|savewebm|animatedwebp|createvideo`）
@@ -3529,21 +3542,58 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 
 ### 前端（bundle 补丁 + CSS）
 
-- 左栏列表从「扁平 v-for」改成 `xcatWFGrouped(l.value)`：按六类顺序摊成
+- 左栏列表从「扁平 v-for」改成 `xcatWFGrouped(l.value)`：按七类顺序摊成
   「组标题行 + 组内条目」，组标题复用 `.wf-item` 的盒模型、加 `xcat-wf-group`
   类（藏图标、字 11px/600、右侧显示「N 个工作流」、`pointer-events:none`）。
   没有条目的类别不出现。
 - **拖拽排序改成按名称**（原来是数组下标，加了组标题就错位）：`q/y/F/g` 四个函数
   改成传工作流名，`F()` 先 `findIndex` 出源/目标位置再 splice；**跨组拖拽会顺带改分类**
   （拖到别的类别上＝归到那一类），最后照旧 `PUT /workflows/order`。
+  ⚠️ 目标对象必须在 `splice` **之前**取（`const tgt=Le[ti]`），插入位置按
+  `si<ti ? ti-1 : ti` 折算——先删再取 `Le[ti]`，往下拖时会拿到目标后面那条，
+  跨组拖拽就归错类（2026-11-14 修）。
 - 右栏动作条多一枚 `分类 · <当前类>`（`key:3`，夹在「保存配置」与「重命名」之间）。
-  点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），六类单选、当前项
+  点它弹原生 DOM 卡片（`.xcat-wfcat-mask`，与「重命名」同款遮罩），七类单选、当前项
   `is-active`，选中后 `POST .../category` → `B()` 重取列表 → 提示条「已归类为 X」。
 - 节点底部的工作流药丸（`.panel-workflows`）也按分类分段：`xcatWFRemember()` 在
   `ul()` 拉列表时把 `name→category` 记进 `window.__xcatWfCats`，`xcatWFPills()`
   摊成「类别标签 + 该类药丸」，标签带 `xcat-wf-pill-g`（无边框、10px、muted、点了
   不选中工作流）。
 - 导入提示从「已保存 X」变成「已保存 X（分类）」，一眼能看出被归到哪。
+
+### 生成节点只接对应类别的工作流（2026-11-14 补充）
+
+用户要求「生成节点分开对应不同的工作流」：
+
+| 节点 | 可用类别 |
+| --- | --- |
+| `gen-image`（生成图片） | 文生图像 · 图像编辑 |
+| `gen-video`（生成视频） | 文生视频 · 参考生视频 |
+| `gen-audio`（生成音频） | 文生音乐 |
+| 其余（`gen-text` / 素材节点） | 不限制（七类全列） |
+
+三处一起改，缺一处就会「列表过滤了、默认值还挂着别类」：
+
+1. **药丸过滤**：`xcatWFPills(names, role, current)`——渲染处传 `e.data.role` 与
+   `e.data.workflow`，按 `xcatWFScope(role)` 过滤；类别取自 `window.__xcatWfCats`。
+2. **默认值**：`Qs()` → `Qs(role)`。`qi` 从「名字数组」改成 `/workflows` 的原始对象
+   数组（带 category），`xcatWFDefaultFor(qi, role)` 取**该类别下的第一条**（保持后端
+   顺序）。原来的 `Qs()` 恒返回 `qi[0]`，等于新建生成视频节点也挂文生图工作流。
+   `w(v)` → `w(v, role)`，`data:{...w(`${r}`,"gen-image")}` 显式传；派生节点用
+   `Qs(W.data.role)`。
+3. **新建菜单**：`xcat-new-node.js` 的 `defaultWorkflow(role)` 同样按类别挑，
+   真源是 bundle 暴露的 `window.__xcatWFScopeFor`（脚本先于 bundle 执行时有内嵌回退）。
+
+**越类怎么办**：旧画布上已经挂着越类工作流的节点，不是静默隐藏——`xcatWFPills` 会把
+当前项 `unshift` 到列表最前并打 `off:true`，渲染成 `xcat-wf-pill-off`：虚线边框、
+去色、`opacity:.9`，`title` 写「<名字> · 不属于此节点的类别」。这样节点看起来仍是
+「有选中工作流」的状态，用户点一下同组的就换掉了；**不自动改用户数据**。
+
+`__xcatWFScopeFor` 是唯一真源，新增/调整映射只改这里（+ `xcat-new-node.js` 的回退副本）。
+
+验证：`verify-wf-scope.js` **22 项**——映射与 scope 函数、图片节点只出两类且默认值属
+图片类、视频节点同理、越类项置顶/带 off/title 有提示/不算分组标签、其余仍只有两类、
+点药丸能切换且选中态唯一、左栏「工作流配置」仍列全部七类不受影响。
 
 ### 坑
 
@@ -3559,9 +3609,9 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 
 ### 验证（`verify-wf-category.js` 31 项 + `verify-wf-category2.js` 17 项）
 
-`verify-wf-category.js`：API 每条带合法 category 且六类齐 → 左栏 6 个分组标题按序、
+`verify-wf-category.js`：API 每条带合法 category 且七类齐 → 左栏 7 个分组标题按序、
 每组条目与后端一致、标题带条数、标题不可点/无图标 → 动作条「分类 · X」文案与顺序 →
-弹层 6 项按序、仅当前项高亮、挂在浮窗内 → 改到另一类后后端生效、列表重新分组、
+弹层 7 项按序、仅当前项高亮、挂在浮窗内 → 改到另一类后后端生效、列表重新分组、
 条目落到新组、按钮文案跟着变、提示条出现 → 非法分类 400 / 不存在 404 → 重载后保持
 → 节点药丸：分类标签与有内容的类别一致、顺序＝分组顺序、标签不参与选中、点标签不改
 工作流、点药丸能选中并高亮。
@@ -3572,6 +3622,294 @@ target 口连线成功 → `__xcatLorasFor` 收集 1 条、停用时不收集 �
 一起清掉。
 
 回归：`verify-selborder`（17）、`verify-lora-node`（27）、`verify-multi-hide`（19）全 PASS。
+
+## 内置文生音乐工作流（2026-11-14，分支 `feat/gen-audio-builtin`）
+
+用户给了两份自己调好的 ComfyUI API 工作流，要求「作为内置生成音频工作流，暴露风格提示词、
+歌词、种子，种子可以固定也可以随机」。做法是：**随插件分发 + 运行期只读加载 + 只暴露必要字段**。
+（字段数后来由 3 个扩到 5 个：补上「最大时长」「保存音频类型」，见本章之后的
+「生成音频节点：对话式面板」一节。）
+
+### 随包内容（`infinite_canvas/builtin_workflows/`）
+
+| 文件 | 说明 |
+| --- | --- |
+| `manifest.json` | 版本号 + 清单（名字 / 分类 / 文件名） |
+| `文生音乐-YuE2.json` | 16 节点：`CheckpointLoaderSimple(yue2_3b_int8_convrot)` → `YuE2GenerateABC` → `YuE2GenerateMusic` → `KSampler` → `VAEDecodeAudio` → `SaveAudioAdvanced`，`ComfySwitchNode` 的 `switch` 由 `PrimitiveBoolean(True)` 驱动（full 模式走 ABC） |
+| `文生音乐-MiniMax-Music-3.json` | 12 节点：`UNETLoader(minimax_music3_dit_fp16)` + `CLIPLoader(type=minimax)` → `MiniMaxMusic3TextEncode` → `KSampler` → `VAEDecodeAudio` / `VAEDecodeAudioTiled`（`ComfySwitchNode` 字面量 `True` 选 tiled）→ `SaveAudioAdvanced` |
+| `<名>.fields.json` | 五条字段（风格提示词 / 歌词 / 最大时长 / 随机种子 / 保存音频类型），见下 |
+
+两个工作流里 `SeedNode` 的初始种子被改成 `0`：原文件是 `9223372036854776000`
+（ComfyUI 前端「随机」上限的表示），画布侧种子默认就是随机的，留这个大数只会让
+「切到固定」时输入框显示一个超范围值。
+
+### 两种工作流：内置（只读）+ 用户自建（可改）
+
+| | 内置 | 用户自建 |
+| --- | --- | --- |
+| 存放位置 | 插件目录 `infinite_canvas/builtin_workflows/`，**不复制进用户目录** | `user/<id>/ComfyUI-Infinite-Canvas/workflows/` |
+| 出现在「工作流配置」 | **否** | 是 |
+| 画布节点上可选 | 是（音频节点只列这一类） | 是 |
+| 改名 / 删除 / 改分类 / 改暴露字段 | **一律 403** | 允许 |
+| 升级方式 | 换插件里的 JSON 即生效（直接读文件，没有版本比较） | 用户自己管 |
+
+#### 后端
+
+- `_read_workflow()`：先找用户目录，没有再找内置目录 —— 所以画布运行、工作流预览、
+  字段读取走的还是同一套代码。
+- `_load_fields()`：`_field_file_candidates()` 决定顺序 —— **用户目录存在同名工作流时只读用户的**，
+  否则先读内置 `.fields.json`、再退回用户目录（兼容旧版复制出去的那份）。
+- `_list_workflows()`：每项多一个 `builtin` 布尔。**用户工作流按 `workflow_order` 排在前面，
+  内置固定压在最后、顺序按 `manifest.items`** —— 不这么排会把「不限类别」的节点
+  （生成文本等）的默认工作流（`qi[0]`）带成音乐工作流。
+- 写接口守卫：`POST /workflows`（同名导入）、`DELETE`、`/rename`、`/category`、
+  `PUT /fields` 命中内置名一律 `403`「是内置工作流，只读」。`PUT /workflows/order`
+  只记用户项，内置名不写进 `workflow_order`。
+- `_builtin_manifest()` 按文件 mtime 缓存，改插件目录里的 JSON 立刻生效，不用重启。
+
+#### 前端（`index-BXU58XDe.js` 两处补丁）
+
+「工作流配置」的列表数据只有两个入口：`GET /workflows` 首次加载、拖拽排序后回填。
+两处都加了 `.filter(x => !x.builtin)`，所以内置**既不出现在列表里，也不会在拖完顺序后突然冒出来**。
+画布节点左侧的选择器（`.panel-workflows`）不做过滤，音频节点照常能选到这两套。
+
+#### 旧版本留下的副本怎么处理
+
+老实现是「首次打开时 `copyfile` 进用户目录」，那份副本既能改也能删，和「内置不可更改」冲突。
+`_ensure_builtin_workflows()` 现在只做迁移（`GET /workflows` 里调用，进程内短路）：
+
+1. `settings.builtin_installed` 里记过的名字，才认为是我们当年装的 → 删掉用户目录里的
+   `<名>.json` 与 `<名>.fields.json`；**用户自己导入的同名工作流没有这条记录，保留不动**
+   （这种情况下列表以内置为准，用户那份不列，避免同名打架）。
+2. 把内置名从 `workflow_order` / `workflow_categories` 里摘掉（顺序改由 `manifest.items` 决定）。
+3. 写 `settings.builtin_migrated = manifest.version`，同版本不再重复扫。
+
+### 暴露的五个字段
+
+| 字段 | YuE2 | MiniMax Music 3 | 控件（对话式面板） |
+| --- | --- | --- | --- |
+| 风格提示词 | `33:36.value`（Text (Style)） | `37:13.caption` | 上半部分左输入区 |
+| 歌词 | `33:37.value`（Text (Lyrics)） | `37:13.lyrics` | 上半部分右输入区 |
+| 最大时长 | `33:25.max_duration` | `37:13.max_duration` | 设置浮层数字框（5~600，步长 5） |
+| 随机种子 | `33:34.seed`（SeedNode） | `37:38.seed` | 设置浮层数字框 + 骰子 |
+| 保存音频类型 | `10.format`（SaveAudioAdvanced） | `35.format` | 设置浮层「格式 + 码率」两个下拉 |
+
+「风格提示词」在画布内部仍是**第一条 text/textarea 字段**（`Ln` → `Ds()` / `ui()`，
+上游把它当主输入框），所以合成器里左输入区写回的是隐藏的 `.panel-prompt textarea`。
+另外四个字段挂在隐藏的 `.panel-fields` 里，合成器只把它们搬进新 UI，不复制一份数据。
+
+### 默认值：提示词与歌词都是空的
+
+两套工作流里四个文本输入（`33:36.value` / `33:37.value` / `37:13.caption` / `37:13.lyrics`）
+**默认都是空串**，节点上是空的输入框 + 占位文案（左「必填，请输入您想要的音乐类型、情绪、
+BPM、乐器等」、右「必填，在此输入或粘贴歌词…」），由用户自己写。
+
+注意默认值只能落在**工作流 JSON** 上：`_public_fields()` 把 `default` 取成工作流里的当前值，
+`.fields.json` 里写 `default` 会被覆盖。清空 JSON 后仍然要保留这两条字段——`_clean_fields()`
+只跳过「连线 / 对象」输入，空字符串是合法字面量。
+
+空值也会真的进 payload：运行时组装 `params` 是**遍历全部字段**（`for (const f of bo.value)
+params[f.nodeId][f.key] = tt(f)`），不是只发改过的键，所以「界面空 → 实际也生成空」，
+不会出现界面空、后端仍用工作流旧文本的情况。
+
+> `manifest.json` 的 `version` 升到 `2`。已装过 `1` 的用户不会被覆盖（见上面的安装策略）——
+> 本人实例 8188 之前没装过，重启即装 v2；预览用的 8198 目录是手工覆盖的。
+
+### 面板布局（历史）：歌词与提示词左右并排
+
+> ⚠️ 本节记录的是 2026-11-14 **上午**的实现，下午已被「对话式面板」取代（见下一节）。
+> `xcat-panel-split.js` 仍留在包里，但显式排除了 `gen-audio`，对音频节点不再命中；
+> 本节的价值是说明「不改 Vue 渲染结构、只重排布局」这个思路和踩过的 CSS 坑。
+
+上游面板是竖排的（主提示词整行 → 其余字段一行 200×60 → 运行按钮）。两套音乐工作流都只有
+「风格提示词 + 歌词」两个文本字段，竖排会把歌词压成小框、提示词区还空着半屏，所以加了一层
+**布局重排**（`assets/xcat-panel-split.js` + `xcat-overrides.css`）：
+
+- **命中条件**（只重排布局，不碰数据、不改 Vue 渲染结构）：面板有主提示词，字段列表的第一项是
+  文本字段（`textarea.panel-text` / `input.panel-input-wide`），且**其余字段里没有第二个文本字段**。
+- 命中后给 `.node-panel` 挂 `.xcat-panel-split`，用两列 grid 把「主提示词」和「第一个字段」
+  放到同一行的左右两列：两列等宽（各占一半，`minmax(0,1fr)`）、`min-height:120px` 且底部对齐。
+  其余字段（种子）和运行按钮各占整行，排在两列下方；字段按内容宽度靠左（`justify-self:start`），
+  不被 grid 拉伸。
+- **左列补标题**：主提示词框自己不带标签（上游只用 placeholder），右列有「歌词」小标题，
+  直接并排会让两列文本域上边缘错开 20px。脚本给 `.panel-prompt` 写
+  `data-xcat-label="提示词"`，CSS 用 `::before { content: attr(...) }` 画同款小标题
+  （`font-size:11px` / `--c-muted` / `margin-bottom:4px`，不设 `line-height` — 设成 `1` 会比
+  右侧 `.panel-field-label` 矮 5px）。
+- **刷新方式**：`MutationObserver` 盯 `#app .vue-flow` 的 `childList`（面板是 `v-if` 渲染的，
+  选中节点 / 切工作流都会重建子树），`setTimeout 0` 合并。**不用 rAF**：页面不可见时会被暂停；
+  也**不监听 attributes**：自己写的 class 会把它自激。
+- 不命中的节点原样不动：生成图像节点字段是 `select` / `number`（无文本字段），生成文本节点
+  有两个文本字段，素材节点没有字段面板 —— 都保持上游竖排。
+- 下午新增「最大时长 / 保存音频类型」后，上游字段列表的首项变成了 `select`，
+  命中条件本来就不会再满足；合成器接管后又加了一道显式排除，两处都不会重排。
+
+### 种子的「固定 / 随机」
+
+前端本来就有 `random` 字段类型（`_FIELD_TYPES` 里已有，一直没人用），语义正好：
+`se(field)` = `data.randomFields[field.id] !== false`，**默认就是随机**。
+
+- **随机**（默认）：每次点运行，`tt(field)` 生成 `min..max` 的整数、`pn()` 写回 `params`，
+  输入框 `readonly`、骰子 `is-on`（蓝色）；节点上的数值会随着每次运行跳动。
+- **固定**：点骰子 → `randomFields["37:38.seed"] = false`，输入框解除只读，可手输；
+  以后每次运行都用这个值。再点一次回到随机，并立刻换一个新随机数。
+- 范围给的是 `0 ~ 9007199254740991`（`Number.MAX_SAFE_INTEGER`）：前端用
+  `Math.random()` 取整，超过 2^53 会丢精度、`JSON.stringify` 也会变成浮点写法。
+
+### 顺带修的一处：切工作流不再把「没动过的提示词」带过去
+
+`cl(S)`（切换工作流）原来是「把当前节点的文本写进新工作流的第一个文本字段」。
+这在图像 / 视频节点上是想要的（换工作流保留提示词），但两套音乐工作流的风格描述格式不同——
+把 MiniMax 的 `Global Metadata: …` 带进 YuE2 毫无意义。现在加了一层判断：
+
+> 旧文本 === 旧字段的 `default`（说明用户没改）→ **不带过去**，新工作流显示自己的默认；
+> 改过 → 照旧带过去。
+
+注意比较的是 `field.default` 而不是 `Bt(field)`：`Bt` 优先取 `params`，用户一改就相等了，
+会把「改过的」误判成「没改过」（第一版就栽在这）。
+
+### 验证（`verify-gen-audio.js` 34 项）
+
+列表里两个内置工作流都在且分类正确 → 新建生成音频节点默认挂 MiniMax、药丸只有「文生音乐」
+一组两条、当前项高亮唯一 → 风格提示词为空（v2 起）、字段面板含「歌词 / 最大时长 /
+随机种子 / 保存音频类型」、
+种子只读 + 骰子 `is-on`、范围 0~2^53-1 → 运行 payload：`workflow` / `37:13.caption` /
+`37:13.lyrics` / `37:38.seed` 四样齐全，种子是范围内的整数，**新节点的随机种子与上一次不同** →
+点骰子固定、手输 424242 进 `params`、改文案进 payload、再点回随机并换值 →
+切到 YuE2：未改动的提示词换成 YuE2 原值、种子回到随机、payload 里是 `33:36` / `33:37` / `33:34` →
+改过的提示词切工作流后仍保留。
+
+> 验收脚本拦截 `POST /infinite_canvas/api/execute` 只取 payload、返回假 `prompt_id`：
+> 8198 是 `--cpu` 实例，真跑 3B 音乐模型会占满一天。每次「运行」场景都先 `Page.reload`
+> 重建节点——点一次运行后节点进入 running，上游组件没有对外的复位口。
+
+布局单独验（`verify-panel-split.js` 26 项，断言已按新语义改写）：音频节点挂
+`.xcat-audio`、由合成器提供两栏且**不带** `.xcat-panel-split` → 两列顶部 / 底部 /
+宽度 / 高度四项都在 ±1px 内对齐、左「风格提示词」右「歌词」、底部工具条四块顺序正确 →
+切到 YuE2 后仍由合成器接管且仍齐平 → 生成图像 / 生成文本 / 素材节点都不带并排类
+（图像面板字段级文本框数为 0）→ 重载后类能自动恢复、控制台无 error。
+
+空默认值同样单独验（`verify-empty-default.js` 20 项）：两个工作流的 fields 接口
+`default`（文本字段）全是空串 → 主框 / 歌词框 `value` 为空且各自显示占位文案 →
+合成器接管且仍是左右两个输入区、种子是随机值 →
+运行 payload 里 `37:13.caption` / `37:13.lyrics` 是空串、种子仍是数字 → 切 YuE2 仍是空、
+`33:36.value` / `33:37.value` 空串 → 改过的文本切工作流仍会带过去（旧行为不变）。
+
+内置只读单独验（`verify-builtin-readonly.js` 36 项）：`/workflows` 里内置项 `builtin:true`、
+**全部压在用户项之后**、用户项 `builtin:false`、分类都是「文生音乐」→ 内置的工作流内容与
+字段配置仍能读到（画布要用）、字段默认值仍是空串 → `DELETE` / `rename` / `category` /
+`PUT fields` / 同名导入 **五种写操作全 403**，被拒后列表与字段都没变化 → 用户工作流
+导入 / 改分类 / 改名 / 删除仍然 200 → 「工作流配置」里 `.wf-item-name` 不含两个内置名、
+没有「文生音乐」分组、条数等于用户工作流数 → 生成音频节点的药丸仍是
+「MiniMax / YuE2」两条（顺序按 `manifest.items`）、默认挂 MiniMax、能切到 YuE2、
+五项字段与合成器并排两栏都正常 → 拖拽排序只改用户项顺序，内置仍压尾 →
+全程零 console error。
+
+
+## 生成音频节点：对话式面板（2026-11-14 下午，分支 `feat/audio-composer`）
+
+需求是「参考 MiniMax 音乐输入框的样子，但又和它不一样」：
+
+- **上半部分两个输入区**：左「风格提示词」、右「歌词」。
+- **底部一行从左到右**：音乐 / 语音切换 → 工作流选择 → 设置 →（贴最右）运行按钮。
+- **点设置**弹出三项：最大时长、随机种子、保存音频类型。
+- 选语音时**暂时与音乐完全一致**（只记录 `data.audioMode`，界面不变），留待以后接 TTS。
+
+### 影子控件：不复制上游逻辑
+
+`assets/xcat-audio-composer.js` 只在 `role === "gen-audio"` 的面板上接管：
+
+1. 给 `.node-panel` 挂 `.xcat-audio`，`xcat-overrides.css` 把上游的
+   `.panel-workflows` / `.panel-prompt` / `.panel-fields` / `.panel-row` 全部
+   `display:none`。**隐藏不是销毁** —— `pn()` / `cl()` / `ct()` 这些绑定都还在。
+2. 在面板里追加一套 `.xcat-ac-*` 新 UI（两个 textarea、分段按钮、工作流下拉、
+   设置浮层、运行按钮）。
+3. 新控件的输入写回隐藏控件并派发 `input` / `change` / `click`，Vue 当成用户输入
+   自己更新 `params`；反过来，隐藏控件里的值（切工作流后的默认值、种子刷新、
+   运行按钮文案「运行 / 中断」）由 `MutationObserver`（`childList`）+ 400ms 轮询同步回新 UI。
+
+这样上游升级时只要控件类名不变就还能用，不用跟着复制一遍工作流与执行逻辑。
+`xcat-panel-split.js` 里也显式排除了 `gen-audio`，两套布局不会打架。
+
+### 底部工具条
+
+| 位置 | 控件 | 行为 |
+| --- | --- | --- |
+| 最左 | `.xcat-ac-seg` 音乐 / 语音 | 只写 `node.data.audioMode`，界面暂不变 |
+| 其次 | `.xcat-ac-wf` 工作流下拉 | 列表读隐藏的 `.panel-workflows .wf-pill`，点击派发到原药丸；名称去掉分组前缀显示短名 |
+| 再次 | `.xcat-ac-gear` 设置 | 打开 `.xcat-ac-pop` 浮层 |
+| 最右 | `.xcat-ac-run` 运行 | `dispatchEvent(click)` 给隐藏的 `.panel-run` |
+
+浮层三项的顺序是合成器自己排的：上游字段列表按控件类型分组（`select` 会排到最前），
+直接渲染会得到「保存音频类型 / 最大时长 / 随机种子」。合成器按
+`max_duration → seed → format` 重排，才与需求描述一致。
+
+### 样式：改用 ComfyUI 官方控件语言（同日第二版）
+
+第一版是「大圆角聊天输入框」的自绘外观（999px 胶囊、合并大卡 + 中间竖分隔线、
+半透明灰块浮层），和 ComfyUI 原生界面不搭。第二版整体对齐官方前端：
+
+| 项目 | 第一版（自绘） | 第二版（官方） |
+| --- | --- | --- |
+| 面板 | `--c-panel-2` #333、20px 圆角 | `--cg-secondary` #262729（`--node` / `--card`）、8px 圆角、`--cg-border` 实线 |
+| 输入区 | 一整张合并卡 + 竖线 | 两个独立 widget 框：`--cg-input` #313235、1px `--cg-border`、8px 圆角，标签在框外上方 |
+| 底栏控件 | 999px 胶囊 | 28px 高、8px 圆角方块；选中 `bg-muted` + 前景字、hover `bg-accent` |
+| 运行 | 亮色胶囊 | `--cg-primary` #0b8ce9 方角按钮（官方 `.comfyui-button` 的 primary 变体） |
+| 设置浮层 | 与面板同色的半透明灰块 | `--cg-bg` #171718（`--popover`）+ 实线边 + 「设置」标题 + 属性行分隔线 |
+
+数值取自 `comfyui_frontend_package/static/assets/main-*.css` 的 `:root`
+（`--color-charcoal-*` / `--color-azure-600`）与 `.comfy-menu` / `.comfyui-button` /
+`.comfy-multiline-input`；本文件顶部早就有一套 `--cg-*` 令牌（暗 / 亮两套主题）
+把官方色阶映射进来，这次只是**改用它**，没有新造颜色。蓝色 `--cg-primary` 只留给
+运行按钮，选中 / 聚焦一律走中性灰白（官方 `--ring` 本身就是 `muted-foreground`）。
+
+浮层定位也顺手改了：`.xcat-ac-settings` 设为 `position: static`，浮层改以
+`.node-panel`（absolute）为基准 `right: 12px; bottom: 48px`。原来贴着齿轮展开，
+正好横跨两个输入框的接缝、把左右各切掉一角；现在整体落在右侧歌词框上，
+观感像「点设置把右栏换成属性面板」。DOM 上浮层仍是 settings 的子元素，
+所以「点击外部关闭」的 `setWrap.contains(target)` 判断不用改。
+
+### 保存音频类型：DynamicCombo 的扁平键
+
+`SaveAudioAdvanced.format` 是 `IO.DynamicCombo`。**API 提示词里它不是嵌套对象**，
+而是两个扁平键：`format`（`flac` / `mp3` / `opus`）+ `format.quality`（码率）。
+执行时 `execution.py` 调 `build_nested_inputs()`，按 `v3_data["dynamic_paths"]`
+（`format → format.format`、`format.quality → format.quality`）重建成
+`{"format": "mp3", "quality": "320k"}` 再传给 `execute()`。
+
+画布侧收成一个字符串，两端各做一次转换：
+
+- `_apply_params()`：`"mp3:320k"` 拆成 `inputs["format"]="mp3"` +
+  `inputs["format.quality"]="320k"`；切回 `flac` 时 `pop("format.quality")`，
+  避免残留码率。守卫条件是 `key === "format"` 且该节点同时有
+  `filename_prefix` / `audio` 输入（防止误伤别的 `format` 字段）。
+- `_public_fields()`：反方向把 `format` + `format.quality` 合成 `"mp3:320k"`
+  作为字段 `default`，前端只认这一个值。
+- 前端 `splitOptions()` 把 `options`（`flac` / `mp3:V0` / …）拆成「格式」+「码率」
+  两个下拉；选 `flac` 时码率下拉隐藏，选 mp3 出现 `V0 / 128k / 320k`，
+  选 opus 出现 `64k / 96k / 128k / 192k / 320k`。
+
+8198 上用真实 `/prompt`（`LoadAudio → SaveAudioAdvanced`）跑过三种组合：
+`flac` / `mp3:320k` / `opus:96k` 分别产出 `.flac` / `.mp3` / `.opus`，无执行错误。
+
+### 验证
+
+- `verify-audio-composer.js` **49 项**：字段接口五项与选项、面板接管与上游隐藏、
+  两输入区四项 ±1px 对齐、工具条四块顺序与左右贴边、音乐/语音切换、
+  工作流下拉两项可切换（切 YuE2 后最大时长变 360）、设置三项顺序与码率联动、
+  骰子固定/随机、文本与设置值回写影子控件、运行 payload 五类参数、
+  `gen-image` / `gen-text` / `asset-image` 不被接管、重载恢复、零 console error。
+- `verify-audio-format.py` **7 项**：从 `__init__.py` 摘出 `_apply_params` 单独执行，
+  验证五种格式值拆分、`mp3 → flac` 不留残留、普通字面量覆盖而连线不覆盖。
+- 旧回归按新语义更新断言后全绿：`verify-gen-audio` 34、`verify-empty-default` 20、
+  `verify-panel-split` 26、`verify-builtin-readonly` 36、`verify-wf-scope` 23、
+  `verify-wf-category` 31、`verify-wf-category2` 17。
+- 版本号：`xcat-overrides.css?v=20261115a`、新增
+  `xcat-audio-composer.js?v=20261114b`。
+
+> 后端 `__init__.py` 改了 `_apply_params` / `_public_fields`，**8188 需要重启一次**；
+> 纯前端改动刷新即可。
+
 
 ## 常见问题
 

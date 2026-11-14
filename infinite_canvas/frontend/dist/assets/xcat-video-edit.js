@@ -5,9 +5,9 @@
 
      提取音轨    点击即执行 → 1 个 asset-audio 节点（m4a / AAC 192k）
      音视分离  点击即执行 → asset-audio + asset-video（静音）两个节点
-     截取片段    单段时间轴：视频预览 + 10 张缩略图 + 两个可拖手柄 +
+     截取        单段时间轴：视频预览 + 10 张缩略图 + 两个可拖手柄 +
                  起止数字输入 → 1 个 asset-video 节点（mp4，含音轨）
-     截取帧  三选一（当前帧 / 首帧 / 尾帧）→ 1 个 asset-image 节点（PNG）
+     抽帧    三选一（当前帧 / 首帧 / 尾帧）→ 1 个 asset-image 节点（PNG）
 
    全部走 POST /infinite_canvas/api/video/process（FFmpeg），原节点保留。
    按钮注入 / 后端就绪预检 / 请求解析 / 产物建节点统一用 xcat-media-core.js，
@@ -78,7 +78,7 @@
   }
 
   /* ------------------------------------------------------------ 通用执行 */
-  /* opts: {title, sub, runLabel, done}；modal 已存在时（截取片段弹窗）复用它，
+  /* opts: {title, sub, runLabel, done}；modal 已存在时（截取弹窗）复用它，
      否则（提取音轨 / 分离 / 截帧）先建一个进度弹窗。 */
   async function execute (payload, ctx, opts) {
     if (busy) return;
@@ -205,9 +205,9 @@
     menu = document.createElement('div');
     menu.className = 'xcat-ve-menu';
     menu.innerHTML = [
-      '<button type="button" data-frame="current">截取当前帧<span>', fmt(t), '</span></button>',
-      '<button type="button" data-frame="first">截取首帧</button>',
-      '<button type="button" data-frame="last">截取尾帧</button>'
+      '<button type="button" data-frame="current">抽取当前帧<span>', fmt(t), '</span></button>',
+      '<button type="button" data-frame="first">抽取首帧</button>',
+      '<button type="button" data-frame="last">抽取尾帧</button>'
     ].join('');
     host.appendChild(menu);
     var r = btn.getBoundingClientRect();
@@ -227,12 +227,12 @@
   function runFrame (which, ctx, time) {
     if (busy || modal) return;
     var labels = { current: '当前帧', first: '首帧', last: '尾帧' };
-    progressModal('截取帧', '导出' + labels[which] + '为 PNG 图片节点，保留原视频', ctx,
+    progressModal('抽帧', '导出' + labels[which] + '为 PNG 图片节点，保留原视频', ctx,
       { ref: ctx.ref, action: 'frame', frame: which, time: time || 0 },
-      { title: '截取帧', sub: '正在截取' + labels[which] + '…', done: '已生成图片节点' });
+      { title: '抽帧', sub: '正在抽取' + labels[which] + '…', done: '已生成图片节点' });
   }
 
-  /* ------------------------------------------------------------ 截取片段 */
+  /* ---------------------------------------------------------------- 截取 */
   /* 交互逐条对齐 Toonflow videoActions.vue 的 trim 分支：
        - 预览只在选区内播放（play 越界跳回 start，播到 end 暂停）
        - 拖边界 / 改输入框时预览同步 seek 到对应时间点
@@ -253,9 +253,9 @@
     modal.className = 'xcat-ae-modal';
     modal.innerHTML = [
       '<div class="xcat-ae-backdrop"></div>',
-      '<div class="xcat-ae-dialog xcat-ve-dialog" role="dialog" aria-modal="true" aria-label="截取片段">',
+      '<div class="xcat-ae-dialog xcat-ve-dialog" role="dialog" aria-modal="true" aria-label="截取">',
         '<div class="xcat-ae-head"><div>',
-          '<div class="xcat-ae-title">截取片段</div>',
+          '<div class="xcat-ae-title">截取</div>',
           '<div class="xcat-ae-sub" id="xcat-ve-sub">正在读取视频…</div>',
         '</div><button type="button" class="xcat-ae-x" id="xcat-ve-x" title="关闭">×</button></div>',
         core.warnHtml(WARN),
@@ -294,7 +294,7 @@
         '<div class="xcat-ae-foot">',
           '<div class="xcat-ae-status" id="xcat-ae-status"></div>',
           '<button type="button" class="xcat-ae-btn" id="xcat-ve-cancel">取消</button>',
-          '<button type="button" class="xcat-ae-btn is-primary" id="xcat-ve-run" disabled>截取片段</button>',
+          '<button type="button" class="xcat-ae-btn is-primary" id="xcat-ve-run" disabled>截取</button>',
         '</div>',
       '</div>'
     ].join('');
@@ -305,7 +305,7 @@
     q('#xcat-ve-run', modal).addEventListener('click', function () {
       if (!S || !valid()) { setStatus('请选择有效的起止时间', true); return; }
       execute({ ref: S.ctx.ref, action: 'trim', start: S.start, end: S.end }, S.ctx, {
-        runLabel: '截取片段', done: '已生成新的视频节点'
+        runLabel: '截取', done: '已生成新的视频节点'
       });
     });
     var si = q('#xcat-ve-start', modal), ei = q('#xcat-ve-end', modal);
@@ -581,8 +581,8 @@
   var DEFS = [
     { cls: 'xcat-ve-audio', label: '提取音轨', open: function (ctx) { runSimple('extractAudio', ctx); } },
     { cls: 'xcat-ve-separate', label: '音视分离', open: function (ctx) { runSimple('separate', ctx); } },
-    { cls: 'xcat-ve-trim', label: '截取片段', open: function (ctx) { openTrim(ctx); } },
-    { cls: 'xcat-ve-frame', label: '截取帧', open: function (ctx, wrap, btn) { openFrameMenu(ctx, btn); } }
+    { cls: 'xcat-ve-trim', label: '截取', open: function (ctx) { openTrim(ctx); } },
+    { cls: 'xcat-ve-frame', label: '抽帧', open: function (ctx, wrap, btn) { openFrameMenu(ctx, btn); } }
   ];
 
   function install () {

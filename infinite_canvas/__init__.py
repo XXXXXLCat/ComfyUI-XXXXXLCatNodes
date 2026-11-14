@@ -101,6 +101,75 @@ def _workflow_path(name):
     return os.path.join(_workflow_dir(), f"{name}.json")
 
 
+# ---------------------------------------------------------------- 内置工作流
+# 随插件分发的现成工作流（目前是两套文生音乐）只在插件目录里存一份，运行时
+# 直接读，**不复制进用户目录**：它们属于「内置」，画布上能用，但不出现在
+# 「工作流配置」里，也不能改名 / 删除 / 改字段；用户自己导入的才归用户所有。
+_BUILTIN_DIR = os.path.join(_NODE_ROOT, "builtin_workflows")
+_builtin_manifest_cache = {"mtime": None, "data": None}
+
+
+def _builtin_manifest():
+    """读内置清单（按文件 mtime 缓存：插件更新后自动失效）"""
+    path = os.path.join(_BUILTIN_DIR, "manifest.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    if _builtin_manifest_cache["mtime"] == mtime:
+        return _builtin_manifest_cache["data"]
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return None
+    data = data if isinstance(data, dict) else None
+    _builtin_manifest_cache["mtime"] = mtime
+    _builtin_manifest_cache["data"] = data
+    return data
+
+
+def _builtin_items():
+    """{名字: 清单条目}，按清单顺序（dict 保序）"""
+    items = {}
+    manifest = _builtin_manifest() or {}
+    for item in manifest.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        name = _safe_name(str(item.get("name") or ""))
+        if name and name not in items:
+            items[name] = item
+    return items
+
+
+def _is_builtin(name):
+    return bool(name) and name in _builtin_items()
+
+
+def _builtin_path(name):
+    """内置工作流 JSON 路径；不是内置的返回空串"""
+    item = _builtin_items().get(name)
+    if not item:
+        return ""
+    filename = str(item.get("file") or "") or f"{name}.json"
+    return os.path.join(_BUILTIN_DIR, filename)
+
+
+def _builtin_fields_path(name):
+    return os.path.join(_BUILTIN_DIR, f"{name}.fields.json")
+
+
+def _field_file_candidates(name):
+    """字段配置文件候选：用户目录有同名工作流时只认用户的，否则先内置后备用户"""
+    candidates = []
+    if not os.path.isfile(_workflow_path(name)):
+        candidates.append(_builtin_fields_path(name))
+    candidates.append(_fields_path(name))
+    return candidates
+
+
 def _is_api_workflow(data):
     """ComfyUI API 格式：{node_id: {"class_type": ..., "inputs": {...}}}"""
     if not isinstance(data, dict) or not data:
@@ -120,6 +189,7 @@ WORKFLOW_CATEGORIES = (
     "参考生视频",
     "图像放大",
     "图像反推",
+    "文生音乐",
 )
 _DEFAULT_WORKFLOW_CATEGORY = WORKFLOW_CATEGORIES[0]
 
@@ -150,6 +220,18 @@ _CATEGORY_HINTS = {
         "superresolution",
     ),
 }
+_AUDIO_OUTPUT_HINTS = (
+    "saveaudio",
+    "yue2",
+    "minimaxmusic",
+    "stableaudio",
+    "acestep",
+    "ace_step",
+    "musicgen",
+    "audiogen",
+    "texttoaudio",
+    "latentaudio",
+)
 _VIDEO_OUTPUT_HINTS = (
     "savevideo",
     "videocombine",
@@ -169,7 +251,7 @@ def _normalize_category(value):
 
 
 def _detect_workflow_category(workflow):
-    """按节点类名猜分类：取标题/打标签 → 放大 → 视频（有无参考图）→ 图像（有无参考图）"""
+    """按节点类名猜分类：音频 → 取标题/打标签 → 放大 → 视频（有无参考图）→ 图像（有无参考图）"""
     classes = []
     if isinstance(workflow, dict):
         for node in workflow.values():
@@ -180,6 +262,10 @@ def _detect_workflow_category(workflow):
 
     def has(hints):
         return any(hint in name for name in classes for hint in hints)
+
+    # 音频优先：文生音乐工作流也可能带 PreviewImage 之类的节点
+    if has(_AUDIO_OUTPUT_HINTS):
+        return "文生音乐"
 
     for category in ("图像反推", "图像放大"):
         if has(_CATEGORY_HINTS[category]):
@@ -196,40 +282,74 @@ def _detect_workflow_category(workflow):
 
 
 def _list_workflows():
+    """全部工作流：用户自己的按拖拽顺序排在前面，内置的（只读）固定压尾"""
     workflow_dir = _workflow_dir()
-    if not os.path.isdir(workflow_dir):
-        return []
     workflow_categories = _load_settings().get("workflow_categories") or {}
     items = []
-    for filename in sorted(os.listdir(workflow_dir)):
-        if not filename.lower().endswith(".json"):
+    user_names = set()
+    if os.path.isdir(workflow_dir):
+        for filename in sorted(os.listdir(workflow_dir)):
+            if not filename.lower().endswith(".json"):
+                continue
+            # <名称>.fields.json 是字段配置，不是工作流
+            if filename.lower().endswith(".fields.json"):
+                continue
+            path = os.path.join(workflow_dir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+            except Exception:
+                continue
+            name = filename[:-5]
+            category = _normalize_category(workflow_categories.get(name))
+            if not category:
+                category = _detect_workflow_category(data)
+            user_names.add(name)
+            items.append(
+                {
+                    "name": name,
+                    "nodes": len(data) if isinstance(data, dict) else 0,
+                    "updated": int(os.path.getmtime(path)),
+                    "category": category,
+                    "builtin": False,
+                }
+            )
+
+    builtin_rank = {}
+    for index, (name, entry) in enumerate(_builtin_items().items()):
+        # 用户自己导入过同名工作流时以用户的为准，内置那份就不列了
+        if name in user_names:
             continue
-        # <名称>.fields.json 是字段配置，不是工作流
-        if filename.lower().endswith(".fields.json"):
+        path = _builtin_path(name)
+        if not path or not os.path.isfile(path):
             continue
-        path = os.path.join(workflow_dir, filename)
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
         except Exception:
             continue
-        name = filename[:-5]
-        category = _normalize_category(workflow_categories.get(name))
-        if not category:
-            category = _detect_workflow_category(data)
+        builtin_rank[name] = index
         items.append(
             {
                 "name": name,
                 "nodes": len(data) if isinstance(data, dict) else 0,
                 "updated": int(os.path.getmtime(path)),
-                "category": category,
+                "category": _normalize_category(entry.get("category"))
+                or _detect_workflow_category(data),
+                "builtin": True,
             }
         )
 
-    # 用户拖拽调整过的顺序优先，其余（新增的）按名称排在后面
+    # 用户拖拽调整过的顺序优先，其余（新增的）按名称排在后面；内置固定压尾
     order = _load_settings().get("workflow_order", [])
     ranked = {name: index for index, name in enumerate(order)}
-    items.sort(key=lambda item: (ranked.get(item["name"], len(ranked)), item["name"]))
+
+    def sort_key(item):
+        if item.get("builtin"):
+            return (1, builtin_rank.get(item["name"], 0), "")
+        return (0, ranked.get(item["name"], len(ranked)), item["name"])
+
+    items.sort(key=sort_key)
     return items
 
 
@@ -239,6 +359,8 @@ def _load_settings():
         "workflow_order": [],
         "fab_position": None,
         "workflow_categories": {},
+        "builtin_installed": {},
+        "builtin_migrated": 0,
     }
     path = _settings_path()
     if os.path.isfile(path):
@@ -269,11 +391,29 @@ def _load_settings():
                     for name, category in categories.items()
                     if name and str(category) in WORKFLOW_CATEGORIES
                 }
+            installed = data.get("builtin_installed")
+            if isinstance(installed, dict):
+                clean = {}
+                for name, version in installed.items():
+                    try:
+                        clean[str(name)] = int(version)
+                    except (TypeError, ValueError):
+                        continue
+                settings["builtin_installed"] = clean
+            try:
+                settings["builtin_migrated"] = int(data.get("builtin_migrated") or 0)
+            except (TypeError, ValueError):
+                settings["builtin_migrated"] = 0
     return settings
 
 
 def _save_settings(
-    address=None, workflow_order=None, fab_position=None, workflow_categories=None
+    address=None,
+    workflow_order=None,
+    fab_position=None,
+    workflow_categories=None,
+    builtin_installed=None,
+    builtin_migrated=None,
 ):
     settings = _load_settings()
     if address is not None:
@@ -284,6 +424,10 @@ def _save_settings(
         settings["fab_position"] = fab_position
     if workflow_categories is not None:
         settings["workflow_categories"] = dict(workflow_categories)
+    if builtin_installed is not None:
+        settings["builtin_installed"] = dict(builtin_installed)
+    if builtin_migrated is not None:
+        settings["builtin_migrated"] = int(builtin_migrated)
     os.makedirs(_data_dir(), exist_ok=True)
     with open(_settings_path(), "w", encoding="utf-8") as handle:
         json.dump(settings, handle, ensure_ascii=False, indent=2)
@@ -299,6 +443,69 @@ def _set_workflow_category(name, category):
         categories.pop(name, None)
     _save_settings(workflow_categories=categories)
     return categories
+
+
+# ---------------------------------------------------------------- 内置工作流（迁移）
+# 旧版本会把内置工作流 copy 进用户 workflows 目录，用户既能改也能删，和
+# 「内置不可更改」冲突。现在内置工作流直接从 _BUILTIN_DIR 只读加载（见文件开头
+# 的 _builtin_* 系列），这里只负责把当年复制出去的副本收回。
+_builtin_state = {"done": False}
+
+
+def _ensure_builtin_workflows():
+    """清理旧版本复制到用户目录的内置副本（幂等，失败下轮重试）
+
+    只删「settings 里 builtin_installed 记过的」名字：那是插件自己装的。
+    用户自己导入的同名工作流没有记录，保留不动（列表里以用户的为准）。
+    """
+    if _builtin_state["done"]:
+        return
+    manifest = _builtin_manifest()
+    if not manifest:
+        _builtin_state["done"] = True
+        return
+    try:
+        version = int(manifest.get("version") or 1)
+    except (TypeError, ValueError):
+        version = 1
+    settings = _load_settings()
+    if settings.get("builtin_migrated") == version:
+        _builtin_state["done"] = True
+        return
+    installed = dict(settings.get("builtin_installed") or {})
+    builtin_names = set(_builtin_items())
+    for name in builtin_names:
+        if name not in installed:
+            continue
+        for path in (_workflow_path(name), _fields_path(name)):
+            if not os.path.isfile(path):
+                continue
+            try:
+                os.remove(path)
+            except Exception as exc:  # pragma: no cover - 只可能是磁盘权限问题
+                print(f"[XXXXXLCat] 清理内置工作流旧副本失败 {name}: {exc}")
+    # 顺带把内置名字从排序 / 分类表里摘掉：内置工作流的顺序由清单决定
+    order = [name for name in settings.get("workflow_order") or [] if name not in builtin_names]
+    if order != (settings.get("workflow_order") or []):
+        _save_settings(workflow_order=order)
+    categories = {
+        name: category
+        for name, category in (settings.get("workflow_categories") or {}).items()
+        if name not in builtin_names
+    }
+    if categories != (settings.get("workflow_categories") or {}):
+        _save_settings(workflow_categories=categories)
+    _save_settings(builtin_migrated=version)
+    _builtin_state["done"] = True
+
+
+def _builtin_readonly(name):
+    """内置工作流的统一拒绝响应（写操作一律挡住）"""
+    from aiohttp import web  # 模块级不依赖 aiohttp，跟 setup() 里一样按需导入
+
+    return web.json_response(
+        {"error": f"「{name}」是内置工作流，只读，不能修改或删除"}, status=403
+    )
 
 
 def _comfy_base(request):
@@ -737,15 +944,18 @@ def _extract_prompt_text(data):
 
 
 def _read_workflow(name):
-    """读取工作流 JSON，不存在或解析失败返回 None"""
-    path = _workflow_path(name)
-    if not name or not os.path.isfile(path):
+    """读取工作流 JSON，不存在或解析失败返回 None（用户目录优先，其次内置）"""
+    if not name:
         return None
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except Exception:
-        return None
+    for path in (_workflow_path(name), _builtin_path(name)):
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception:
+            return None
+    return None
 
 
 # ---------------------------------------------------------------- 字段配置
@@ -837,16 +1047,17 @@ def _fields_path(name):
 
 
 def _load_fields(name):
-    path = _fields_path(name)
-    if not os.path.isfile(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except Exception:
-        return []
-    fields = raw.get("fields") if isinstance(raw, dict) else None
-    return [item for item in fields if isinstance(item, dict)] if isinstance(fields, list) else []
+    for path in _field_file_candidates(name):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+        except Exception:
+            return []
+        fields = raw.get("fields") if isinstance(raw, dict) else None
+        return [item for item in fields if isinstance(item, dict)] if isinstance(fields, list) else []
+    return []
 
 
 def _clean_fields(raw, workflow):
@@ -945,7 +1156,14 @@ def _public_fields(name, workflow):
     result = []
     for field in fields:
         node = workflow.get(field["nodeId"]) or {}
-        value = _resolution_value((node.get("inputs") or {}).get(field["key"]))
+        inputs = node.get("inputs") or {}
+        value = _resolution_value(inputs.get(field["key"]))
+        # 音频保存格式：码率存在「format.quality」这个扁平键里，
+        # 合成一个字符串返回（flac / mp3:320k / opus:96k），前端只认这一个值。
+        if field["key"] == "format" and isinstance(value, str):
+            quality = inputs.get("format.quality")
+            if isinstance(quality, str) and quality:
+                value = f"{value}:{quality}"
         field["default"] = value if isinstance(value, (str, int, float, bool, list)) else ""
         result.append(field)
     # 把「关闭自动填入」的记录也返回，配置页保存时会原样带回；
@@ -1414,6 +1632,23 @@ def _apply_params(workflow, params):
         if not isinstance(inputs, dict):
             continue
         for key, value in values.items():
+            # SaveAudioAdvanced 的 format 是 DynamicCombo：主值是 flac / mp3 / opus，
+            # 码率在 API 提示词里是**扁平的「format.quality」键**（不是嵌套对象）。
+            # 画布上收成一个字符串（flac、mp3:320k、opus:96k），这里拆开写回。
+            if (
+                key == "format"
+                and isinstance(value, str)
+                and "filename_prefix" in inputs
+                and "audio" in inputs
+            ):
+                file_format, _, quality = value.partition(":")
+                if file_format:
+                    inputs["format"] = file_format
+                    if quality:
+                        inputs["format.quality"] = quality
+                    else:
+                        inputs.pop("format.quality", None)
+                continue
             if key not in inputs:
                 continue
             current = inputs[key]
@@ -1871,6 +2106,7 @@ def register_routes(app):
         )
 
     async def list_workflows(request):
+        _ensure_builtin_workflows()
         return web.json_response({"workflows": _list_workflows()})
 
     async def reorder_workflows(request):
@@ -1882,7 +2118,12 @@ def register_routes(app):
         if not isinstance(names, list):
             return web.json_response({"error": "缺少 names 顺序列表"}, status=400)
         known = {item["name"] for item in _list_workflows()}
-        order = [str(name) for name in names if str(name) in known]
+        # 内置工作流的位置由清单决定，不参与用户的拖拽顺序
+        order = [
+            str(name)
+            for name in names
+            if str(name) in known and not _is_builtin(str(name))
+        ]
         _save_settings(workflow_order=order)
         return web.json_response({"workflows": _list_workflows()})
 
@@ -2090,6 +2331,9 @@ def register_routes(app):
                 {"error": "不是 ComfyUI API 格式工作流（需为 {节点id: {class_type, inputs}}）"},
                 status=400,
             )
+        # 内置工作流的名字是保留名：不允许用导入 / 保存的方式覆盖它
+        if _is_builtin(name):
+            return _builtin_readonly(name)
         # 导入时没指定分类就按节点猜一个，用户随后可在「工作流配置」里改
         category = _normalize_category(payload.get("category"))
         if not category:
@@ -2103,6 +2347,8 @@ def register_routes(app):
         name = _safe_name(request.match_info.get("name", ""))
         if _read_workflow(name) is None:
             return web.json_response({"error": "工作流不存在"}, status=404)
+        if _is_builtin(name):
+            return _builtin_readonly(name)
         try:
             payload = await request.json()
         except Exception:
@@ -2126,6 +2372,8 @@ def register_routes(app):
         name = _safe_name(request.match_info.get("name", ""))
         if _read_workflow(name) is None:
             return web.json_response({"error": "工作流不存在"}, status=404)
+        if _is_builtin(name):
+            return _builtin_readonly(name)
         os.remove(_workflow_path(name))
         _delete_fields(name)
         _set_workflow_category(name, "")
@@ -2140,6 +2388,8 @@ def register_routes(app):
         old = _safe_name(request.match_info.get("name", ""))
         if _read_workflow(old) is None:
             return web.json_response({"error": "工作流不存在"}, status=404)
+        if _is_builtin(old):
+            return _builtin_readonly(old)
         try:
             payload = await request.json()
         except Exception:
@@ -2147,6 +2397,8 @@ def register_routes(app):
         new = _safe_name(str(payload.get("name", "") or ""))
         if not new:
             return web.json_response({"error": "缺少新名称"}, status=400)
+        if _is_builtin(new):
+            return _builtin_readonly(new)
         if new != old:
             if _read_workflow(new) is not None:
                 return web.json_response(
@@ -2180,6 +2432,9 @@ def register_routes(app):
         workflow = _read_workflow(name)
         if workflow is None:
             return web.json_response({"error": "工作流不存在"}, status=404)
+        # 内置工作流暴露哪些字段是插件定好的，用户改不了
+        if _is_builtin(name):
+            return _builtin_readonly(name)
         try:
             payload = await request.json()
         except Exception:

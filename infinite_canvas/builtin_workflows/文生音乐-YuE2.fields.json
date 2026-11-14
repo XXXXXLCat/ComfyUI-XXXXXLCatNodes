@@ -1,0 +1,51 @@
+{
+  "fields": [
+    {
+      "nodeId": "33:36",
+      "key": "value",
+      "type": "textarea",
+      "label": "风格提示词"
+    },
+    {
+      "nodeId": "33:37",
+      "key": "value",
+      "type": "textarea",
+      "label": "歌词"
+    },
+    {
+      "nodeId": "33:25",
+      "key": "max_duration",
+      "type": "number",
+      "label": "最大时长",
+      "min": 5,
+      "max": 600,
+      "step": 5
+    },
+    {
+      "nodeId": "33:34",
+      "key": "seed",
+      "type": "random",
+      "label": "随机种子",
+      "min": 0,
+      "max": 9007199254740991,
+      "step": 1
+    },
+    {
+      "nodeId": "10",
+      "key": "format",
+      "type": "select",
+      "label": "保存音频类型",
+      "options": [
+        "flac",
+        "mp3:V0",
+        "mp3:128k",
+        "mp3:320k",
+        "opus:64k",
+        "opus:96k",
+        "opus:128k",
+        "opus:192k",
+        "opus:320k"
+      ]
+    }
+  ]
+}
