@@ -327,6 +327,26 @@ import {
     "首帧":     [{ kind: "image" }],
     "首尾帧":   [{ kind: "image" }, { kind: "image" }],
   };
+  /* Audio generator accepts AUDIO + TEXT only — images and videos are refused
+     at connect time (isValidConnection + onConnect), not merely mode-blocked.
+     Audio belongs to the two reference-based modes (音乐翻唱 / 语音克隆) and at
+     most ONE clip; the two pure-prompt modes take no media at all. A wired
+     text node is a PROMPT, never a media asset: it feeds the FIRST area
+     (提示词 / 语气), never 歌词 / 朗读文本. */
+  const AUDIO_INPUT_RULES = {
+    "音乐设计": {},
+    "音乐翻唱": { audio: { min: 0, max: 1 } },
+    "语音设计": {},
+    "语音克隆": { audio: { min: 0, max: 1 } },
+  };
+  const AUDIO_MODES = Object.keys(AUDIO_INPUT_RULES);
+  function isAudioGenData(data) {
+    return !!data && (data.role === "gen-audio" || (data.role === "gen" && data.kind === "audio"));
+  }
+  /* The reference modes that own the audio input, per family. */
+  function audioRefMode(mode) {
+    return String(mode || "").indexOf("音乐") === 0 ? "音乐翻唱" : "语音克隆";
+  }
   function isVideoGenData(data) {
     return !!data && (data.role === "gen-video" || (data.role === "gen" && data.kind === "video"));
   }
@@ -366,13 +386,17 @@ import {
   /* Single source of truth: given the counts of wired assets per kind, decide
      whether `mode` is selectable. Returns "" when OK, else the reason.
      Checks BOTH bounds: kinds the mode doesn't allow, required counts (min)
-     and caps (max) — so 1 image does NOT qualify for 首尾帧 (needs 2). */
-  function modeReasonFor(mode, counts) {
-    const rules = VIDEO_INPUT_RULES[mode] || VIDEO_INPUT_RULES["文生视频"];
+     and caps (max) — so 1 image does NOT qualify for 首尾帧 (needs 2).
+     `table` picks the rule set (video / audio generator); an unknown mode falls
+     back to an EMPTY rule set = pure-prompt mode. `denyText` lets the caller
+     word the "kind not accepted here" case per node type. */
+  function modeReasonFor(mode, counts, table = VIDEO_INPUT_RULES, denyText = null) {
+    const rules = table[mode] || {};
     /* Any wired kind this mode forbids? (metadata keys start with "_") */
     for (const kind of Object.keys(counts)) {
       if (!counts[kind]) continue;
       if (!kind.startsWith("_") && !(kind in rules)) {
+        if (denyText) return denyText(kind, mode);
         const allowed = Object.keys(rules).filter((k) => !k.startsWith("_")).map((k) => KIND_CN[k]?.label || k).join("、");
         /* Empty rule set (文生视频) accepts no media at all — it's the pure
            prompt mode. */
@@ -1283,14 +1307,51 @@ import {
          right-hand widget — into the workflow's REAL node inputs at run time.
          Templates that carry no {{placeholders}} (MiniMax music, voice design)
          therefore still receive what the user typed. */
-      const AUDIO_MODES = ["音乐设计", "音乐翻唱", "语音设计", "语音克隆"];
+      /* AUDIO_MODES / AUDIO_INPUT_RULES live at module level: the same table
+         gates the tabs here and the wires in onConnect. */
       const audioModes = AUDIO_MODES;
       const isGenAudio = computed(() => isGen && kind.value === "audio");
       const audioMode = computed(() => (AUDIO_MODES.indexOf(data.audioMode) >= 0
         ? data.audioMode : AUDIO_MODES[0]));
       const audioFamily = computed(() => (String(audioMode.value).indexOf("音乐") === 0 ? "music" : "voice"));
+      /* Wired inputs of the audio generator: audio clips (max 1) and text nodes
+         (prompts). Read straight from the edge store so the tabs react the
+         moment a wire is added or removed. */
+      const audioWired = computed(() => {
+        const out = { audio: [], text: [] };
+        if (!isGenAudio.value) return out;
+        const nodes = NS.flow?.nodesOf?.() || [];
+        const edges = NS.flow?.edgesOf?.() || [];
+        const seen = new Set();
+        for (const edge of edges) {
+          if (edge.target !== props.id || seen.has(edge.source)) continue;
+          seen.add(edge.source);
+          const src = nodes.find((n) => n.id === edge.source);
+          const srcKind = assetKindOf(src);
+          if (srcKind === "audio") out.audio.push(src);
+          else if (srcKind === "text") out.text.push(src);
+        }
+        return out;
+      });
+      const wiredAudio = computed(() => audioWired.value.audio);
+      const wiredTextNodes = computed(() => audioWired.value.text);
+      /* Every wired text node's content, joined. Feeds the FIRST area
+         (提示词 / 语气) at run time — never 歌词 / 朗读文本. */
+      const wiredText = computed(() => wiredTextNodes.value
+        .map((n) => String(n.data?.text || "").trim()).filter(Boolean).join("\n\n"));
+      const audioCounts = computed(() => (wiredAudio.value.length ? { audio: wiredAudio.value.length } : {}));
+      const audioModeReason = (mode) => modeReasonFor(mode, audioCounts.value, AUDIO_INPUT_RULES,
+        (badKind, target) => (badKind === "audio"
+          ? `「${target}」不接入音频，请切换到音乐翻唱或语音克隆`
+          : `「${target}」不接入${KIND_CN[badKind]?.label || "媒体素材"}`));
+      const audioModeAvailable = (mode) => !audioModeReason(mode);
       const setAudioMode = (mode) => {
         if (AUDIO_MODES.indexOf(mode) < 0 || mode === audioMode.value) return;
+        const reason = audioModeReason(mode);
+        if (reason) {
+          NS.api?.toast?.("warning", "该模式不可选", reason);
+          return;
+        }
         patch({ audioMode: mode });
       };
       const audioSlots = computed(() => (audioFamily.value === "music"
@@ -1923,6 +1984,7 @@ import {
         workflows, workflowLabels, sizePresets, sizeValue, setSize,
         isGenVideo, videoModes, videoMode, setVideoMode, modeAvailable, modeReason, incomingAssets, assetSlots, slotHint,
         isGenAudio, audioModes, audioMode, setAudioMode, audioSlots, audioFamily,
+        audioModeReason, audioModeAvailable, wiredAudio, wiredTextNodes, wiredText,
         apiFields, apiBarFields, fieldId, fieldValue, setFieldValue,
         previewKey, onAssetEnter, onAssetLeave, previewMetaDuration, onPreviewMeta, videoThumbs, wfList,
         selOpen, toggleSel, pickSel, wfValue, wfLabel, sizeLabel,
@@ -2152,14 +2214,18 @@ import {
              @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
           <div class="icn__gpv-modes">
             <button v-for="m in audioModes" :key="m" class="icn__gpv-mode"
-                    :class="{ 'is-on': audioMode === m }" type="button"
-                    :title="'切换到' + m" @click.stop="setAudioMode(m)">{{ m }}</button>
+                    :class="{ 'is-on': audioMode === m, 'is-disabled': !audioModeAvailable(m) }"
+                    :title="audioModeReason(m) || ('切换到' + m)" type="button"
+                    @click.stop="setAudioMode(m)">{{ m }}</button>
           </div>
           <div class="icn__gpa-inputs">
             <label class="icn__gpa-box">
-              <span class="icn__gpa-label">{{ audioSlots.a.label }}</span>
+              <span class="icn__gpa-label">{{ audioSlots.a.label }}
+                <span v-if="wiredTextNodes.length" class="icn__gpa-wired"
+                      :title="wiredText">· 文本节点已接入</span>
+              </span>
               <textarea class="icn__gpa-area icn__gpa-area--a" :value="data.prompt"
-                        :placeholder="audioSlots.a.ph" spellcheck="false"
+                        :placeholder="wiredText || audioSlots.a.ph" spellcheck="false"
                         @input="setField('prompt', $event.target.value)"
                         @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
             </label>
@@ -2850,6 +2916,9 @@ import {
 .icn__gpa-inputs { display:flex; flex-direction:column; gap:8px; margin-bottom:9px; }
 .icn__gpa-box { display:flex; flex-direction:column; gap:4px; min-width:0; }
 .icn__gpa-label { font-size:10px; line-height:1.4; color:var(--ic-soft, #8a8a8a); }
+/* Wired text node marker: the text is a PROMPT, it feeds this first area at
+   run time (never the lyrics / reading-text area below). */
+.icn__gpa-wired { color:var(--ic-brand, #0b8ce9); white-space:nowrap; }
 .icn__gpa-area { box-sizing:border-box; width:100%; padding:8px; resize:none; border:0; outline:none;
   border-radius:var(--icnw-r, 6px); background:var(--icnw-bg, #313235); color:var(--ic-text, #ffffff);
   font-family:inherit; font-size:12px; line-height:1.55; text-align:left; cursor:text; }
@@ -3043,6 +3112,33 @@ import {
         NS.flow?.onViewport?.(viewport);
       };
 
+      /* Audio generator gate, shared by the drag-time visual check and the
+         authoritative onConnect check. Returns "" when the wire is allowed. */
+      const audioWireReason = (targetId, sourceId) => {
+        const nodes = state.nodes.value;
+        const source = nodes.find((n) => n.id === sourceId);
+        const srcKind = assetKindOf(source);
+        if (srcKind !== "audio" && srcKind !== "text") {
+          return "音频生成节点只能接入音频或文本素材";
+        }
+        if (srcKind === "text") return "";
+        const wired = state.edges.value.filter((e) => e.target === targetId
+          && assetKindOf(nodes.find((n) => n.id === e.source)) === "audio");
+        if (wired.some((e) => e.source === sourceId)) return "";
+        if (wired.length >= 1) return "音频只能接入 1 个，请先断开已连接的音频";
+        return "";
+      };
+      /* Reject invalid drops at DRAG time so the handle turns invalid instead of
+         silently swallowing the wire. onConnect re-checks — this prop is UX
+         only (drops, restores and loaded canvases bypass it). */
+      const isValidConnection = (conn) => {
+        const targetId = conn?.target?.id ?? conn?.target;
+        const sourceId = conn?.source?.id ?? conn?.source;
+        const target = state.nodes.value.find((n) => n.id === targetId);
+        if (!isAudioGenData(target?.data)) return true;
+        return !audioWireReason(targetId, sourceId);
+      };
+
       const onConnect = (params) => {
         /* Wires are ALWAYS accepted. The assets wired in decide which modes
            stay selectable (modeAvailable) — a mode choice never cuts a wire.
@@ -3050,6 +3146,27 @@ import {
            wire again is a no-op, so it always counts as one connection. */
         const key = String(params.source) + "→" + String(params.target);
         if (state.edges.value.some((e) => edgeKey(e) === key)) return;
+        const nodes = state.nodes.value;
+        const targetNode = nodes.find((n) => n.id === params.target);
+        /* Audio generator: audio + text only, at most one audio clip, and
+           audio only lives in the two reference modes — switch there instead of
+           dropping the wire the user just drew. */
+        if (isAudioGenData(targetNode?.data)) {
+          const reason = audioWireReason(params.target, params.source);
+          if (reason) {
+            NS.api?.toast?.("warning", "无法接入", reason);
+            return;
+          }
+          const srcKind = assetKindOf(nodes.find((n) => n.id === params.source));
+          if (srcKind === "audio") {
+            const mode = targetNode.data.audioMode || AUDIO_MODES[0];
+            if (!AUDIO_INPUT_RULES[mode]?.audio) {
+              const next = audioRefMode(mode);
+              NS.flow?.updateNodeData?.(params.target, { audioMode: next });
+              NS.api?.toast?.("info", "已切换到" + next, `「${mode}」不接入音频，连线已保留`);
+            }
+          }
+        }
         state.edges.value = state.edges.value.concat([{
           id: "e_" + Math.random().toString(36).slice(2, 10),
           source: params.source, sourceHandle: params.sourceHandle || "out",
@@ -3058,8 +3175,6 @@ import {
         }]);
         /* If this new wire makes the generator's ACTIVE mode invalid, fall back
            to 全能参考 (accepts any asset) instead of dropping the connection. */
-        const nodes = state.nodes.value;
-        const targetNode = nodes.find((n) => n.id === params.target);
         if (isVideoGenData(targetNode?.data)) {
           const mode = targetNode.data.videoMode || "文生视频";
           const counts = incomingKindCounts(params.target, state.edges.value, nodes);
@@ -3295,7 +3410,7 @@ import {
       watch([state.nodes, state.edges], () => { NS.flow?.history?.schedule?.(); }, { deep: true });
 
       return {
-        gridCanvas, mode, showMinimap, onInit, onViewportChange, onConnect,
+        gridCanvas, mode, showMinimap, onInit, onViewportChange, onConnect, isValidConnection,
         onNodeDragStop, onNodeClick, onSelectionChange,
         zoomFar, cutMode, cutTrail,
         /* Vue Flow clamps d3-zoom's scaleExtent from these two props; leaving
@@ -3326,6 +3441,7 @@ import {
         :default-edge-options="{ type: 'ic' }"
         :class="['ic-flow', 'mode-' + mode, { 'is-far': zoomFar, 'is-cut-mode': cutMode }]"
         @init="onInit" @viewport-change="onViewportChange" @connect="onConnect"
+        :is-valid-connection="isValidConnection"
         @node-drag-stop="onNodeDragStop" @node-click="onNodeClick" @selection-change="onSelectionChange"
       >
         <div v-if="showMinimap" class="ic-minimap-wrap nodrag">

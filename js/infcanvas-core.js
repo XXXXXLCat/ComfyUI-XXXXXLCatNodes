@@ -824,11 +824,13 @@
      Both deliberately OVERWRITE the template value: an explicit user value
      beats whatever default the workflow file shipped with. Unlinked inputs only
      — a linked input (["node", 0]) is data, not a parameter. */
-  function applyNodeInputs(target, data) {
+  function applyNodeInputs(target, data, areaA) {
     if (!target || typeof target !== "object") return;
     const writes = [];
     const map = data?.audioMap || {};
-    if (map.a) writes.push([map.a, data.prompt ?? ""]);
+    /* `areaA` is the first input area INCLUDING any wired text node, so a text
+       wire reaches the workflow even when the user typed nothing. */
+    if (map.a) writes.push([map.a, areaA ?? data.prompt ?? ""]);
     if (map.b) writes.push([map.b, data.lyrics ?? ""]);
     for (const [id, value] of Object.entries(data?.apiValues || {})) writes.push([id, value]);
     for (const [id, value] of writes) {
@@ -852,6 +854,10 @@
     const text = inputs.filter((entry) => entry.kind === "text")
       .map((entry) => entry.text || entry.asset?.name || "").filter(Boolean).join("\n");
     const promptText = [data.prompt || "", text].filter(Boolean).join("\n") || "a photo";
+    /* The audio generator's FIRST area (提示词 / 语气) is what a wired text node
+       feeds. Typed text wins the first line, wired prompts are appended — that
+       is the only place wired text is allowed to land (never 歌词 / 朗读文本). */
+    const areaA = [data.prompt || "", text].filter(Boolean).join("\n");
     if (image && image.type !== "input") {
       throw new Error("图像素材需来自 input 目录；请先把该素材拖入画布上传一次");
     }
@@ -865,7 +871,7 @@
       /* Audio generator aliases: the second area is 歌词 (music) / 朗读文本
          (voice), the first one doubles as 语气 for voice templates. */
       lyrics: data.lyrics || "",
-      tone: data.prompt || "",
+      tone: areaA,
       seed: Number(data.seed) || Math.floor(Math.random() * 1000000000),
       steps: Number(data.steps) || 20,
       width: Number(data.width) || 512,
@@ -892,7 +898,7 @@
     /* Audio panel values beat the template's own defaults. Applied AFTER the
        placeholder pass so the user's own text is never scanned for {{tokens}}
        (a lyric may legitimately contain braces). */
-    applyNodeInputs(prompt, data);
+    applyNodeInputs(prompt, data, areaA);
     if (image && prompt["3"]?.inputs && prompt["4"] && prompt["5"]) {
       prompt["1001"] = { class_type: "LoadImage", inputs: { image: values.image } };
       prompt["1002"] = { class_type: "VAEEncode", inputs: { pixels: ["1001", 0], vae: ["4", 2] } };
@@ -975,7 +981,10 @@
         return;
       }
       let prompt;
-      try { prompt = await buildPrompt(kind, template, data, collectInputs(data)); }
+      /* collectInputs walks edges by NODE id, so it needs the node, not its
+         data object (data has no id — passing it silently yielded zero
+         wired inputs, so {{image}}/{{text}}/{{audio}} were always empty). */
+      try { prompt = await buildPrompt(kind, template, data, collectInputs(node)); }
       catch (error) { toast("error", "构建工作流失败", String(error)); return; }
       data.status = "running";
       data.error = "";
