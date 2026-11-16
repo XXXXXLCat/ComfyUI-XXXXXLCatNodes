@@ -1,11 +1,11 @@
 // Minimal CDP driver for the local headless Chrome (port 9222).
 // usage:
-//   node tools/_cdp.mjs eval        (JS from stdin, awaited, result printed)
-//   node tools/_cdp.mjs shot <png>
-//   node tools/_cdp.mjs click <x> <y> [button]
-//   node tools/_cdp.mjs move <x> <y>
-//   node tools/_cdp.mjs wheel <x> <y> <deltaY>
-//   node tools/_cdp.mjs navigate <url>
+//   node tools/cdp/cdp.mjs eval        (JS from stdin, awaited, result printed)
+//   node tools/cdp/cdp.mjs shot <png>
+//   node tools/cdp/cdp.mjs click <x> <y> [button]
+//   node tools/cdp/cdp.mjs move <x> <y>
+//   node tools/cdp/cdp.mjs wheel <x> <y> <deltaY>
+//   node tools/cdp/cdp.mjs navigate <url>
 import fs from "node:fs";
 
 const [, , command, ...args] = process.argv;

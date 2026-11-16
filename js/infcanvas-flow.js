@@ -5,7 +5,7 @@
    components, media are real <img>/<video>/<audio> elements, panning and zooming
    come from d3-zoom. ComfyUI never exposes window.Vue and the extension cannot
    resolve npm modules, so Vue and Vue Flow are compiled into
-   ./vendor/vueflow.bundle.mjs (see tools/vuebuild/entry.js).
+   ./vendor/vueflow.bundle.mjs (see tools/build/entry.js).
 
    Asset nodes now follow E:/Workspace/Workspace-XXXXXLCatNodes/infinite_canvas
    (the "infinite_canvas" frontend) numerically, not approximately:

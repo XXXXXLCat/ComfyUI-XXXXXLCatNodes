@@ -11,6 +11,9 @@
 .tmp-chrome*/
 .tmp-src/
 
+# ---- ComfyUI 前端源码参考（GPL-3.0，只作查阅，不随项目分发）----
+docs/reference/
+
 # ---- ComfyUI 前端源码 dump（研究用，需要时从 sourcemap 重新提取）----
 _src/
 _src2/

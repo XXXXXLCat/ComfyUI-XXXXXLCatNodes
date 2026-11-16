@@ -1,5 +1,5 @@
 // Collect console errors / uncaught exceptions while reloading and entering
-// canvas mode. usage: node tools/_cdp-check.mjs [ms]
+// canvas mode. usage: node tools/cdp/cdp-check.mjs [ms]
 const waitMs = Number(process.argv[2] || 15000);
 
 const targets = await (await fetch("http://127.0.0.1:9222/json")).json();
