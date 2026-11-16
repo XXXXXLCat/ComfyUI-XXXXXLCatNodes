@@ -1,0 +1,10 @@
+[project]
+name = "comfyui-infinite-canvas"
+version = "0.1.0"
+description = "Embedded infinite canvas mode for ComfyUI"
+license = "MIT"
+requires-python = ">=3.10"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Infinite Canvas"

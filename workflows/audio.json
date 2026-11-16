@@ -1,0 +1,6 @@
+{
+  "_requires_config": true,
+  "kind": "audio",
+  "name": "生成音频",
+  "hint": "把你的文生音频工作流导出为 API 格式 JSON 覆盖本文件。可用占位符：{{prompt}} {{seed}} {{steps}} {{text}} {{audio}} {{image}}。"
+}

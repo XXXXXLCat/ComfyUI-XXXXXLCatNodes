@@ -1,0 +1,29 @@
+# ---- 本地备份（磁盘上保留，不进版本库）----
+.backup/
+
+# ---- 会话临时产物（截图 / CDP 脚本输出）----
+.workbuddy/tmp/
+.workbuddy/projects/
+
+# ---- 浏览器调试 profile，统一收在 .cache/ ----
+.cache/
+.chrome-profile/
+.tmp-chrome*/
+.tmp-src/
+
+# ---- ComfyUI 前端源码 dump（研究用，需要时从 sourcemap 重新提取）----
+_src/
+_src2/
+_src3/
+_src4/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- Node ----
+node_modules/
+
+# ---- 系统 ----
+Thumbs.db
+.DS_Store

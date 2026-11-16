@@ -1,0 +1,6 @@
+{
+  "_requires_config": true,
+  "kind": "text",
+  "name": "生成文本",
+  "hint": "把你的文本生成工作流（或 API 节点）导出为 API 格式 JSON 覆盖本文件。可用占位符：{{prompt}} {{text}} {{seed}}。输出中会寻找 text/string 字段作为结果。"
+}
