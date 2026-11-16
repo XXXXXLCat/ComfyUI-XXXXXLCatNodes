@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const child = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + PORT,
     '--window-size=1600,1000', '--hide-scrollbars',
-    '--user-data-dir=' + ROOT + '/.workbuddy/tmp/a-shot-profile', 'http://127.0.0.1:8188/'], { stdio: 'ignore' });
+    '--user-data-dir=' + ROOT + '/.cache/cdp-profile', 'http://127.0.0.1:8188/'], { stdio: 'ignore' });
   let list = null;
   for (let i = 0; i < 60 && !list; i += 1) { await sleep(300); try { list = JSON.parse(await get('/json/list')); } catch (e) { /* wait */ } }
   const target = (list || []).find((t) => t.type === 'page' && t.url.includes('8188'));

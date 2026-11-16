@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const child = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + PORT,
     '--window-size=1440,900', '--hide-scrollbars',
-    '--user-data-dir=' + ROOT + '/.workbuddy/tmp/edge-profile', URL], { stdio: 'ignore' });
+    '--user-data-dir=' + ROOT + '/.cache/cdp-profile', URL], { stdio: 'ignore' });
   let list = null;
   for (let i = 0; i < 60 && !list; i += 1) { await sleep(300); try { list = JSON.parse(await get('/json/list')); } catch (e) { /* wait */ } }
   const target = (list || []).find((t) => t.type === 'page' && t.url.includes('8188'));

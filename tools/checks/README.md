@@ -2,10 +2,16 @@
 
 这些脚本不是单元测试，而是**实机检查**：启动无头 Chrome → 连本机 ComfyUI（默认 `http://127.0.0.1:8188`）→ 注入真实的鼠标/键盘事件 → 读 computed style 与几何 → 截图并断言。
 
-前置：ComfyUI 已在 8188 运行。脚本自带 `--user-data-dir`，截图与临时 profile 写到 `.workbuddy/tmp/`（已被 gitignore）。
+前置：ComfyUI 已在 8188 运行。所有脚本**共用一个** Chrome profile（`.cache/cdp-profile/`，约 90MB，可随时删除），截图写到 `.workbuddy/tmp/`。两个目录都已 gitignore。
 
 ```bash
 node tools/checks/check_edges.js
+```
+
+脚本跑完不会自动删 profile（下次运行复用，省去重新初始化）；想彻底清干净：
+
+```bash
+rm -rf .cache/cdp-profile .workbuddy/tmp/*.png
 ```
 
 ## 当前有效（针对 Vue Flow 引擎）

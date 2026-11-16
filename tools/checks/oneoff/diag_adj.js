@@ -12,7 +12,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const child = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + PORT,
     '--window-size=1080,600', '--hide-scrollbars',
-    '--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.workbuddy/tmp/adj-profile', URL], { stdio: 'ignore' });
+    '--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.cache/cdp-profile', URL], { stdio: 'ignore' });
   let list = null;
   for (let i = 0; i < 40 && !list; i += 1) { await sleep(250); try { list = JSON.parse(await get('/json/list')); } catch (e) { /* retry */ } }
   const t = (list || []).find((x) => x.type === 'page');

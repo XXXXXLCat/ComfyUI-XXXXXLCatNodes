@@ -177,7 +177,7 @@ mklink /J "E:\Comfy-Org\ComfyUI-Main\ComfyUI\custom_nodes\ComfyUI_InfiniteCanvas
 
 ## 开发与验证
 
-- **回归检查**：`tools/checks/*.js` 会启动无头 Chrome 连本机 ComfyUI，实机验证画布行为（连线圆点、撤销重做、@ 引用、音频面板等），截图与临时 profile 写到 `.workbuddy/tmp/`。索引见 `tools/checks/README.md`。
+- **回归检查**：`tools/checks/*.js` 会启动无头 Chrome 连本机 ComfyUI，实机验证画布行为（连线圆点、撤销重做、@ 引用、音频面板等），**共用一个** `.cache/cdp-profile/`（约 90MB，可随时删），截图写到 `.workbuddy/tmp/`。索引见 `tools/checks/README.md`。
 - **源码依据**：核对 ComfyUI 前端实现时，用 `tools/srcmap/findsrc.py` 从 sourcemap 提取到 `docs/reference/comfyui-src/`（该目录 GPL-3.0，不进版本库）。
 - **改造历史**：逐项改动与实测数据见 [docs/changelog-2026-11.md](docs/changelog-2026-11.md)。
 - **版本控制**：`git log` 可回滚到任意一次改动，`.backup/` 只是历史遗留，不再新增。

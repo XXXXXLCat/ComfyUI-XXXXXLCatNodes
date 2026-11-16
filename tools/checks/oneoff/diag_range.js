@@ -4,7 +4,7 @@ const URL='file:///E:/Workspace/Workspace-Infinite-Canvas/__dlg2_demo.html';
 const get=(p)=>new Promise((res,rej)=>{http.get({host:'127.0.0.1',port:PORT,path:p},(r)=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>res(b));}).on('error',rej);});
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
- const child=spawn(CHROME,['--headless=new','--remote-debugging-port='+PORT,'--window-size=820,600','--hide-scrollbars','--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.workbuddy/tmp/diag-profile',URL],{stdio:'ignore'});
+ const child=spawn(CHROME,['--headless=new','--remote-debugging-port='+PORT,'--window-size=820,600','--hide-scrollbars','--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.cache/cdp-profile',URL],{stdio:'ignore'});
  let list=null;for(let i=0;i<40&&!list;i++){await sleep(250);try{list=JSON.parse(await get('/json/list'));}catch(e){}}
  const t=(list||[]).find(x=>x.type==='page');
  const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();

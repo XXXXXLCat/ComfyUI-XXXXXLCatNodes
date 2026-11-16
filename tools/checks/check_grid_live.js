@@ -55,7 +55,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const url = `http://127.0.0.1:${SITE}/test-grid.html`;
   const child = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + PORT,
     '--window-size=1200,900', '--hide-scrollbars',
-    '--user-data-dir=' + ROOT + '/.workbuddy/tmp/grid-live-profile', url], { stdio: 'ignore' });
+    '--user-data-dir=' + ROOT + '/.cache/cdp-profile', url], { stdio: 'ignore' });
   let list = null;
   for (let n = 0; n < 40 && !list; n += 1) { await sleep(250); try { list = JSON.parse(await get('/json/list')); } catch (e) { /* wait */ } }
   const target = (list || []).find((t) => t.type === 'page' && t.url.includes('test-grid'));

@@ -21,7 +21,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const child = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${PORT}`,
     '--window-size=820,700', '--hide-scrollbars',
-    '--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.workbuddy/tmp/dlg-profile',
+    '--user-data-dir=E:/Workspace/Workspace-Infinite-Canvas/.cache/cdp-profile',
     URL,
   ], { stdio: 'ignore' });
 
