@@ -2363,7 +2363,7 @@ import {
                            @pointerdown.stop @mousedown.stop @dblclick.stop />
                     <button class="icn__gpa-badge" type="button" title="随机取值"
                             @click.stop="randomField(f)">
-                      <IcIcon name="shuffle" :size="11" />
+                      <IcIcon name="shuffle" :size="12" />
                     </button>
                     <button class="icn__gpa-nbtn" type="button" title="增加"
                             @click.stop="bumpField(f, 1)">
