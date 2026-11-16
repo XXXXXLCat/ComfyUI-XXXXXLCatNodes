@@ -23,7 +23,7 @@ from aiohttp import web
 from server import PromptServer
 
 PACK_ROOT = os.path.dirname(os.path.realpath(__file__))
-WORKFLOW_DIR = os.path.join(PACK_ROOT, "workflows")
+WORKFLOW_DIR = os.path.join(PACK_ROOT, "api")
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]{1,120}$")
 STEM_RE = re.compile(r"[^A-Za-z0-9_\- ]")

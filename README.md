@@ -52,7 +52,7 @@ ComfyUI_InfiniteCanvas/          ← 目录联接就是本仓库根，不能再�
 │  ├─ infcanvas-style.js        注入宿主对齐样式
 │  ├─ infcanvas-api-config.js   API（工作流字段）配置弹窗
 │  └─ vendor/                   预打包 Vue 3 + Vue Flow
-├─ workflows/                   生成模板（运行时读取，路径不可改）
+├─ api/                         生成模板（API 格式工作流，运行时读取，路径不可改）
 ├─ docs/
 │  ├─ changelog-2026-11.md      逐项改造记录与实测数据
 │  └─ reference/                ComfyUI 前端源码参考（GPL-3.0，不入库）
@@ -144,7 +144,7 @@ mklink /J "E:\Comfy-Org\ComfyUI-Main\ComfyUI\custom_nodes\ComfyUI_InfiniteCanvas
 
 ## 生成模板
 
-`workflows/*.json` 是 **API 格式 prompt**（不是 UI 工作流 JSON），由后端 `/api/infcanvas/workflow` 提供给前端。
+`api/*.json` 是 **API 格式 prompt**（不是 UI 工作流 JSON），由后端 `/api/infcanvas/workflow` 提供给前端。
 
 - `image.json`：内置可用的默认文生图模板（CheckpointLoaderSimple → KSampler → VAEDecode → SaveImage）。若连线了图像素材，会自动改为 `LoadImage → VAEEncode` 图生图。
 - `video.json` / `audio.json`：**需自行配置**。用 ComfyUI 导出 API 格式 JSON 覆盖对应文件即可；文件里 `_requires_config: true` 时，运行节点会提示配置而不是静默失败。
