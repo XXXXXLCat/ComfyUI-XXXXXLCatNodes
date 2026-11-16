@@ -2,8 +2,7 @@
 .backup/
 
 # ---- 会话临时产物（截图 / CDP 脚本输出）----
-.workbuddy/tmp/
-.workbuddy/projects/
+.workbuddy/
 
 # ---- 浏览器调试 profile，统一收在 .cache/ ----
 .cache/
