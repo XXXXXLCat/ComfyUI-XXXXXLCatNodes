@@ -25,7 +25,7 @@ rm -rf .cache/cdp-profile .workbuddy/tmp/*.png
 | `check_copy.js` | chip 复制为纯文本 `@图片1`、粘贴还原 chip |
 | `check_select.js` | ComfyUI 下拉框皮肤的 trigger/菜单尺寸、选中态、快捷键隔离 |
 | `check_audio_panel.js` | 音频生成节点：4 模式、两个输入区、工作流 payload 真实字段 |
-| `check_audio_bar.js` | 音频面板底部参数条：混合类型控件、换行不错位、API 下拉不被压缩 |
+| `check_audio_params.js` | 齿轮弹窗：暴露参数渲染成 widget 行（数值 `− 值 随机 +` 胶囊 / 开关 / 下拉 / 文本）、步进与随机真的改值、Esc 只关弹窗不取消选中 |
 | `check_audio_wiring.js` | 音频节点接线规则：图片/视频被拒、音频仅翻唱/克隆且限 1 个、文本进提示词/语气 |
 | `check_tools_select.js` | 选中节点后工具行出现时机与位置 |
 | `check_grid_live.js` / `check_grid_custom.js` | 画布网格 canvas 贴图与 LiteGraph 一致性 |

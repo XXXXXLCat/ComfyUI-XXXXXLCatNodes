@@ -110,7 +110,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
     return JSON.stringify({ panel: pick('.icn__gpa'), bar: pick('.icn__gpa-bar'),
       api: pick('.icn__gpa-bar > .icn__selwrap'), apiText: document.querySelector('.icn__gpa-bar .icn__sel-t')?.textContent,
-      fields: document.querySelectorAll('.icn__gpa-fields .icn__gpa-pill, .icn__gpa-fields .icn__selwrap').length,
+      gear: pick('.icn__gpa-set'), gearLeftOfApi: (() => {
+        const g = document.querySelector('.icn__gpa-set'); const a = document.querySelector('.icn__gpa-bar > .icn__selwrap');
+        return g && a ? g.getBoundingClientRect().right <= a.getBoundingClientRect().left : null; })(),
       run: pick('.icn__gpa .icn__gp-send') }); })()`));
 
   /* pick the real music workflow from the API dropdown */
@@ -134,17 +136,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   })()`, true));
   await sleep(400);
 
-  console.log('right-side fields:', await ev(`(() => {
-    const cells = [...document.querySelectorAll('.icn__gpa-fields > *')];
-    return JSON.stringify(cells.map((c) => {
-      const b = c.getBoundingClientRect(); const cs = getComputedStyle(c);
-      const input = c.querySelector('input');
-      return { kind: c.className, w: Math.round(b.width), h: Math.round(b.height),
-        bg: cs.backgroundColor, radius: cs.borderRadius,
-        label: c.querySelector('.icn__gpa-k')?.textContent.trim(),
-        value: input ? input.value : c.querySelector('.icn__gpa-v')?.textContent.trim(),
-        type: input && input.type };
-    })); })()`));
+  /* the exposed params live in the gear popover now */
+  console.log('popover fields:', await ev(`(async () => {
+    const gear = document.querySelector('.icn__gpa-set');
+    gear.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const pop = document.querySelector('.icn__gpa-pop');
+    if (!pop) return 'NO POPOVER';
+    const rows = [...pop.querySelectorAll('.icn__gpa-row')].map((row) => {
+      const k = row.querySelector('.icn__gpa-rowk');
+      const ctl = row.querySelector('.icn__gpa-num, .icn__gpa-sw, .icn__gpa-rowsel, .icn__gpa-txt');
+      const cb = ctl && ctl.getBoundingClientRect();
+      const cs = ctl && getComputedStyle(ctl);
+      const num = ctl && ctl.querySelector('.icn__gpa-nin');
+      const txt = ctl && ctl.querySelector('.icn__gpa-tin');
+      const sel = ctl && ctl.querySelector('.icn__sel-t');
+      return { label: k && k.textContent.trim(), kind: ctl && ctl.getAttribute('class'),
+        w: cb && Math.round(cb.width), h: cb && Math.round(cb.height),
+        bg: cs && cs.backgroundColor, r: cs && cs.borderTopLeftRadius,
+        value: num ? num.value : txt ? txt.value : sel ? sel.textContent.trim() : null };
+    });
+    const b = pop.getBoundingClientRect();
+    return JSON.stringify({ rect: [Math.round(b.width), Math.round(b.height)],
+      bg: getComputedStyle(pop).backgroundColor, rows }, null, 1);
+  })()`, true));
 
   /* type into both areas */
   await ev(`(() => { const ta = document.querySelectorAll('.icn__gpa-area')[0];
@@ -159,16 +174,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const node = InfCanvas.flow.state.nodes.value.find((n) => n.id === window.__probe.genId);
     return JSON.stringify({ prompt: node.data.prompt, lyrics: node.data.lyrics }); })()`));
 
-  /* change 时长 (number field) to 120 through the real input */
+  /* change 时长 (number field) to 120 through its real input in the popover */
   console.log('field edit:', await ev(`(() => {
-    const inputs = [...document.querySelectorAll('.icn__gpa-fields input')];
-    const dur = inputs.find((i) => i.type === 'number' && Number(i.value) === 300);
-    if (!dur) return 'NO DURATION INPUT: ' + inputs.map((i) => i.type + '=' + i.value).join(',');
+    const pop = document.querySelector('.icn__gpa-pop');
+    if (!pop) return 'NO POPOVER';
+    const inputs = [...pop.querySelectorAll('.icn__gpa-nin')];
+    const dur = inputs.find((i) => Number(i.value) === 300);
+    if (!dur) return 'NO DURATION ROW: ' + inputs.map((i) => i.value).join(',');
     dur.value = '120';
     dur.dispatchEvent(new Event('change', { bubbles: true }));
     const node = InfCanvas.flow.state.nodes.value.find((n) => n.id === window.__probe.genId);
-    return JSON.stringify({ apiValues: node.data.apiValues });
+    return JSON.stringify({ apiValues: node.data.apiValues, shown: dur.value });
   })()`));
+  /* close it so the screenshot shows the resting bar */
+  await ev(`(() => { document.querySelector('.icn__gpa-set').click(); return true; })()`);
+  await sleep(300);
 
   /* capture the prompt that generation would submit (queuePrompt is stubbed) */
   console.log('built prompt:', await ev(`(async () => {

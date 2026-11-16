@@ -292,6 +292,15 @@ import {
        (SelectTrigger's SelectIcon + SelectItemIndicator). */
     "chevron-down": '<path d="M6 9.5 L12 15.5 L18 9.5" stroke="currentColor" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     check: '<path d="M4.5 12.5 L9.5 17.5 L19.5 6.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    /* lucide minus / plus — ScrubableNumberInput's decrement & increment */
+    minus: '<path d="M5 12 H19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+    plus: '<path d="M12 5 V19 M5 12 H19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+    /* lucide shuffle — the value-control badge (ValueControlButton randomize) */
+    shuffle: '<path d="M18 14 L22 18 L18 22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M18 2 L22 6 L18 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M2 18 H3.97 A4 4 0 0 0 7.27 16.3 L12.72 7.7 A4 4 0 0 1 16.02 6 H22" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M2 6 H3.97 A4 4 0 0 1 7.57 8.2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M22 18 H15.96 A4 4 0 0 1 12.66 16.2 L12.3 15.75" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   };
 
   /* ---- video-generator input rules ----------------------------------
@@ -1396,14 +1405,87 @@ import {
         const keywords = SLOT_KEYWORDS[audioFamily.value];
         return { a: take(keywords.a) || take(/.+/), b: take(keywords.b) || take(/.+/) };
       });
-      /* Everything else the API exposes belongs on the right of the bottom bar
-         (the two text areas already stand for their own fields). */
+      /* Everything else the API exposes belongs in the settings popover (the
+         two text areas already stand for their own fields). */
       const apiBarFields = computed(() => {
         const slots = audioFieldSlots.value;
         const skip = {};
         for (const field of [slots.a, slots.b]) if (field) skip[fieldId(field)] = true;
         return apiFields.value.filter((field) => !skip[fieldId(field)] && BAR_FIELD_TYPES[field.type]);
       });
+
+      /* ---- settings popover: the exposed API parameters -------------------
+         Rendering every parameter inline turned the 30px bar into a wrapping
+         mess on a workflow with 6+ params (and squeezed the API selector), so
+         they now sit behind a gear button. Each row is a port of ComfyUI's
+         Nodes 2.0 widget line, which is what the user pointed at:
+           WidgetLayoutField  label left (muted, truncated), control right;
+           ScrubableNumberInput  − value [control badge] + inside one bg-input
+                              pill; a bg-primary/15 fill behind them when the
+                              range is small enough to draw one;
+           Switch             36×20 track + 16px thumb, bg-primary when on. */
+      const setOpen = ref(false);
+      const toggleSet = () => {
+        setOpen.value = !setOpen.value;
+        if (setOpen.value) selOpen.value = null;
+      };
+      const fieldStep = (field) => {
+        const step = Number(field?.step);
+        return Number.isFinite(step) && step > 0 ? step : 1;
+      };
+      const fieldMin = (field) => (Number.isFinite(Number(field?.min))
+        ? Number(field.min) : Number.MIN_SAFE_INTEGER);
+      const fieldMax = (field) => (Number.isFinite(Number(field?.max))
+        ? Number(field.max) : Number.MAX_SAFE_INTEGER);
+      const fieldNum = (field) => {
+        const value = Number(fieldValue(field));
+        return Number.isFinite(value) ? value : 0;
+      };
+      const decimalsOf = (step) => {
+        const text = String(step);
+        const dot = text.indexOf(".");
+        return dot < 0 ? 0 : text.length - dot - 1;
+      };
+      /* Display only — 0.1 + 0.2 must still read "0.3", not 0.30000000000000004. */
+      const fieldText = (field) => {
+        const value = fieldValue(field);
+        if (value === "" || value === null || value === undefined) return "";
+        const num = Number(value);
+        if (!Number.isFinite(num)) return String(value);
+        const own = field?.precision;
+        const digits = own === undefined || own === null || own === ""
+          ? decimalsOf(fieldStep(field)) : Number(own);
+        return Number.isFinite(digits) && digits > 0 ? num.toFixed(Math.min(digits, 6)) : String(num);
+      };
+      const fieldFill = (field) => {
+        const min = Number(field?.min), max = Number(field?.max), step = Number(field?.step);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step <= 0) return 0;
+        if (max <= min || (max - min) / step >= 100) return 0;
+        return Math.max(0, Math.min(1, (fieldNum(field) - min) / (max - min))) * 100;
+      };
+      const clampField = (field, value) => Math.min(fieldMax(field), Math.max(fieldMin(field), value));
+      const bumpField = (field, dir) => {
+        const next = fieldNum(field) + dir * fieldStep(field);
+        setFieldValue(field, clampField(field, Number(next.toFixed(6))));
+      };
+      const commitFieldNum = (field, event) => {
+        const element = event?.target || null;
+        const raw = String(element?.value ?? "").trim();
+        const num = Number(raw);
+        if (raw === "" || !Number.isFinite(num)) {
+          /* Garbage or empty: snap the field back instead of writing NaN in. */
+          if (element) element.value = fieldText(field);
+          return;
+        }
+        setFieldValue(field, clampField(field, Number(num.toFixed(6))));
+        if (element) element.value = fieldText(field);
+      };
+      const randomField = (field) => {
+        const min = Number.isFinite(Number(field?.min)) ? Number(field.min) : 0;
+        const max = Number.isFinite(Number(field?.max)) ? Number(field.max) : min + 1000000;
+        const pick = max <= min ? min : Math.floor(min + Math.random() * (max - min + 1));
+        setFieldValue(field, pick);
+      };
       const syncAudioMap = () => {
         if (!isGenAudio.value) return;
         const slots = audioFieldSlots.value;
@@ -1811,18 +1893,22 @@ import {
         return hit ? hit.label : (data.width || 512) + "×" + (data.height || 512);
       });
       const onSelOutside = (event) => {
+        /* The settings popover is its own layer: a press anywhere outside the
+           gear wrapper (canvas, another node, the API picker) closes it. */
+        if (setOpen.value && !event.target?.closest?.(".icn__gpa-setwrap")) setOpen.value = false;
         if (!selOpen.value) return;
         if (event.target?.closest?.(".icn__selwrap")) return;
         selOpen.value = null;
       };
       const onSelKey = (event) => {
-        if (!selOpen.value) return;
+        if (!selOpen.value && !setOpen.value) return;
         if (event.key !== "Escape" && event.key !== "Esc") return;
         /* Swallow it: Vue Flow uses Escape for its own selection handling, which
            would deselect the node and hide the panel just because a list closed. */
         event.stopPropagation();
         event.preventDefault();
         selOpen.value = null;
+        setOpen.value = false;
       };
       onMounted(() => {
         document.addEventListener("pointerdown", onSelOutside, true);
@@ -1986,6 +2072,7 @@ import {
         isGenAudio, audioModes, audioMode, setAudioMode, audioSlots, audioFamily,
         audioModeReason, audioModeAvailable, wiredAudio, wiredTextNodes, wiredText,
         apiFields, apiBarFields, fieldId, fieldValue, setFieldValue,
+        setOpen, toggleSet, fieldText, fieldFill, bumpField, commitFieldNum, randomField,
         previewKey, onAssetEnter, onAssetLeave, previewMetaDuration, onPreviewMeta, videoThumbs, wfList,
         selOpen, toggleSel, pickSel, wfValue, wfLabel, sizeLabel,
         promptEl, mention, mentionItems, closeMention, onPromptInput, hoverMention, pickMention, onPromptKeydown,
@@ -2238,6 +2325,90 @@ import {
             </label>
           </div>
           <div class="icn__gpa-bar">
+            <!-- Settings: the workflow's exposed API params live in here, drawn
+                 as Nodes 2.0 widget rows instead of a cramped wrapping row. -->
+            <div class="icn__gpa-setwrap">
+              <button class="icn__gpa-set" :class="{ 'is-open': setOpen }" type="button"
+                      :title="apiBarFields.length
+                        ? 'API 参数（' + apiBarFields.length + ' 项）'
+                        : 'API 参数（当前 API 未暴露参数）'"
+                      @click.stop="toggleSet">
+                <IcIcon name="settings" :size="14" />
+                <span v-if="apiBarFields.length && !setOpen" class="icn__gpa-setdot"></span>
+              </button>
+              <div v-if="setOpen" class="icn__gpa-pop"
+                   @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+                <div class="icn__gpa-pophead">
+                  <span class="icn__gpa-popt">API 参数</span>
+                  <span v-if="apiBarFields.length" class="icn__gpa-popcnt">{{ apiBarFields.length }}</span>
+                </div>
+                <div v-if="!apiBarFields.length" class="icn__gpa-popempty">
+                  当前 API 未暴露参数，可在 API 配置里勾选要显示的输入项
+                </div>
+                <div v-for="f in apiBarFields" :key="fieldId(f)" class="icn__gpa-row">
+                  <span class="icn__gpa-rowk" :title="f.label || fieldId(f)">{{ f.label || fieldId(f) }}</span>
+
+                  <!-- number / slider / random: ScrubableNumberInput -->
+                  <div v-if="f.type === 'number' || f.type === 'slider' || f.type === 'random'"
+                       class="icn__gpa-num">
+                    <span class="icn__gpa-fill" :style="{ width: fieldFill(f) + '%' }"></span>
+                    <button class="icn__gpa-nbtn" type="button" title="减少"
+                            @click.stop="bumpField(f, -1)">
+                      <IcIcon name="minus" :size="14" />
+                    </button>
+                    <input class="icn__gpa-nin" :value="fieldText(f)" inputmode="decimal"
+                           autocomplete="off" spellcheck="false"
+                           @change="commitFieldNum(f, $event)"
+                           @keydown.enter.prevent="commitFieldNum(f, $event)"
+                           @pointerdown.stop @mousedown.stop @dblclick.stop />
+                    <button class="icn__gpa-badge" type="button" title="随机取值"
+                            @click.stop="randomField(f)">
+                      <IcIcon name="shuffle" :size="11" />
+                    </button>
+                    <button class="icn__gpa-nbtn" type="button" title="增加"
+                            @click.stop="bumpField(f, 1)">
+                      <IcIcon name="plus" :size="14" />
+                    </button>
+                  </div>
+
+                  <!-- switch: Nodes 2.0 Switch (36×20 track, 16px thumb) -->
+                  <button v-else-if="f.type === 'switch'" type="button" class="icn__gpa-sw"
+                          :class="{ 'is-on': !!fieldValue(f) }"
+                          :title="(f.label || '开关') + '：' + (fieldValue(f) ? '开' : '关')"
+                          @click.stop="setFieldValue(f, !fieldValue(f))">
+                    <span class="icn__gpa-swt"><span class="icn__gpa-thumb"></span></span>
+                  </button>
+
+                  <!-- select: the same Nodes 2.0 select the bar uses -->
+                  <div v-else-if="f.type === 'select'" class="icn__selwrap icn__gpa-rowsel">
+                    <button class="icn__sel icn__gpa-sel" type="button"
+                            :class="{ 'is-open': selOpen === 'f:' + fieldId(f) }"
+                            :title="(f.label || '') + '（当前：' + fieldValue(f) + '）'"
+                            @click.stop="toggleSel('f:' + fieldId(f))">
+                      <span class="icn__sel-t">{{ fieldValue(f) }}</span>
+                      <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
+                    </button>
+                    <div v-if="selOpen === 'f:' + fieldId(f)" class="icn__selmenu"
+                         @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+                      <button v-for="opt in (f.options || [])" :key="opt" type="button" class="icn__selitem"
+                              :class="{ 'is-on': fieldValue(f) === opt }"
+                              @click.stop="pickSel('f:' + fieldId(f), opt)">
+                        <span class="icn__selitem-t">{{ opt }}</span>
+                        <IcIcon v-if="fieldValue(f) === opt" class="icn__selitem-check" name="check" :size="14" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- text / textarea: single-line pill -->
+                  <label v-else class="icn__gpa-txt" :title="f.label || ''">
+                    <input class="icn__gpa-tin" :value="fieldValue(f)" spellcheck="false"
+                           autocomplete="off"
+                           @change="setFieldValue(f, $event.target.value)"
+                           @pointerdown.stop @mousedown.stop @dblclick.stop />
+                  </label>
+                </div>
+              </div>
+            </div>
             <div class="icn__selwrap">
               <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
                       :title="'API（工作流）：' + wfLabel" @click.stop="toggleSel('wf')">
@@ -2253,54 +2424,9 @@ import {
                 </button>
               </div>
             </div>
-            <div class="icn__gpa-right">
-              <div v-if="apiBarFields.length" class="icn__gpa-fields">
-                <template v-for="f in apiBarFields" :key="fieldId(f)">
-                  <div v-if="f.type === 'select'" class="icn__selwrap">
-                    <button class="icn__sel icn__gpa-sel" type="button"
-                            :class="{ 'is-open': selOpen === 'f:' + fieldId(f) }"
-                            :title="f.label + '（当前：' + fieldValue(f) + '）'"
-                            @click.stop="toggleSel('f:' + fieldId(f))">
-                      <span class="icn__gpa-k">{{ f.label }}</span>
-                      <span class="icn__sel-t">{{ fieldValue(f) }}</span>
-                      <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
-                    </button>
-                    <div v-if="selOpen === 'f:' + fieldId(f)" class="icn__selmenu"
-                         @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
-                      <button v-for="opt in (f.options || [])" :key="opt" type="button" class="icn__selitem"
-                              :class="{ 'is-on': fieldValue(f) === opt }"
-                              @click.stop="pickSel('f:' + fieldId(f), opt)">
-                        <span class="icn__selitem-t">{{ opt }}</span>
-                        <IcIcon v-if="fieldValue(f) === opt" class="icn__selitem-check" name="check" :size="14" />
-                      </button>
-                    </div>
-                  </div>
-                  <button v-else-if="f.type === 'switch'" type="button" class="icn__gpa-pill icn__gpa-sw"
-                          :class="{ 'is-on': !!fieldValue(f) }" :title="f.label"
-                          @click.stop="setFieldValue(f, !fieldValue(f))">
-                    <span class="icn__gpa-k">{{ f.label }}</span>
-                    <span class="icn__gpa-v">{{ fieldValue(f) ? '开' : '关' }}</span>
-                  </button>
-                  <label v-else-if="f.type === 'text' || f.type === 'textarea'"
-                         class="icn__gpa-pill" :title="f.label">
-                    <span class="icn__gpa-k">{{ f.label }}</span>
-                    <input class="icn__gpa-in" :value="fieldValue(f)" spellcheck="false"
-                           @change="setFieldValue(f, $event.target.value)"
-                           @pointerdown.stop @mousedown.stop @dblclick.stop />
-                  </label>
-                  <label v-else class="icn__gpa-pill" :title="f.label">
-                    <span class="icn__gpa-k">{{ f.label }}</span>
-                    <input class="icn__gpa-in icn__gpa-in--num" type="number" :value="fieldValue(f)"
-                           :min="f.min" :max="f.max" :step="f.step"
-                           @change="setFieldValue(f, Number($event.target.value))"
-                           @pointerdown.stop @mousedown.stop @dblclick.stop />
-                  </label>
-                </template>
-              </div>
-              <button class="icn__gp-send" type="button"
-                      :title="data.status === 'running' ? '正在生成…' : '运行生成'"
-                      :disabled="data.status === 'running'" @click.stop="run">运行</button>
-            </div>
+            <button class="icn__gp-send icn__gpa-send" type="button"
+                    :title="data.status === 'running' ? '正在生成…' : '运行生成'"
+                    :disabled="data.status === 'running'" @click.stop="run">运行</button>
           </div>
         </div>
 
@@ -2910,8 +3036,8 @@ import {
 /* ---- AUDIO generator panel -------------------------------------------
    Same Nodes 2.0 surfaces as the video panel (mode row / input surface /
    30px bottom bar). The two prompt areas are labelled boxes so the meaning of
-   each one is explicit (提示词/歌词 vs 语气/朗读文本), and the bottom bar wraps
-   instead of clipping: a workflow may expose any number of parameters. */
+   each one is explicit (提示词/歌词 vs 语气/朗读文本); the workflow's exposed
+   API parameters live behind the gear button on the left of the API picker. */
 .icn__genpanel.icn__gpa { width:max(100%, 520px); padding:10px; }
 .icn__gpa-inputs { display:flex; flex-direction:column; gap:8px; margin-bottom:9px; }
 .icn__gpa-box { display:flex; flex-direction:column; gap:4px; min-width:0; }
@@ -2927,35 +3053,86 @@ import {
 .icn__gpa-area::placeholder { color:var(--ic-soft, #8a8a8a); }
 .icn__gpa-area--a { height:76px; }
 .icn__gpa-area--b { height:104px; }
-.icn__gpa-bar { display:flex; align-items:flex-start; gap:6px; min-width:0; }
-/* The API picker never shrinks: the field group wraps instead, so a workflow
-   with many parameters can never squeeze the workflow name to "音频面…". */
-.icn__gpa-bar > .icn__selwrap { flex:0 0 auto; }
-.icn__gpa-right { margin-left:auto; display:flex; align-items:flex-start; gap:6px; min-width:0; }
-.icn__gpa-fields { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end;
-  gap:6px; min-width:0; }
-.icn__gpa-pill { display:inline-flex; align-items:center; gap:5px; box-sizing:border-box;
-  height:var(--ic-ctrl-h, 30px); padding:0 8px; border:0; border-radius:var(--icnw-r, 6px);
-  background:var(--icnw-bg, #313235); color:var(--ic-soft, #8a8a8a);
-  font:inherit; font-size:10px; white-space:nowrap; cursor:text; }
-.icn__gpa-pill:hover { background:var(--icnw-hover, #3c3d42); }
-.icn__gpa-k { flex:0 0 auto; max-width:76px; overflow:hidden; text-overflow:ellipsis; }
-.icn__gpa-in { width:64px; min-width:0; padding:0; border:0; outline:none; background:transparent;
-  color:var(--ic-text, #ffffff); font:inherit; font-size:12px; text-align:right; cursor:text; }
-.icn__gpa-in--num { width:52px; -moz-appearance:textfield; }
-.icn__gpa-in--num::-webkit-inner-spin-button,
-.icn__gpa-in--num::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
-.icn__gpa-sw { cursor:pointer; }
-.icn__gpa-v { color:var(--ic-soft, #8a8a8a); font-size:12px; line-height:1; }
-.icn__gpa-sw.is-on .icn__gpa-v { color:var(--ic-brand, #0b8ce9); }
-/* Exposed select: label + current value (the plain .icn__sel only shows a
-   value, which would be ambiguous with several dropdowns in one bar). */
-.icn__gpa-sel { max-width:164px; gap:5px; }
-.icn__gpa-sel .icn__sel-t { flex:0 1 auto; color:var(--ic-text, #ffffff); }
+.icn__gpa-bar { display:flex; align-items:center; gap:6px; min-width:0; }
+/* Both pickers keep their intrinsic width; only the run button eats the slack,
+   so a long workflow name can never be squeezed to "音频面…". */
+.icn__gpa-bar > .icn__selwrap, .icn__gpa-setwrap { flex:0 0 auto; }
+.icn__gpa-send { margin-left:auto; }
 /* The API picker may carry a full workflow filename (文生音乐：MiniMax Music 3),
-   so it gets a wider cap than the shared 172px — still truncated, never
-   pushing the field row out of the panel. */
-.icn__gpa-bar > .icn__selwrap > .icn__sel { max-width:200px; }
+   so it gets a wider cap than the shared 172px — still truncated. */
+.icn__gpa-bar > .icn__selwrap > .icn__sel { max-width:220px; }
+
+/* ---- API params popover ----------------------------------------------
+   The exposed parameters used to render inline in the 30px bar, which wrapped
+   into two rows as soon as a workflow exposed six of them. They now live in
+   this popover, drawn as ComfyUI's Nodes 2.0 widget rows (see the state block
+   in the node setup for the source of each control). */
+.icn__gpa-setwrap { position:relative; display:inline-flex; }
+.icn__gpa-set { position:relative; display:inline-flex; align-items:center; justify-content:center;
+  width:var(--ic-ctrl-h, 30px); height:var(--ic-ctrl-h, 30px); padding:0; border:0; border-radius:8px;
+  background:var(--icnw-bg, #313235); color:var(--ic-soft, #8a8a8a); cursor:pointer;
+  transition:background-color .15s ease, color .15s ease; }
+.icn__gpa-set:hover, .icn__gpa-set.is-open {
+  background:var(--icnw-hover, #3c3d42); color:var(--ic-text, #ffffff); }
+/* Dot = "this API has parameters behind the gear" (they are no longer inline). */
+.icn__gpa-setdot { position:absolute; top:5px; right:5px; width:5px; height:5px;
+  border-radius:50%; background:var(--ic-brand, #0b8ce9); }
+.icn__gpa-pop { position:absolute; left:0; bottom:calc(100% + 8px); z-index:62;
+  box-sizing:border-box; width:308px; padding:8px; display:flex; flex-direction:column; gap:1px;
+  border-radius:10px; background:#171718; border:1px solid var(--ic-line, #494a50);
+  box-shadow:0 10px 30px rgba(0,0,0,.55); }
+.icn__gpa-pophead { display:flex; align-items:center; gap:6px; padding:1px 4px 5px; }
+.icn__gpa-popt { font-size:10px; line-height:1.4; letter-spacing:.02em;
+  color:var(--ic-soft, #8a8a8a); }
+.icn__gpa-popcnt { padding:0 5px; border-radius:999px; background:var(--icnw-bg, #313235);
+  color:var(--ic-text, #ffffff); font-size:10px; line-height:14px; }
+.icn__gpa-popempty { padding:5px 4px 3px; font-size:11px; line-height:1.5;
+  color:var(--ic-soft, #8a8a8a); }
+/* WidgetLayoutField: label left, control right */
+.icn__gpa-row { display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:3px 4px; min-height:34px; }
+.icn__gpa-rowk { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:12px; line-height:1.2; color:var(--ic-soft, #8a8a8a); }
+/* ScrubableNumberInput: − value [badge] + in one bg-input pill */
+.icn__gpa-num { position:relative; flex:0 0 auto; display:flex; align-items:center;
+  box-sizing:border-box; width:152px; height:28px; border-radius:8px;
+  background:var(--icnw-bg, #313235); overflow:hidden; }
+/* Its optional progress fill (bg-primary/15) behind the buttons */
+.icn__gpa-fill { position:absolute; left:0; top:0; bottom:0; pointer-events:none;
+  background:rgba(11,140,233,.15); }
+.icn__gpa-nbtn { position:relative; flex:0 0 auto; width:26px; height:100%; padding:0; border:0;
+  display:inline-flex; align-items:center; justify-content:center; background:transparent;
+  color:var(--ic-soft, #8a8a8a); cursor:pointer; }
+.icn__gpa-nbtn:hover { background:var(--icnw-hover, #3c3d42); color:var(--ic-text, #ffffff); }
+.icn__gpa-nin { position:relative; flex:1 1 auto; min-width:0; width:100%; padding:0 2px; border:0;
+  outline:none; background:transparent; color:var(--ic-text, #ffffff); font:inherit; font-size:12px;
+  line-height:1; text-align:center; cursor:text; -moz-appearance:textfield; }
+.icn__gpa-nin:focus { box-shadow:0 0 0 1px var(--icnw-ring, #8a8a8a) inset; }
+/* ValueControlButton: h-4.5 w-8 rounded-full bg-primary/30 */
+.icn__gpa-badge { position:relative; flex:0 0 auto; width:32px; height:18px; padding:0; border:0;
+  display:inline-flex; align-items:center; justify-content:center; border-radius:999px;
+  background:rgba(11,140,233,.3); color:var(--ic-brand, #0b8ce9); cursor:pointer; }
+.icn__gpa-badge:hover { background:rgba(11,140,233,.27); }
+/* Switch: h-6 w-10 target, h-5 w-9 track, size-4 thumb sliding 14px */
+.icn__gpa-sw { flex:0 0 auto; width:40px; height:24px; padding:0; border:0; background:transparent;
+  display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+.icn__gpa-swt { position:relative; display:inline-flex; align-items:center; box-sizing:border-box;
+  width:36px; height:20px; padding:0 2px; border-radius:999px;
+  background:var(--icnw-hover, #3c3d42); transition:background-color .15s ease; }
+.icn__gpa-sw.is-on .icn__gpa-swt { background:var(--ic-brand, #0b8ce9); }
+.icn__gpa-thumb { display:block; width:16px; height:16px; border-radius:50%; background:#171718;
+  box-shadow:0 1px 2px rgba(0,0,0,.35); transition:transform .15s ease; }
+.icn__gpa-sw.is-on .icn__gpa-thumb { transform:translateX(14px); }
+/* Exposed select / text rows share the numeric pill's footprint */
+.icn__gpa-rowsel { flex:0 0 auto; width:152px; }
+.icn__gpa-rowsel > .icn__sel { width:100%; max-width:152px; height:28px; }
+.icn__gpa-sel .icn__sel-t { color:var(--ic-text, #ffffff); }
+.icn__gpa-txt { flex:0 0 auto; display:inline-flex; align-items:center; box-sizing:border-box;
+  width:152px; height:28px; padding:0 8px; border-radius:8px;
+  background:var(--icnw-bg, #313235); cursor:text; }
+.icn__gpa-txt:hover { background:var(--icnw-hover, #3c3d42); }
+.icn__gpa-tin { width:100%; min-width:0; padding:0; border:0; outline:none; background:transparent;
+  color:var(--ic-text, #ffffff); font:inherit; font-size:12px; text-align:left; cursor:text; }
 
 /* Four corner resize grips — verbatim port of ComfyUI's vueNodes renderer
    (LGraphNode.vue + resize/resizeHandleConfig.ts). The glyph is the upstream
