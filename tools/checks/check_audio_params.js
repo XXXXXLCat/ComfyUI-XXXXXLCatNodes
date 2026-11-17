@@ -74,6 +74,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const setup = await ev(`(async () => {
     const NS = window.InfCanvas;
     await NS.api.enter();
+    NS.api.newCanvas();
     await new Promise((r) => setTimeout(r, 900));
     const gen = NS.api.addNodeByType('infcanvas/gen_audio', [640, 180]);
     window.__probe = { gen: gen.id };

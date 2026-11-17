@@ -10,6 +10,10 @@
    canvas saved before the switch opens unchanged. New saves are `version: 2`. */
 (() => {
   const NS = (window.InfCanvas = window.InfCanvas || {});
+  /* i18n: lazy reference; i18n.js loads after most modules, but every call
+     site runs after app init when NS.i18n is available. Named `tr` (not `t`)
+     because toast() below has a local `t` bound to the host toast object. */
+  const tr = (key, params) => (NS.i18n ? NS.i18n.t(key, params) : key);
 
   const APP = () => NS.app || window.comfyAPI?.app?.app;
   const API = () => window.comfyAPI?.api?.api;
@@ -58,25 +62,41 @@
   };
   const kindFromFile = (name) => EXT_KIND[String(name).split(".").pop().toLowerCase()] || null;
 
-  /* `size` is the whole frame for every node (no title bar any more):
-     asset nodes fill it with media, generate nodes host their form inside it. */
+  /* `size` is the whole frame for every node (no title bar any more).
+     ONE node type per medium: 图像 / 视频 / 音频 are generators by default and
+     turn into material nodes the moment a file lands on them. `data.asset` is
+     the only discriminator — a material node is a final state (delete + create
+     to get a generator back), so there is no separate role for the two states.
+     Text stays its own role: it is never uploaded, only typed/pasted. */
   const SPECS = [
-    { type: "infcanvas/asset_image", role: "asset", kind: "image", title: "图像", desc: "图片素材", icon: "pi pi-image", size: [320, 180] },
-    { type: "infcanvas/asset_video", role: "asset", kind: "video", title: "视频", desc: "视频素材", icon: "pi pi-video", size: [320, 180] },
-    { type: "infcanvas/asset_audio", role: "asset", kind: "audio", title: "音频", desc: "音频素材", icon: "pi pi-volume-up", size: [320, 180] },
+    { type: "infcanvas/media_image", role: "media", kind: "image", title: "图像", desc: "图片素材，或调用 ComfyUI 生成图片", icon: "pi pi-image", workflow: "image", size: [320, 180] },
+    { type: "infcanvas/media_video", role: "media", kind: "video", title: "视频", desc: "视频素材，或调用 ComfyUI 生成视频", icon: "pi pi-video", workflow: "video", size: [320, 180] },
+    { type: "infcanvas/media_audio", role: "media", kind: "audio", title: "音频", desc: "音频素材，或调用 ComfyUI 生成音频", icon: "pi pi-volume-up", workflow: "audio", size: [320, 180] },
     { type: "infcanvas/asset_text", role: "text", kind: "text", title: "文本", desc: "文本素材", icon: "pi pi-align-left", size: [320, 180] },
-    { type: "infcanvas/gen_image", role: "gen", kind: "image", title: "生成图像", desc: "调用 ComfyUI 生成图片", icon: "pi pi-sparkles", workflow: "image", size: [320, 180] },
-    { type: "infcanvas/gen_video", role: "gen", kind: "video", title: "生成视频", desc: "调用 ComfyUI 生成视频", icon: "pi pi-sparkles", workflow: "video", size: [320, 180] },
-    { type: "infcanvas/gen_audio", role: "gen", kind: "audio", title: "生成音频", desc: "调用 ComfyUI 生成音频", icon: "pi pi-sparkles", workflow: "audio", size: [320, 180] },
   ];
   const TYPE_BY_KIND = {
-    image: "infcanvas/asset_image",
-    video: "infcanvas/asset_video",
-    audio: "infcanvas/asset_audio",
+    image: "infcanvas/media_image",
+    video: "infcanvas/media_video",
+    audio: "infcanvas/media_audio",
     text: "infcanvas/asset_text",
   };
   const SPEC_BY_TYPE = Object.fromEntries(SPECS.map((spec) => [spec.type, spec]));
-  const TYPE_BY_LEGACY = SPEC_BY_TYPE;
+  /* Every type ever written to disk points at the merged type now; the role
+     lives in the node data, so old canvases load into the unified node. */
+  const LEGACY_TYPE = {
+    "infcanvas/asset_image": "infcanvas/media_image",
+    "infcanvas/asset_video": "infcanvas/media_video",
+    "infcanvas/asset_audio": "infcanvas/media_audio",
+    "infcanvas/asset_text": "infcanvas/asset_text",
+    "infcanvas/gen_image": "infcanvas/media_image",
+    "infcanvas/gen_video": "infcanvas/media_video",
+    "infcanvas/gen_audio": "infcanvas/media_audio",
+  };
+  const TYPE_BY_LEGACY = Object.fromEntries(
+    Object.entries(LEGACY_TYPE).map(([old, current]) => [old, SPEC_BY_TYPE[current]]));
+  /* Old type names keep working for saved graphs and for any script that still
+     asks for "infcanvas/gen_image" — the merged node is what comes back. */
+  const specOf = (type) => SPEC_BY_TYPE[type] || TYPE_BY_LEGACY[type] || null;
   NS.SPECS = SPECS;
   NS.TYPE_BY_KIND = TYPE_BY_KIND;
 
@@ -85,12 +105,17 @@
 
   /* ------------------------------ helpers ------------------------------ */
 
-  function toast(kind, summary, detail = "") {
+  /* Host toast store (src/components/ui/toast/toastStore.ts):
+       success/error/info/warning/loading(title, { description, duration })
+     `duration` MUST be passed -- the store defaults it to POSITIVE_INFINITY,
+     so a toast without it never closes on its own. */
+  function toast(kind, summary, detail = "", duration = 3000) {
     const t = EXT()?.toast;
     if (!t) { console.log("[InfCanvas]", kind, summary, detail); return; }
     try {
-      if (typeof t[kind] === "function") t[kind](summary, { description: detail, duration: 3200 });
-      else if (typeof t.add === "function") t.add({ severity: kind, summary, detail, life: 3200 });
+      if (typeof t[kind] === "function") {
+        t[kind](summary, { description: detail || undefined, duration });
+      } else if (typeof t.add === "function") t.add({ severity: kind, summary, detail, life: duration });
     } catch (error) { console.warn("[InfCanvas] toast failed", error); }
   }
 
@@ -132,10 +157,38 @@
     }
   }
 
+  /* 多用户（--multi-user + 素材隔离）下文件实际在 input|output/<user>/ 里，而
+     <img> 标签没法带 comfy-user 头。只写 filename 的话宿主 /view 会当成全局
+     目录去解析，正好命中全局 input/output 里的同名旧文件——素材明明替换成功，
+     画布却显示成别人的图。宿主自己的 assets API 就是把用户段塞进 subfolder，
+     它的 /view 兜底也按这个形状解析，这里跟它保持一致。 */
+  function assetUser() {
+    try {
+      const user = window.comfyAPI?.api?.api?.user;
+      return user ? String(user) : "";
+    } catch (error) { return ""; }
+  }
+  function userSubfolder(subfolder) {
+    const user = assetUser();
+    const sub = String(subfolder || "");
+    if (!user) return sub;
+    if (sub === user || sub.startsWith(user + "/")) return sub;
+    return sub ? user + "/" + sub : user;
+  }
+  /* 旧画布里存的是没有用户段的老地址，载入时按当前用户重算一次。只碰本站的
+     /view 地址，外部链接 / blob 原样保留。 */
+  function refreshViewUrl(asset) {
+    if (!asset || typeof asset !== "object" || !asset.filename) return asset;
+    const url = String(asset.url || "");
+    if (url && !url.includes("/view?")) return asset;
+    asset.url = viewUrl(asset);
+    return asset;
+  }
+
   function viewUrl(asset) {
     const query = new URLSearchParams({
       filename: asset.filename || "",
-      subfolder: asset.subfolder || "",
+      subfolder: userSubfolder(asset.subfolder),
       type: asset.type || "input",
     }).toString();
     const url = "/view?" + query;
@@ -233,6 +286,59 @@
     results: 0,
   };
 
+  /* Canvas persistence mirrors ComfyUI's workflow store (see workflowStore.ts
+     + useWorkflowTabState.ts in the frontend source). Three independent pieces:
+       - Tabs: the ordered list of open canvas ids + the active index.
+       - Drafts: node/edge/viewport payload for every canvas, keyed by its STABLE
+         id (never its name), so unsaved work survives a page refresh.
+       - Meta: name/saved per id, so a draft can be told apart from a saved file.
+     A saved canvas keeps living on disk under api/user/infinite_canvas; drafts
+     are only the localStorage mirror of the in-memory state. */
+  const TABS_KEY = "InfCanvas.Tabs.v1";
+  const DRAFT_KEY = (id) => "InfCanvas.Draft.v1:" + id;
+  const META_KEY = (id) => "InfCanvas.Meta.v1:" + id;
+
+  const storageRead = (key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    } catch (error) { return null; }
+  };
+  const storageWrite = (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); }
+    catch (error) { /* storage unavailable / quota */ }
+  };
+  const storageRemove = (key) => {
+    try { localStorage.removeItem(key); } catch (error) { /* storage unavailable */ }
+  };
+
+  /* Persist the tab list + each doc's meta. Called after every tab operation
+     (new/open/close/switch/save/rename) so a refresh can rebuild the exact set. */
+  function persistTabs() {
+    storageWrite(TABS_KEY, {
+      ids: state.docs.map((doc) => doc.id),
+      activeIndex: Math.max(0, state.docs.findIndex((doc) => doc.id === state.activeId)),
+    });
+    for (const doc of state.docs) {
+      storageWrite(META_KEY(doc.id), { id: doc.id, name: doc.name, saved: !!doc.saved });
+    }
+  }
+
+  /* Write a doc's current graph to its draft slot. Source of truth for unsaved
+     canvases; for saved ones it is just a mirror used until the next disk save. */
+  function writeDraft(doc) {
+    if (!doc) return;
+    storageWrite(DRAFT_KEY(doc.id), {
+      version: 2,
+      nodes: doc.nodes || [],
+      edges: doc.edges || [],
+      groups: doc.groups || [],
+      viewport: doc.viewport || null,
+    });
+  }
+  function readDraft(id) { return storageRead(DRAFT_KEY(id)); }
+  function clearDraft(id) { storageRemove(DRAFT_KEY(id)); storageRemove(META_KEY(id)); }
+
   const flow = () => NS.flow;
   const activeDoc = () => state.docs.find((doc) => doc.id === state.activeId) || null;
   const autoSaveEnabled = () => {
@@ -261,7 +367,9 @@
     if (asset) {
       data.kind = asset.kind || data.kind;
       if (asset.text) data.text = asset.text;
-      data.title = spec.title + " · " + (asset.name || "");
+      /* Title stays the plain medium name ("图像"): the generator and the
+         material node are the same thing, so the name must not advertise which
+         state the node happens to be in. */
     }
     return { id: newNodeId(), type: "ic", position: { x: position[0], y: position[1] }, data };
   }
@@ -279,8 +387,9 @@
 
     for (const node of legacyNodes) {
       const props = savedProps[String(node.id)] || node.properties || {};
-      const spec = TYPE_BY_LEGACY[node.type] ||
-        (props.role === "gen" ? SPEC_BY_TYPE["infcanvas/gen_" + (props.kind || "image")] : SPEC_BY_TYPE[TYPE_BY_KIND[props.kind || "image"]]);
+      const spec = TYPE_BY_LEGACY[node.type]
+        || SPEC_BY_TYPE[TYPE_BY_KIND[props.kind || "image"]]
+        || SPEC_BY_TYPE[TYPE_BY_KIND.image];
       if (!spec) continue;
       const pos = Array.isArray(node.pos) ? node.pos : [node.pos?.[0] || 0, node.pos?.[1] || 0];
       const size = Array.isArray(node.size) ? node.size : (spec.size || [320, 180]);
@@ -306,6 +415,14 @@
           size: [Number(size[0]) || 320, Number(size[1]) || 180],
         },
       };
+      /* Old labels were auto-composed ("图像 · a.png"). Keep a real user name,
+         otherwise name the node after its material file / its medium. */
+      const savedTitle = String(created.data.title || "").trim();
+      if (!savedTitle || savedTitle.indexOf(spec.title + " · ") === 0) {
+        created.data.title = created.data.asset
+          ? (created.data.asset.name || created.data.asset.filename || spec.title)
+          : spec.title;
+      }
       idMap.set(String(node.id), created);
       doc.nodes.push(created);
     }
@@ -316,9 +433,9 @@
         : link;
       const target = idMap.get(String(parts.target_id));
       if (!target) continue;
-      // Only generation nodes accept input now; legacy links into material
-      // nodes (old "in" handle) are dropped to match the current rule.
-      if (target.data.role !== "gen") continue;
+      // Only a generator (a media node with no material) accepts input; legacy
+      // links into material nodes (old "in" handle) are dropped to match it.
+      if (target.data.role !== "media" || target.data.asset) continue;
       doc.edges.push({
         id: "e_" + (parts.id ?? Math.random().toString(36).slice(2, 8)),
         source: String(parts.origin_id),
@@ -345,14 +462,91 @@
     };
   }
 
+  /* Old canvases stored two roles (`asset` / `gen`) and two type names per
+     medium. The unified node keeps `data.asset` as the state, so all that has
+     to change is the role label; the title is rewritten too because material
+     nodes used to append the file name to it. */
+  /* 分类在 2026-11-17 全局改名（当天改了两次）；旧画布 nodes 里存的
+     imageMode/videoMode/audioMode/textMode 可能是最早的名字，也可能是第一次
+     改名后的中间名。载入时一律映射到最终名，否则 activeCategory 过滤不到新
+     分类的工作流。和 server_routes.CATEGORY_RENAMES 保持一致。 */
+  const LEGACY_MODE_NAMES = {
+    "图片生成": "文生图", "图片编辑": "图像编辑", "图片放大": "图像放大",
+    "移除背景": "背景移除", "全能参考": "参考生视频", "参考视频": "参考生视频",
+    "首帧": "图生视频", "首尾帧": "首尾帧视频", "音乐设计": "文生音乐",
+    "音乐翻唱": "音乐翻唱", "语音设计": "语音合成", "TTS": "语音合成",
+    "语音克隆": "语音克隆", "LLM": "智能对话", "LLM对话": "智能对话",
+  };
+  const migrateMode = (value) => (value ? (LEGACY_MODE_NAMES[value] || value) : value);
+
+  function normalizeNodeData(data) {
+    if (!data) return;
+    if (data.role === "asset" || data.role === "gen") {
+      data.role = data.kind === "text" ? "text" : "media";
+    }
+    for (const key of ["imageMode", "videoMode", "audioMode", "textMode"]) {
+      if (typeof data[key] === "string") data[key] = migrateMode(data[key]);
+    }
+    /* 旧画布里存的预览地址没有用户段：载入时按当前账号重算，否则同一个文件名
+       在全局 input/output 里另有一份时，画面会显示成那份旧文件。 */
+    refreshViewUrl(data.asset);
+    refreshViewUrl(data.result);
+    if (data.role === "media" || data.role === "text") {
+      const spec = SPEC_BY_TYPE[TYPE_BY_KIND[data.kind || "image"]];
+      if (spec) {
+        data.legacyType = spec.type;
+        /* Titles are user-editable, so a saved name must survive a reload. Only
+           the OLD auto-composed label ("图像 · a.png") is rewritten: a material
+           node is named after its file, a generator after its medium. */
+        const title = typeof data.title === "string" ? data.title.trim() : "";
+        const legacyLabel = title.indexOf(spec.title + " · ") === 0;
+        if (!title || legacyLabel) {
+          data.title = data.asset
+            ? (data.asset.name || data.asset.filename || spec.title)
+            : spec.title;
+        }
+      }
+    }
+  }
+
+  /* 旧版本在生成器旁边留了一个结果节点，而生成器本身就显示同一张图。载入时
+     直接收掉：画面留在生成器里，老画布看起来和新规则产物一样（素材 → 生成器）。 */
+  function foldResultNodes(doc) {
+    const nodes = doc.nodes || [];
+    const byId = new Map(nodes.map((entry) => [String(entry.id), entry]));
+    const drop = new Map();
+    for (const entry of nodes) {
+      const ownerId = entry?.data?.resultOf;
+      if (!ownerId) continue;
+      const owner = byId.get(String(ownerId));
+      /* 生成器还没结果可显示时不动它：那张图此时只存在于结果节点里。 */
+      if (!owner?.data?.result) continue;
+      drop.set(String(entry.id), String(owner.id));
+    }
+    if (!drop.size) return;
+    doc.nodes = nodes.filter((entry) => !drop.has(String(entry.id)));
+    doc.edges = (doc.edges || []).filter((edge) =>
+      !drop.has(String(edge.source)) && !drop.has(String(edge.target)));
+    for (const ownerId of new Set(drop.values())) {
+      const owner = byId.get(ownerId);
+      if (owner?.data) owner.data.resultNodes = [];
+    }
+  }
+
   function hydrate(doc, data) {
     if (!data) return;
     if (Number(data.version) >= 2 && Array.isArray(data.nodes)) {
       doc.nodes = data.nodes;
       doc.edges = Array.isArray(data.edges) ? data.edges : [];
-      /* Generate nodes now expose a single input handle ("in"). Normalize legacy
-         edges that targeted the old four typed handles so their lines survive. */
-      const genIds = new Set(doc.nodes.filter((n) => n?.data?.role === "gen").map((n) => String(n.id)));
+      doc.groups = Array.isArray(data.groups) ? data.groups : [];
+      for (const node of doc.nodes) normalizeNodeData(node?.data);
+      foldResultNodes(doc);
+      /* The unified node exposes a single input handle ("in"), and only in its
+         generator state. Normalize legacy edges that targeted the old four
+         typed handles so their lines survive. */
+      const genIds = new Set(doc.nodes
+        .filter((n) => n?.data?.role === "media" && !n.data.asset)
+        .map((n) => String(n.id)));
       for (const edge of doc.edges) {
         if (genIds.has(String(edge.target))) edge.targetHandle = "in";
       }
@@ -362,7 +556,7 @@
     try { migrateLegacyGraph(doc, data); }
     catch (error) {
       console.error("[InfCanvas] migrate failed", error);
-      toast("error", "画布迁移失败", String(error));
+      toast("error", tr("画布迁移失败"), String(error));
     }
   }
 
@@ -380,10 +574,10 @@
     return name;
   }
 
-  function createDoc(name = null, data = null) {
+  function createDoc(name = null, data = null, id = null) {
     const doc = {
-      id: uid(), name: name || unconflictedName(), saved: !!name, dirty: false,
-      nodes: [], edges: [], viewport: null,
+      id: id || uid(), name: name || unconflictedName(), saved: !!name, dirty: false,
+      nodes: [], edges: [], groups: [], viewport: null,
     };
     hydrate(doc, data);
     return doc;
@@ -393,6 +587,9 @@
     const target = doc || activeDoc();
     if (!target) return;
     if (!target.dirty) { target.dirty = true; NS.ui?.renderTabs(); }
+    if (target.id === state.activeId) syncDocFromFlow(target);
+    writeDraft(target);
+    persistTabs();
     clearTimeout(state.autosaveTimer);
     state.autosaveTimer = setTimeout(async () => {
       if (!state.active || !target.saved || !autoSaveEnabled()) return;
@@ -409,16 +606,18 @@
     if (!snapshot) return;
     doc.nodes = snapshot.nodes;
     doc.edges = snapshot.edges;
+    doc.groups = snapshot.groups || [];
     doc.viewport = snapshot.viewport;
   }
 
   function switchDoc(id) {
     const previous = activeDoc();
-    if (previous && previous.id !== id) syncDocFromFlow(previous);
+    if (previous && previous.id !== id) { syncDocFromFlow(previous); writeDraft(previous); }
     const doc = state.docs.find((entry) => entry.id === id);
     if (!doc || !flow()) return;
     state.activeId = id;
     flow().load(doc);
+    persistTabs();
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
   }
@@ -429,7 +628,7 @@
     let name = doc.name;
     if (!name || askName) {
       const input = await promptDialog({
-        title: "保存画布", message: "画布名称",
+        title: tr("保存画布"), message: tr("画布名称"),
         defaultValue: name || BASE_NAME,
       });
       if (input === null || !String(input).trim()) return false;
@@ -439,13 +638,17 @@
     const payload = {
       version: 2, engine: "vueflow",
       name, savedAt: new Date().toISOString(),
-      nodes: doc.nodes, edges: doc.edges, viewport: doc.viewport,
+      nodes: doc.nodes, edges: doc.edges, groups: doc.groups || [], viewport: doc.viewport,
     };
     await backend.save(name, payload);
     doc.name = name; doc.saved = true; doc.dirty = false;
+    /* Content is now on disk; the draft is redundant. ComfyUI does the same
+       on save — the draft is only for work that has not reached a file. */
+    clearDraft(doc.id);
+    persistTabs();
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
-    toast("success", "画布已保存", name);
+    toast("success", tr("画布已保存"), name);
     return true;
   }
 
@@ -454,15 +657,16 @@
     if (!doc) return false;
     if (doc.dirty) {
       const choice = await confirmDialog({
-        title: "保存更改？",
-        message: `画布「${doc.name || BASE_NAME}」有未保存的更改`,
-        hint: "保存：保存并关闭；不保存：直接关闭；取消操作：留在当前状态",
+        title: tr("保存更改？"),
+        message: tr("画布「{name}」有未保存的更改", { name: doc.name || BASE_NAME }),
+        hint: tr("保存：保存并关闭；不保存：直接关闭；取消操作：留在当前状态"),
         threeWay: true,
       });
       if (choice === null) return false;
       if (choice === true && !(await saveActive(false, doc))) return false;
     }
     state.docs = state.docs.filter((entry) => entry.id !== id);
+    clearDraft(id);
     if (state.activeId === id) {
       const next = state.docs[0];
       if (next) switchDoc(next.id);
@@ -471,22 +675,34 @@
         state.docs.push(fresh);
         switchDoc(fresh.id);
       }
-    }
+    } else persistTabs();
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
     return true;
   }
 
   async function openByName(name) {
-    const existing = state.docs.find((doc) => doc.name === name);
-    if (existing) { switchDoc(existing.id); return; }
+    /* Disk is the source of truth. Even when a tab with this name is already
+       open, reload its content from disk — otherwise the stale in-memory copy
+       would hide (and on next save overwrite) the persisted version. This is
+       exactly the "Unsaved Canva loses its content" bug. */
     try {
       const response = await backend.canvas(name);
-      const doc = createDoc(name, response.exists ? response.data : null);
-      state.docs.push(doc);
-      switchDoc(doc.id);
-      toast("info", "已打开画布", name);
-    } catch (error) { toast("error", "打开画布失败", String(error)); }
+      if (!response.exists) { toast("error", tr("打开画布失败"), tr("画布不存在：") + name); return; }
+      const existing = state.docs.find((doc) => doc.name === name && doc.saved);
+      if (existing) {
+        /* Same identity, fresh content. Keep the id so its draft/meta follow. */
+        hydrate(existing, response.data);
+        existing.dirty = false;
+        clearDraft(existing.id);
+        switchDoc(existing.id);
+      } else {
+        const doc = createDoc(name, response.data);
+        state.docs.push(doc);
+        switchDoc(doc.id);
+      }
+      toast("info", tr("已打开画布"), name);
+    } catch (error) { toast("error", tr("打开画布失败"), String(error)); }
   }
 
   function newCanvas() {
@@ -501,12 +717,17 @@
     const doc = state.docs.find((entry) => entry.id === id);
     if (!doc) return;
     const value = await promptDialog({
-      title: "重命名画布", message: "画布名称",
+      title: tr("重命名画布"), message: tr("画布名称"),
       defaultValue: doc.name || BASE_NAME,
     });
     if (value === null || !String(value).trim()) return;
     doc.name = String(value).trim();
     doc.dirty = true;
+    /* If it was saved under the old name, renaming detaches it from that file
+       until the next explicit save — same as ComfyUI's Save As. */
+    if (doc.saved) doc.saved = false;
+    writeDraft(doc);
+    persistTabs();
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
   }
@@ -521,15 +742,99 @@
       version: 2,
       nodes: JSON.parse(JSON.stringify(doc.nodes)),
       edges: JSON.parse(JSON.stringify(doc.edges)),
+      groups: JSON.parse(JSON.stringify(doc.groups || [])),
       viewport: doc.viewport ? { ...doc.viewport } : null,
     });
     copy.name = name;
     copy.saved = false;
     copy.dirty = true;
     state.docs.push(copy);
+    writeDraft(copy);
     switchDoc(copy.id);
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
+  }
+
+  /* Bookmarks mirror ComfyUI's useWorkflowBookmarkStore: a Set of canvas names
+     kept in localStorage. The sidebar marks each row with a bookmark button. */
+  const BOOKMARKS_KEY = "InfCanvas.Bookmarks.v1";
+
+  function readBookmarks() {
+    const value = storageRead(BOOKMARKS_KEY);
+    return new Set(Array.isArray(value)
+      ? value.filter((entry) => typeof entry === "string") : []);
+  }
+  function writeBookmarks(set) { storageWrite(BOOKMARKS_KEY, Array.from(set)); }
+  function isBookmarked(name) { return !!name && readBookmarks().has(name); }
+  function toggleBookmark(name) {
+    const set = readBookmarks();
+    const next = !set.has(name);
+    if (next) set.add(name); else set.delete(name);
+    writeBookmarks(set);
+    return next;
+  }
+
+  /* Rename/duplicate a saved canvas by composing the existing GET/POST/DELETE
+     canvas routes, so no Python change (and no ComfyUI restart) is required. */
+  async function renameCanvas(oldName, newName) {
+    const target = String(newName || "").trim();
+    if (!target) throw new Error("名称不能为空");
+    if (target === oldName) return target;
+    const response = await backend.canvas(oldName);
+    if (!response.exists) throw new Error(tr("画布不存在：") + oldName);
+    const payload = {
+      ...(response.data || {}), name: target, savedAt: new Date().toISOString(),
+    };
+    await backend.save(target, payload);
+    await backend.remove(oldName);
+    for (const doc of state.docs) {
+      if (doc.saved && doc.name === oldName) doc.name = target;
+    }
+    const marks = readBookmarks();
+    if (marks.delete(oldName)) { marks.add(target); writeBookmarks(marks); }
+    persistTabs();
+    NS.ui?.renderTabs();
+    return target;
+  }
+
+  /* 复制 ≠ 保存. Duplicating a canvas only loads its content into a NEW
+     in-memory document (saved=false, dirty=true) and opens it — exactly like
+     duplicateDoc() for tabs. Nothing is written to disk until the user saves,
+     so no "<name> (Copy)" file appears in the canvas list.
+     `takenNames` lets the caller fold in the on-disk names it already knows. */
+  async function duplicateCanvas(name, newName, takenNames) {
+    const response = await backend.canvas(name);
+    if (!response.exists) throw new Error(tr("画布不存在：") + name);
+    const source = response.data || {};
+    const used = new Set([
+      ...(Array.isArray(takenNames) ? takenNames : []),
+      ...state.docs.map((doc) => doc.name),
+    ]);
+    const suggested = String(newName || "").trim()
+      || String(name).replace(/\s*\(\d+\)$/, "") + " (Copy)";
+    let target = suggested;
+    if (used.has(target)) {
+      const stem = suggested.replace(/\s*\(\d+\)$/, "");
+      let counter = 2;
+      while (used.has(`${stem} (${counter})`)) counter += 1;
+      target = `${stem} (${counter})`;
+    }
+    const copy = createDoc(null, {
+      version: 2,
+      nodes: JSON.parse(JSON.stringify(source.nodes || [])),
+      edges: JSON.parse(JSON.stringify(source.edges || [])),
+      viewport: source.viewport ? { ...source.viewport } : null,
+    });
+    copy.name = target;
+    copy.saved = false;
+    copy.dirty = true;
+    state.docs.push(copy);
+    writeDraft(copy);
+    persistTabs();
+    switchDoc(copy.id);
+    NS.ui?.renderTabs();
+    NS.ui?.refreshPanels();
+    return target;
   }
 
   async function closeDocsAt(id, mode) {
@@ -643,15 +948,20 @@
     flow().setViewport({ x: vp.x - dx * zoom, y: vp.y - dy * zoom, zoom });
   }
 
-  function addNodeByType(type, pos = null, asset = null) {
-    const spec = SPEC_BY_TYPE[type];
+  function addNodeByType(type, pos = null, asset = null, title = null) {
+    const spec = specOf(type);
     if (!spec || !flow()) {
-      toast("error", "无法创建节点", "画布尚未就绪，请刷新页面后重试");
+      toast("error", tr("无法创建节点"), tr("画布尚未就绪，请刷新页面后重试"));
       return null;
     }
     const autoPlaced = !pos;
     const position = autoPlaced ? freeSpot(centerPos(), spec.size, spec.role) : [pos[0], pos[1]];
     const node = nodeFromSpec(spec, position, asset);
+    /* A node that starts life WITH a material is named after that material (the
+       file the user dropped or pasted). A generated result passes its title
+       explicitly so the new node keeps the plain medium name. */
+    if (title !== null) node.data.title = title;
+    else if (asset) node.data.title = asset.name || asset.filename || spec.title;
     flow().addNode(node);
     flow().selectNodes([node.id]);
     markDirty();
@@ -663,6 +973,56 @@
     if (!flow()) return;
     flow().removeNodes([id]);
     markDirty();
+  }
+
+  /* ---- dropping a file ON a node: generator -> material, one way ----
+     A media node is a generator until a file lands on it, and that flip is
+     final (delete + create to get a generator back). Collapsing the states
+     means the flip may never destroy work: a node that already produced a
+     result, or that is being fed by upstream nodes, refuses the drop. */
+  const MEDIA_LABELS = { image: "图片", video: "视频", audio: "音频" };
+  function absorbReason(node) {
+    const data = node?.data;
+    if (!data || data.role !== "media") return "该节点不接受素材";
+    if (data.asset) return "该节点已经是素材节点，如需更换请删除后重建";
+    if (data.result) return "该节点已生成结果，不能再转为素材节点，请新建一个图像 / 视频 / 音频节点";
+    const wired = (flow()?.edgesOf?.() || []).filter((edge) => edge.target === node.id);
+    if (wired.length) return "该节点已接入上游素材，请先断开连线";
+    return "";
+  }
+
+  async function absorbFiles(node, files, point) {
+    const data = node?.data;
+    if (!data) return;
+    const file = files?.[0];
+    if (!file) return;
+    if (files.length > 1) toast("info", tr("只接收第一个文件"), file.name);
+    const kind = kindOfFile(file);
+    if (!kind) { toast("warning", tr("不支持的文件类型"), file.name); return; }
+    const reason = absorbReason(node);
+    if (reason) { toast("warning", tr("无法拖入素材"), reason); return; }
+    if (kind !== data.kind) {
+      toast("warning", tr("文件类型不匹配"),
+        tr("「{title}」节点仅接受{kind}文件：{file}", { title: data.title || tr(MEDIA_LABELS[data.kind] || data.kind), kind: tr(MEDIA_LABELS[data.kind] || data.kind), file: file.name }));
+      return;
+    }
+    try {
+      const asset = await backend.upload(file);
+      asset.kind = kind;
+      asset.name = asset.name || file.name;
+      asset.url = refreshViewUrl(asset).url || viewUrl(asset);
+      if (kind === "text") {
+        try { asset.text = (await readTextFile(file)).slice(0, 4000); } catch (error) { /* binary */ }
+      }
+      /* The capsule shows the name the user actually dropped (file.name), not
+         the store name the backend gave it (which carries a timestamp suffix). */
+      NS.flow?.updateNodeData?.(node.id, kind === "text"
+        ? { asset, text: asset.text || "", title: file.name }
+        : { asset, title: file.name });
+      markDirty();
+      NS.ui?.refreshPanels?.();
+      toast("success", tr("已转为素材节点"), file.name);
+    } catch (error) { toast("error", tr("上传失败"), file.name + " · " + String(error)); }
   }
 
   /* ---- system clipboard / file drop -> nodes (ported from xcat-paste.js) ----
@@ -736,16 +1096,16 @@
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
       const kind = kindOfFile(file);
-      if (!kind) { toast("warning", "不支持的文件类型", file.name); continue; }
+      if (!kind) { toast("warning", tr("不支持的文件类型"), file.name); continue; }
       try {
         const asset = await backend.upload(file);
         if (kind === "text") {
           try { asset.text = (await readTextFile(file)).slice(0, 4000); } catch (error) { /* binary */ }
         }
-        addNodeByType(TYPE_BY_KIND[kind], [point.x + index * 24, point.y + index * 24], asset);
+        addNodeByType(TYPE_BY_KIND[kind], [point.x + index * 24, point.y + index * 24], asset, file.name);
         NS.ui?.refreshPanels();
-        toast("success", "素材已添加", file.name);
-      } catch (error) { toast("error", "上传失败", file.name + " · " + String(error)); }
+        toast("success", tr("素材已添加"), file.name);
+      } catch (error) { toast("error", tr("上传失败"), file.name + " · " + String(error)); }
     }
   }
 
@@ -774,7 +1134,7 @@
       try {
         const asset = JSON.parse(custom);
         addNodeByType(TYPE_BY_KIND[asset.kind] || TYPE_BY_KIND.text, [point.x, point.y], asset);
-      } catch (error) { toast("error", "资产解析失败", String(error)); }
+      } catch (error) { toast("error", tr("资产解析失败"), String(error)); }
       return;
     }
     await handleFiles(collectFiles(event.dataTransfer), point);
@@ -795,7 +1155,9 @@
       if (seenSources.has(edge.source)) continue;
       seenSources.add(edge.source);
       const source = (flow()?.nodesOf?.() || []).find((entry) => entry.id === edge.source);
-      const asset = source?.data?.asset;
+      /* 生成器把结果回显在自己身上（data.result），没有独立的结果节点；它
+         照样能作为素材接到下一个生成节点，所以这里两种都认。 */
+      const asset = source?.data?.asset || source?.data?.result;
       const kind = source?.data?.kind || asset?.kind || (source?.data?.role === "text" ? "text" : null);
       /* A text node is a PROMPT input, not an asset — it legitimately has no
          asset, so don't drop it. Media nodes still require an asset. */
@@ -806,7 +1168,7 @@
         name: edge.targetHandle || "",
         asset: asset || null,
         kind,
-        text: source.data.text || "",
+        text: source.data.text || source.data.result?.text || "",
       });
     }
     return result;
@@ -832,7 +1194,16 @@
        wire reaches the workflow even when the user typed nothing. */
     if (map.a) writes.push([map.a, areaA ?? data.prompt ?? ""]);
     if (map.b) writes.push([map.b, data.lyrics ?? ""]);
-    for (const [id, value] of Object.entries(data?.apiValues || {})) writes.push([id, value]);
+    /* The prompt of an image / video / text generator is edited in the node's
+       own text area, not in the settings popover; `promptMap` says which
+       exposed input it belongs to. An empty area leaves the workflow's own
+       default alone instead of wiping it. */
+    const promptId = data?.promptMap || "";
+    if (promptId && (areaA ?? data.prompt ?? "")) writes.push([promptId, areaA ?? data.prompt ?? ""]);
+    for (const [id, value] of Object.entries(data?.apiValues || {})) {
+      if (promptId && id === promptId) continue;
+      writes.push([id, value]);
+    }
     for (const [id, value] of writes) {
       const [nodeId, key] = String(id).split(":");
       const node = target[nodeId];
@@ -843,6 +1214,14 @@
     }
   }
 
+  /* Seeds are 64-bit in ComfyUI. Only fall back to a random pick when the panel
+     actually has no value -- `Number(data.seed) || x` used to rewrite a legal 0. */
+  function seedOrRandom(raw) {
+    const value = Number(raw);
+    if (raw !== "" && raw !== null && raw !== undefined && Number.isFinite(value)) return value;
+    return Math.floor(Math.random() * SAFE_INT_MAX);
+  }
+
   async function buildPrompt(kind, template, data, inputs) {
     let checkpoint = "";
     try {
@@ -850,7 +1229,51 @@
       checkpoint = defs?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0]?.[0] || "";
     } catch (error) { /* object_info may be unavailable */ }
     const find = (wanted) => inputs.find((entry) => entry.kind === wanted)?.asset || null;
-    const image = find("image"), video = find("video"), audio = find("audio");
+    /* LoadImage / LoadVideo / LoadAudio 只读 input 目录，而生成结果都落在 output：
+       「生成 → 放大 / 编辑 / 再生成」这条链以前直接抛错，让用户把同一张图再拖一次
+       才算上传。现在先请求后端把文件拷进 input/infcanvas（同一份只拷一次），
+       拿到的 ref 再交给模板。老后端没有这条路由时保持原来的报错。 */
+    const MEDIA_LABEL = { image: "图像", video: "视频", audio: "音频" };
+    async function ensureInputAsset(asset, kind) {
+      if (!asset || !asset.filename) return asset;
+      if ((asset.type || "input") === "input") return asset;
+      try {
+        const api = API();
+        const res = await api.fetchApi("/infcanvas/media/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: asset.filename,
+            subfolder: asset.subfolder || "",
+            type: asset.type || "input",
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const next = data?.asset;
+          if (next?.filename) {
+            return { ...asset, filename: next.filename, subfolder: next.subfolder || "", type: "input" };
+          }
+        }
+      } catch (error) { /* 旧后端没有 /media/import，走下面的兜底报错 */ }
+      throw new Error((MEDIA_LABEL[kind] || "素材") + "需来自 input 目录；请先把该素材拖入画布上传一次");
+    }
+    /* 只搬模板真的会用到的素材：文本节点也接受图片/视频，但它的模板里没有
+       {{image}} 占位符，为一个用不上的 100MB 视频做拷贝没有意义。 */
+    const templateText = JSON.stringify(template);
+    const legacyImage = !!(template["3"] && template["4"] && template["5"]);
+    const consumed = {
+      image: templateText.includes("{{image}}") || legacyImage,
+      video: templateText.includes("{{video}}"),
+      audio: templateText.includes("{{audio}}"),
+    };
+    const take = async (wanted) => {
+      const asset = find(wanted);
+      return consumed[wanted] ? await ensureInputAsset(asset, wanted) : asset;
+    };
+    const image = await take("image");
+    const video = await take("video");
+    const audio = await take("audio");
     const text = inputs.filter((entry) => entry.kind === "text")
       .map((entry) => entry.text || entry.asset?.name || "").filter(Boolean).join("\n");
     const promptText = [data.prompt || "", text].filter(Boolean).join("\n") || "a photo";
@@ -858,9 +1281,6 @@
        feeds. Typed text wins the first line, wired prompts are appended — that
        is the only place wired text is allowed to land (never 歌词 / 朗读文本). */
     const areaA = [data.prompt || "", text].filter(Boolean).join("\n");
-    if (image && image.type !== "input") {
-      throw new Error("图像素材需来自 input 目录；请先把该素材拖入画布上传一次");
-    }
     if (!checkpoint && JSON.stringify(template).includes("{{checkpoint}}")) {
       throw new Error("未检测到 Checkpoint 模型，请先在 ComfyUI 中放置一个模型");
     }
@@ -872,7 +1292,9 @@
          (voice), the first one doubles as 语气 for voice templates. */
       lyrics: data.lyrics || "",
       tone: areaA,
-      seed: Number(data.seed) || Math.floor(Math.random() * 1000000000),
+      /* 0 is a legal seed, so test for absence rather than truthiness; the
+         fallback stays inside the same 64-bit range object_info reports. */
+      seed: seedOrRandom(data.seed),
       steps: Number(data.steps) || 20,
       width: Number(data.width) || 512,
       height: Number(data.height) || 512,
@@ -951,33 +1373,131 @@
     throw new Error("等待生成结果超时");
   }
 
-  function attachResult(node, asset) {
-    const type = TYPE_BY_KIND[asset.kind] || TYPE_BY_KIND.text;
-    const size = node.data?.size || [250, 230];
-    const position = [
-      node.position.x + (size[0] || 250) + 70,
-      node.position.y + (state.results % 5) * 46,
-    ];
-    const created = addNodeByType(type, position, asset);
-    // Material nodes no longer accept input connections, so the generated
-    // result is placed next to the generator rather than wired into it.
-    node.data.result = asset;
-    state.results += 1;
+  /* 结果直接写回生成器自己：节点本来就把 data.result 当画面显示
+     （assetOf = asset || result），再在旁边放一个结果节点就是同一张图出现两次。
+     回显出来的这张图本身就能当素材接到下一个生成节点（生成器对外提供 result）。
+     只有一次跑出多个输出（批量）时，生成器装不下的那些才各占一个节点。
+     `resultNodes` 因此只记这些多余槽位；`data.resultOf` 反过来指回生成器。 */
+  function attachResults(node, assets) {
+    const data = node.data;
+    const list = (assets || []).filter(Boolean);
+    if (!list.length) return;
+
+    /* 旧版本在生成器右边留的结果节点：直接收走，回显只留在生成器里。 */
+    for (const id of Array.isArray(data.resultNodes) ? data.resultNodes.slice() : []) {
+      const found = flow()?.findNode?.(id);
+      if (!found || found.data?.resultOf !== node.id) continue;
+      removeNode(found.id);
+    }
+
+    const next = [];
+    list.slice(1).forEach((asset, index) => {
+      const type = TYPE_BY_KIND[asset.kind] || TYPE_BY_KIND.text;
+      const spec = SPEC_BY_TYPE[type];
+      const size = data?.size || [250, 230];
+      const position = [
+        node.position.x + (size[0] || 250) + 70,
+        node.position.y + ((state.results + index) % 5) * 46,
+      ];
+      /* A generated result keeps the medium name ("图像"), NOT the output file
+         name: the file name is an implementation detail of the run, while the
+         node stays the same kind of thing the user created. */
+      const created = addNodeByType(type, position, asset, spec?.title || null);
+      if (!created) return;
+      /* Marked through the flow layer, not on the raw object: Vue Flow keeps its
+         own copy of the node, so a plain field write would only reach the
+         serialised array and fail the resultOf check on the next run. */
+      NS.flow?.updateNodeData?.(created.id, { resultOf: node.id });
+      next.push(created.id);
+      state.results += 1;
+    });
+
+    data.resultNodes = next;
+    /* 再次运行 = 覆盖同一个画面，不会每跑一次多一张。 */
+    data.result = list[0];
+    NS.flow?.updateNodeData?.(node.id, { resultNodes: next, result: data.result });
   }
+
+  /* Value control (ComfyUI core/graph/widgets/valueControl.ts). Mirrors
+     computeNextNumberValue(): randomize = floor(random() * range) * step + min.
+     The guard is 2^64-1, the range object_info reports for INT seeds -- anything
+     tighter would silently truncate the templates' own seeds (4.4e14 and up). */
+  const SAFE_INT_MAX = 18446744073709552000;
+  function nextControlledValue(mode, spec, current) {
+    const value = Number(current);
+    if (!Number.isFinite(value)) return undefined;
+    if (mode === "fixed") return undefined;
+    const step = Number.isFinite(Number(spec?.step)) && Number(spec.step) > 0
+      ? Number(spec.step) : 1;
+    const min = Math.max(-SAFE_INT_MAX, Number.isFinite(Number(spec?.min))
+      ? Number(spec.min) : 0);
+    const max = Math.min(SAFE_INT_MAX, Number.isFinite(Number(spec?.max))
+      ? Number(spec.max) : min + step * 1000000);
+    let next = value;
+    if (mode === "increment") next += step;
+    else if (mode === "decrement") next -= step;
+    else if (mode === "randomize") {
+      /* A float cannot hold 2^64-1 exactly: drawing near the ceiling rounds UP
+         to 2^64, which ComfyUI then rejects with value_bigger_than_max. Rolling
+         inside the safe-integer range stays a valid seed and never overflows. */
+      const ceiling = Math.min(max, Number.MAX_SAFE_INTEGER);
+      const range = (ceiling - min) / step;
+      if (!(range > 0)) return min;
+      next = Math.floor(Math.random() * range) * step + min;
+    } else return undefined;
+    return Number(Math.min(Math.max(next, min), max).toFixed(6));
+  }
+
+  NS.fieldControl = {
+    next: nextControlledValue,
+    /* Runs right after the prompt is queued (the host's "after generate").
+       Writing apiValues means the NEXT run uses the new seed and the node's own
+       input shows it immediately. */
+    applyAfterQueue(node) {
+      const modes = node?.data?.fieldModes || {};
+      const specs = node?.data?.fieldSpecs || {};
+      /* EVERY exposed 随机数 counts, not only the ones whose badge was clicked:
+         the badge shows 随机值 by default (the host default is "randomize"), so
+         an untouched seed still has to advance after each run -- keying off
+         fieldModes alone made 递增 / 递减 / 随机 all do nothing until the user
+         happened to re-pick a mode. */
+      const ids = [...new Set([...Object.keys(specs), ...Object.keys(modes)])];
+      if (!ids.length) return;
+      const values = { ...(node.data.apiValues || {}) };
+      let changed = false;
+      for (const id of ids) {
+        const spec = specs[id] || {};
+        const raw = values[id];
+        /* Never touched: the panel is showing the template's own value, so that
+           is the number to advance. Passing undefined skipped every mode. */
+        const current = raw === undefined || raw === null || raw === ""
+          ? spec.default
+          : raw;
+        const next = nextControlledValue(modes[id] || "randomize", spec, current);
+        if (next === undefined || next === current) continue;
+        values[id] = next;
+        changed = true;
+      }
+      if (!changed) return;
+      node.data.apiValues = values;
+      NS.flow?.updateNodeData?.(node.id, { apiValues: values });
+      markDirty();
+    },
+  };
 
   NS.generate = {
     async run(nodeId) {
       const node = (flow()?.nodesOf?.() || []).find((entry) => entry.id === nodeId);
       if (!node) return;
       const data = node.data;
-      if (data.status === "running") { toast("info", "该节点正在生成"); return; }
+      if (data.status === "running") { toast("info", tr("该节点正在生成")); return; }
       const kind = data.kind;
       const templateName = data.workflow || kind;
       let template;
       try { template = await backend.workflow(templateName); }
-      catch (error) { toast("error", "读取生成模板失败", String(error)); return; }
+      catch (error) { toast("error", tr("读取生成模板失败"), String(error)); return; }
       if (template?._requires_config) {
-        toast("warning", "请先配置生成模板", template.hint || `workflows/${templateName}.json`);
+        toast("warning", tr("请先配置生成模板"), template.hint || `workflows/${templateName}.json`);
         return;
       }
       let prompt;
@@ -985,7 +1505,7 @@
          data object (data has no id — passing it silently yielded zero
          wired inputs, so {{image}}/{{text}}/{{audio}} were always empty). */
       try { prompt = await buildPrompt(kind, template, data, collectInputs(node)); }
-      catch (error) { toast("error", "构建工作流失败", String(error)); return; }
+      catch (error) { toast("error", tr("构建工作流失败"), String(error)); return; }
       data.status = "running";
       data.error = "";
       markDirty();
@@ -994,15 +1514,18 @@
       try {
         const queued = await API().queuePrompt(0, { output: prompt, workflow: {} });
         if (!queued?.prompt_id) throw new Error("提交任务失败，未返回 prompt_id");
+        /* Comfy.WidgetControlMode defaults to "after": the seed advances once the
+           prompt is queued, so this run keeps the value it was submitted with. */
+        NS.fieldControl.applyAfterQueue(node);
         const outputs = await pollHistory(queued.prompt_id);
         if (!outputs.length) throw new Error("任务完成但没有返回可用输出");
-        outputs.forEach((asset) => attachResult(node, asset));
+        attachResults(node, outputs);
         data.status = "done";
-        toast("success", "生成完成", `${outputs.length} 个结果已回贴到画布`);
+        toast("success", tr("生成完成"), tr("{n} 个结果已回显到节点", { n: outputs.length }));
       } catch (error) {
         data.status = "error";
         data.error = String(error);
-        toast("error", "生成失败", String(error));
+        toast("error", tr("生成失败"), String(error));
       }
       markDirty();
       NS.flow?.history?.absorb?.();
@@ -1026,24 +1549,47 @@
       event.preventDefault(); event.stopPropagation();
       onDrop(event);
     });
-    /* Generate nodes never accept media (ported from the reference project's
-       xcat-no-media-import.js). Swallow dragover/drop in the CAPTURE phase so
-       the host's drop handler above never fires for a generate node — the event
-       is stopped before it can bubble down to `host`. Everything else (asset
-       nodes, empty canvas, panel media-strip reorders) passes through. */
-    const genTarget = (event) => {
-      const t = event.target;
-      return t && t.closest ? t.closest(".icn--gen") : null;
+    /* A file dropped ON a node never creates a second node: it flips that
+       generator into a material node (or is refused with a reason). Vue Flow
+       puts the node id on the wrapper, so the hit test needs no DOM markers of
+       our own. Capture phase, so the host's "drop -> new node" handler below
+       never sees it. */
+    const mediaTarget = (event) => {
+      const wrapper = event.target?.closest?.(".vue-flow__node");
+      const id = wrapper?.dataset?.id;
+      if (!id) return null;
+      const node = (flow()?.nodesOf?.() || []).find((entry) => String(entry.id) === String(id));
+      return node?.data?.role === "media" ? node : null;
     };
     document.addEventListener("dragover", (event) => {
-      if (!state.active || !genTarget(event)) return;
+      if (!state.active) return;
+      const target = mediaTarget(event);
+      if (!target) return;
       event.preventDefault(); event.stopPropagation();
-      try { if (event.dataTransfer) event.dataTransfer.dropEffect = "none"; } catch (error) { /* ignore */ }
+      const effect = absorbReason(target) ? "none" : "copy";
+      try { if (event.dataTransfer) event.dataTransfer.dropEffect = effect; } catch (error) { /* ignore */ }
     }, true);
     document.addEventListener("drop", (event) => {
-      if (!state.active || !genTarget(event)) return;
+      if (!state.active) return;
+      const target = mediaTarget(event);
+      if (!target) return;
       event.preventDefault(); event.stopPropagation();
-      toast("warning", "生成节点不接受素材", "请在下方选择工作流并运行");
+      const reason = absorbReason(target);
+      if (reason) { toast("warning", tr("无法拖入素材"), reason); return; }
+      /* Asset payloads dragged out of a node's own tool dialog arrive as JSON,
+         not as a File -- flip the node straight to that asset. */
+      const custom = event.dataTransfer?.getData("application/x-infcanvas-asset");
+      if (custom) {
+        try {
+          const asset = JSON.parse(custom);
+          NS.flow?.updateNodeData?.(target.id, { asset });
+          markDirty();
+          NS.ui?.refreshPanels?.();
+          toast("success", tr("已转为素材节点"), asset.name || asset.filename || "");
+        } catch (error) { toast("error", tr("资产解析失败"), String(error)); }
+        return;
+      }
+      absorbFiles(target, collectFiles(event.dataTransfer));
     }, true);
     /* Double-clicking empty canvas opens the canvas's own node list at the
        pointer. Vue Flow gives us screen->flow conversion, so the new node lands
@@ -1057,6 +1603,10 @@
          node menu in ComfyUI either. */
       if (NS.flow?.state?.mode?.value === "drag") return;
       if (event.target.closest?.(".vue-flow__node")) return;
+      /* Groups and the multi-select toolbox are real controls on the canvas:
+         double-clicking a group title renames it, and the toolbox buttons
+         must never open the add-node menu underneath them. */
+      if (event.target.closest?.(".ic-group, .ic-group-ui, .ic-selection-tools")) return;
       const point = flow().screenToFlow(event.clientX, event.clientY);
       NS.ui?.showAddNodeMenu?.({
         clientX: event.clientX, clientY: event.clientY,
@@ -1071,12 +1621,12 @@
     if (state.exiting) return;
     if (state.active) { NS.ui?.renderTabs(); return; }
     if (!flow()) {
-      toast("error", "画布引擎未就绪", "请刷新页面后重试");
+      toast("error", tr("画布引擎未就绪"), tr("请刷新页面后重试"));
       return;
     }
     NS.ui?.injectStyles();
     const shell = NS.ui?.mountShell();
-    if (!shell) { toast("error", "画布界面创建失败", "请刷新页面后重试"); return; }
+    if (!shell) { toast("error", tr("画布界面创建失败"), tr("请刷新页面后重试")); return; }
     ensureSurface(shell.stage);
     try { NS.controls?.mount?.(shell.stage); }
     catch (error) { console.error("[InfCanvas] mountControls failed", error); }
@@ -1086,12 +1636,44 @@
     suppressPreexistingDialogs(true);
     document.documentElement.classList.add("infcanvas-mode");
     if (!state.docs.length) {
-      const doc = createDoc();
-      state.docs.push(doc);
-      state.activeId = doc.id;
+      /* Rebuild every open tab from persisted state. Saved canvases come from
+         disk (fresh), unsaved ones from their localStorage draft. Both carry
+         their original id so drafts/metas stay attached. */
+      const tabs = storageRead(TABS_KEY);
+      if (tabs && Array.isArray(tabs.ids) && tabs.ids.length) {
+        for (const id of tabs.ids) {
+          const meta = storageRead(META_KEY(id));
+          let data = readDraft(id);
+          let name = meta?.name || "";
+          let saved = !!meta?.saved;
+          if (saved && name) {
+            try {
+              const response = await backend.canvas(name);
+              if (response.exists) data = response.data;
+              else { /* file gone: fall back to draft if we have one */
+                if (!data) continue;
+                saved = false;
+              }
+            } catch (error) { if (!data) continue; }
+          }
+          if (!data) continue;
+          const doc = createDoc(name || null, data, id);
+          doc.saved = saved;
+          doc.dirty = !saved;
+          state.docs.push(doc);
+        }
+      }
+      if (!state.docs.length) {
+        const doc = createDoc();
+        state.docs.push(doc);
+        writeDraft(doc);
+      }
+      const wanted = tabs && Number.isInteger(tabs.activeIndex)
+        ? Math.min(Math.max(tabs.activeIndex, 0), state.docs.length - 1) : 0;
+      state.activeId = state.docs[wanted]?.id || state.docs[0].id;
     }
     switchDoc(state.activeId || state.docs[0].id);
-    toast("info", "已进入无限画布", "拖入素材或点击左侧「新建节点」");
+    toast("info", tr("已进入无限画布"), tr("拖入素材或点击左侧「添加节点」"));
   }
 
   async function exit() {
@@ -1108,16 +1690,18 @@
       for (const doc of Array.from(state.docs)) {
         if (doc.dirty) {
           const choice = await confirmDialog({
-            title: "保存更改？",
-            message: `画布「${doc.name || BASE_NAME}」有未保存的更改`,
-            hint: "保存：保存后返回；不保存：直接返回；取消操作：留在画布",
+            title: tr("保存更改？"),
+            message: tr("画布「{name}」有未保存的更改", { name: doc.name || BASE_NAME }),
+            hint: tr("保存：保存后返回；不保存：直接返回；取消操作：留在画布"),
             threeWay: true,
           });
           if (choice === null) return;
           if (choice === true && !(await saveActive(false, doc))) return;
         }
         syncDocFromFlow(doc);
+        writeDraft(doc);
       }
+      persistTabs();
       state.active = false;
       try { flow()?.pauseAll?.(); } catch (error) { /* optional */ }
       document.documentElement.classList.remove("infcanvas-mode");
@@ -1126,7 +1710,7 @@
       try { NS.controls?.unmount?.(); } catch (error) { /* optional */ }
       NS.ui?.unmountShell();
       flow()?.unmount?.();
-      toast("info", "已返回 ComfyUI");
+      toast("info", tr("已返回 ComfyUI"));
     } finally {
       state.exiting = false;
     }
@@ -1184,15 +1768,34 @@
       const selected = flow()?.selectedNodes?.() || [];
       if (selected.length) {
         event.preventDefault(); event.stopImmediatePropagation();
+        if (flow()?.state?.selectedGroupId) flow().state.selectedGroupId.value = null;
         flow().removeNodes(selected.map((node) => node.id));
         markDirty();
         return;
       }
-      /* No node selected: a highlighted link is what Delete removes. */
+      /* A selected group behaves like ComfyUI's selected LGraphGroup: Delete
+         removes the rectangle and keeps its nodes exactly where they are. */
+      const groupId = flow()?.state?.selectedGroupId?.value;
+      if (groupId) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        flow()?.state?.groupActions?.deleteGroup?.(groupId);
+        return;
+      }
+      /* No node or group selected: a highlighted link is what Delete removes. */
       const edges = NS.flow?.state?.flow?.getSelectedEdges?.value || [];
       if (edges.length) {
         event.preventDefault(); event.stopImmediatePropagation();
         flow().removeEdges(edges.map((edge) => edge.id));
+      }
+      return;
+    }
+    /* Ctrl+G groups the current selection, like ComfyUI's group command.
+       At least two nodes are required; a single node is not a selection. */
+    if (mod && key === "g" && !event.shiftKey) {
+      const selected = flow()?.selectedNodes?.() || [];
+      if (selected.length >= 2) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        flow()?.state?.groupActions?.createGroup?.();
       }
       return;
     }
@@ -1251,6 +1854,7 @@
     init, enter, exit, toast, confirmDialog, promptDialog, viewUrl, resolveMediaUrl,
     markDirty, saveActive, closeDoc, closeDocsAt, openByName, newCanvas,
     renameDoc, duplicateDoc, switchDoc,
+    renameCanvas, duplicateCanvas, isBookmarked, toggleBookmark,
     addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile,
     docs: () => state.docs, activeId: () => state.activeId,
     isActive: () => state.active,

@@ -69,6 +69,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('setup:', await ev(`(async () => {
     const NS = window.InfCanvas;
     await NS.api.enter();
+    NS.api.newCanvas();   /* blank doc: earlier runs left nodes behind */
     await new Promise((r) => setTimeout(r, 800));
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#2f6f8f"/><circle cx="200" cy="150" r="70" fill="#e0b040"/></svg>';
     const asset = NS.api.addNodeByType('infcanvas/asset_image', [180, 220], {
@@ -84,20 +85,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(900);
 
   /* select the generator with a real click so the overlay panel becomes visible */
-  const gp = JSON.parse(await ev(`(() => { const el = [...document.querySelectorAll('.icn--gen')][0];
-    const b = el.getBoundingClientRect(); return JSON.stringify([Math.round(b.x + b.width / 2), Math.round(b.y + 24)]); })()`));
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: gp[0], y: gp[1], button: 'left', clickCount: 1 });
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: gp[0], y: gp[1], button: 'left', clickCount: 1 });
-  await sleep(600);
+  /* Node-scoped query helpers: the canvas may already hold OTHER generator
+     nodes (each with its own .icn__gpv-rich / .icn__gpv-asset), so a global
+     query would read the wrong panel. */
+  console.log('scope:', await ev(`(() => {
+    window.__root = () => document.querySelector('[data-id="' + window.__probe.genId + '"]');
+    window.__q = (s) => { const r = window.__root(); return r ? r.querySelector(s) : null; };
+    window.__qa = (s) => { const r = window.__root(); return r ? [...r.querySelectorAll(s)] : []; };
+    return !!window.__root(); })()`));
+
+  /* Select through the API: a synthetic click no longer reliably lands on the
+     node header, and the overlay panel is inert (pointer-events:none) while the
+     node is unselected. */
+  console.log('select:', await ev(`(() => { InfCanvas.flow.selectNodes([window.__probe.genId]);
+    InfCanvas.api.revealNode(window.__probe.genId); return 'ok'; })()`));
+  await sleep(800);
 
   /* "文生视频" has no asset slots — switch to "全能参考" so thumbnails show up
      and both preview cards can be compared side by side. */
   console.log('mode:', await ev(`(async () => {
-    const btn = [...document.querySelectorAll('.icn__gpv-mode')].find((b) => b.textContent.trim() === '全能参考');
+    const btn = [...window.__qa('.icn__gpv-mode')].find((b) => b.textContent.trim() === '全能参考');
     if (!btn) return 'NO BTN';
     btn.click();
     await new Promise((r) => setTimeout(r, 500));
-    return JSON.stringify({ slots: document.querySelectorAll('.icn__gpv-asset').length });
+    return JSON.stringify({ slots: window.__qa('.icn__gpv-asset').length });
   })()`, true));
 
   console.log('panel layout:', await ev(`(() => {
@@ -105,7 +116,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const b = e.getBoundingClientRect();
       return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
     return JSON.stringify({
-      node: pick('.icn--gen'),
+      node: (function () { const e = document.querySelector('[data-id="' + window.__probe.genId + '"] .icn');
+        if (!e) return null; const b = e.getBoundingClientRect();
+        return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; })(),
       panel: pick('.icn__gpv'),
       modes: pick('.icn__gpv-modes'),
       assets: pick('.icn__gpv-assets'),
@@ -116,13 +129,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     }); })()`));
 
   /* put the caret at the end of the prompt and type "参考 @" */
-  console.log('focus:', await ev(`(() => { const el = document.querySelector('.icn__gpv-rich'); el.focus();
+  console.log('focus:', await ev(`(() => { const el = window.__q('.icn__gpv-rich'); el.focus();
     const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
     return document.activeElement === el; })()`));
   await send('Input.insertText', { text: '参考 @' });
   await sleep(400);
-  console.log('menu:', await ev(`(() => { const m = document.querySelector('.icn__gpv-atmenu');
+  console.log('menu:', await ev(`(() => { const m = window.__q('.icn__gpv-atmenu');
     return m ? JSON.stringify({ items: m.querySelectorAll('.icn__gpv-atitem').length }) : 'NO MENU'; })()`));
 
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
@@ -130,8 +143,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(500);
   console.log('chip:', await ev(`(() => {
     const node = InfCanvas.flow.state.nodes.value.find((n) => n.id === window.__probe.genId);
-    const chip = document.querySelector('.icn__gpv-ref');
-    const el = document.querySelector('.icn__gpv-rich');
+    const chip = window.__q('.icn__gpv-ref');
+    const el = window.__q('.icn__gpv-rich');
     if (!chip) return JSON.stringify({ prompt: node?.data?.prompt, chip: null, html: el?.innerHTML });
     const b = chip.getBoundingClientRect();
     const label = chip.querySelector('.icn__gpv-ref-t');
@@ -148,11 +161,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* hover the chip -> preview card */
   /* hover the SLOT thumbnail first, to capture the reference card metrics */
-  const sr = JSON.parse(await ev(`(() => { const s = document.querySelector('.icn__gpv-asset');
+  const sr = JSON.parse(await ev(`(() => { const s = window.__q('.icn__gpv-asset');
     const b = s.getBoundingClientRect(); return JSON.stringify([Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]); })()`));
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sr[0], y: sr[1], buttons: 0 });
   await sleep(500);
-  console.log('slot preview:', await ev(`(() => { const p = document.querySelector('.icn__gpv-preview:not(.icn__gpv-refprev)');
+  console.log('slot preview:', await ev(`(() => { const p = window.__q('.icn__gpv-preview:not(.icn__gpv-refprev)');
     if (!p) return 'NO SLOT PREVIEW';
     const b = p.getBoundingClientRect(); const cs = getComputedStyle(p);
     const m = p.querySelector('.icn__gpv-preview-media'); const mr = m?.getBoundingClientRect();
@@ -162,22 +175,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       mediaRadius: m && getComputedStyle(m).borderRadius,
       name: p.querySelector('.icn__gpv-preview-name')?.textContent }); })()`));
 
-  const cr = JSON.parse(await ev(`(() => { const c = document.querySelector('.icn__gpv-ref');
+  const cr = JSON.parse(await ev(`(() => { const c = window.__q('.icn__gpv-ref');
     const b = c.getBoundingClientRect(); return JSON.stringify([Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]); })()`));
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cr[0], y: cr[1], buttons: 0 });
   await sleep(500);
   console.log('chip preview:', await ev(`(() => { const p = document.querySelector('.icn__gpv-refprev');
     if (!p) return 'NO PREVIEW';
     const b = p.getBoundingClientRect(); const cs = getComputedStyle(p);
-    const chip = document.querySelector('.icn__gpv-ref').getBoundingClientRect();
+    const chip = window.__q('.icn__gpv-ref').getBoundingClientRect();
     return JSON.stringify({ w: Math.round(b.width), h: Math.round(b.height), above: Math.round(chip.top - b.bottom),
       radius: cs.borderRadius, border: cs.borderColor, bg: cs.backgroundColor, shadow: cs.boxShadow.slice(0, 30),
       name: p.querySelector('.icn__gpv-preview-name')?.textContent,
       centered: Math.round(b.left + b.width / 2 - (chip.left + chip.width / 2)) }); })()`));
-  console.log('typography:', await ev(`(() => { const el = document.querySelector('.icn__gpv-rich');
+  console.log('typography:', await ev(`(() => { const el = window.__q('.icn__gpv-rich');
     const cs = getComputedStyle(el);
-    const label = getComputedStyle(document.querySelector('.icn__gpv-ref-t'));
-    const img = document.querySelector('.icn__gpv-ref-img')?.getBoundingClientRect();
+    const label = getComputedStyle(window.__q('.icn__gpv-ref-t'));
+    const img = window.__q('.icn__gpv-ref-img')?.getBoundingClientRect();
     return JSON.stringify({ font: cs.fontFamily.split(',')[0], size: cs.fontSize, lh: cs.lineHeight,
       h: Math.round(el.getBoundingClientRect().height),
       weight: cs.fontWeight, chipFont: label.fontSize, chipColor: label.color, img: img && Math.round(img.width) }); })()`));
@@ -196,7 +209,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     }); })()`));
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(ROOT + '/.workbuddy/tmp/chip-hover.png', Buffer.from(shot.data, 'base64'));
-  const zb = JSON.parse(await ev(`(() => { const c = document.querySelector('.icn__gpv-ref').getBoundingClientRect();
+  const zb = JSON.parse(await ev(`(() => { const c = window.__q('.icn__gpv-ref').getBoundingClientRect();
     return JSON.stringify([Math.round(c.left), Math.round(c.top)]); })()`));
   const zoomPrev = await send('Page.captureScreenshot', { format: 'png',
     clip: { x: Math.max(0, zb[0] - 130), y: Math.max(0, zb[1] - 230), width: 320, height: 280, scale: 2 } });
@@ -211,7 +224,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const chip = el?.closest?.('.icn__gpv-ref');
     return JSON.stringify({ anchor: n?.nodeName, anchorText: (n?.textContent || '').slice(0, 24), insideChip: !!chip }); })()`));
   /* park the caret where a real insert leaves it: end of the separator space */
-  await ev(`(() => { const chip = document.querySelector('.icn__gpv-ref'); const el = document.querySelector('.icn__gpv-rich');
+  await ev(`(() => { const chip = window.__q('.icn__gpv-ref'); const el = window.__q('.icn__gpv-rich');
     el.focus(); const space = chip.nextSibling; const r = document.createRange();
     if (space && space.nodeType === 3 && space.data.length) r.setStart(space, space.data.length);
     else r.setStartAfter(chip);
@@ -226,7 +239,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   };
   const readPrompt = async () => ev(`(() => {
     const node = InfCanvas.flow.state.nodes.value.find((n) => n.id === window.__probe.genId);
-    return JSON.stringify({ prompt: node?.data?.prompt, chips: document.querySelectorAll('.icn__gpv-ref').length });
+    return JSON.stringify({ prompt: node?.data?.prompt, chips: window.__qa('.icn__gpv-ref').length });
   })()`);
   await backspace();
   console.log('after backspace 1:', await readPrompt());
@@ -242,7 +255,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   })()`));
   await sleep(600);
   console.log('reparsed:', await ev(`(() => {
-    const el = document.querySelector('.icn__gpv-rich');
+    const el = window.__q('.icn__gpv-rich');
     const chip = el.querySelector('.icn__gpv-ref');
     return JSON.stringify({ chips: el.querySelectorAll('.icn__gpv-ref').length, html: el.innerHTML.slice(0, 260),
       hasImg: !!chip?.querySelector('img') });
@@ -252,7 +265,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* select-all inside the editor: the chip's "@图片1" must be part of the text */
   console.log('selection:', await ev(`(() => {
-    const el = document.querySelector('.icn__gpv-rich'); el.focus();
+    const el = window.__q('.icn__gpv-rich'); el.focus();
     const r = document.createRange(); r.selectNodeContents(el);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
     return JSON.stringify({ text: s.toString(), userSelect: getComputedStyle(el.querySelector('.icn__gpv-ref')).userSelect });
@@ -260,7 +273,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   /* paste a copied prompt: tokens must come back as chips, not raw text */
   console.log('paste:', await ev(`(() => {
-    const el = document.querySelector('.icn__gpv-rich');
+    const el = window.__q('.icn__gpv-rich');
     el.focus();
     const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
@@ -272,13 +285,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(400);
   console.log('pasted:', await ev(`(() => {
     const node = InfCanvas.flow.state.nodes.value.find((n) => n.id === window.__probe.genId);
-    const el = document.querySelector('.icn__gpv-rich');
+    const el = window.__q('.icn__gpv-rich');
     return JSON.stringify({ prompt: node?.data?.prompt, chips: el.querySelectorAll('.icn__gpv-ref').length,
       text: el.textContent });
   })()`));
 
   /* close-up of the prompt line so chip/typography alignment is inspectable */
-  const pb = JSON.parse(await ev(`(() => { const b = document.querySelector('.icn__gpv-rich').getBoundingClientRect();
+  const pb = JSON.parse(await ev(`(() => { const b = window.__q('.icn__gpv-rich').getBoundingClientRect();
     return JSON.stringify([Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]); })()`));
   const zoom = await send('Page.captureScreenshot', { format: 'png',
     clip: { x: pb[0], y: pb[1], width: pb[2], height: Math.min(60, pb[3]), scale: 3 } });
@@ -292,7 +305,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const b = e.getBoundingClientRect();
       return { cls: e.className, rect: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] };
     });
-    const slot = document.querySelector('.icn__gpv-asset');
+    const slot = window.__q('.icn__gpv-asset');
     const sb = slot?.getBoundingClientRect();
     return JSON.stringify({ cards: list, slot: sb && [Math.round(sb.left), Math.round(sb.top), Math.round(sb.width), Math.round(sb.height)] });
   })()`));

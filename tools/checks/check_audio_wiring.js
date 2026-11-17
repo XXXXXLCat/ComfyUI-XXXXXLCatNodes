@@ -77,6 +77,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('setup:', await ev(`(async () => {
     const NS = window.InfCanvas;
     await NS.api.enter();
+    NS.api.newCanvas();   /* blank doc: earlier runs left nodes behind */
     await new Promise((r) => setTimeout(r, 1000));
     const asset = (kind, filename) => ({ filename, subfolder: '', type: 'input', kind, name: filename });
     const gen = NS.api.addNodeByType('infcanvas/gen_audio', [900, 300]);

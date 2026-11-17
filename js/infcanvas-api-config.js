@@ -8,7 +8,7 @@
      frontend/src/components/WorkflowPreview/NodeFields.vue
 
    The rail entry (labelled "API", see infcanvas-ui.js) opens this dialog;
-   the dialog title is "API配置" (renamed from 工作流配置 as requested).
+   the dialog title is "API 配置" (renamed from 工作流配置 as requested).
    The reference gates its "COMFYUI 后端地址" input behind import.meta.env.DEV
    (WorkflowConfig.vue: showAddress); this build ships INSIDE ComfyUI, so that
    dev-only field is intentionally omitted - every request already goes to the
@@ -27,171 +27,70 @@
    verbatim from WorkflowPreview/PreviewNode. */
 (() => {
   const NS = (window.InfCanvas = window.InfCanvas || {});
+  /* i18n: lazy reference; i18n.js loads after most modules, but every call
+     site runs after app init when NS.i18n is available. */
+  const t = (key, params) => (NS.i18n ? NS.i18n.t(key, params) : key);
+  /* Category display: normalise legacy backend names, then translate. */
+  const cat = (name) => (NS.i18n?.cat ? NS.i18n.cat(name) : t(name || "未分类"));
 
   const CSS = `
+/* The dialog shell is composed from the host's own class strings
+   (BaseModalLayout: rounded-2xl / bg-background, bg-card left panel, h-18
+   headers; NavItem; buttonVariants), so nothing below re-draws a surface.
+   What remains is the graph-preview canvas and the overlay masks, which have
+   no host equivalent. */
 .ac-config, .ac-config * { box-sizing:border-box; }
-.ac-config {
-  display:flex; gap:14px; height:100%; min-height:0;
-  color:var(--ic-text, #ffffff);
-  font:var(--ic-ctrl-fs, 12px)/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
-}
-.ac-config button { font:inherit; cursor:pointer; }
-.ac-config input, .ac-config select { font:inherit; }
-.ac-config [hidden] { display:none !important; }
-
-/* ---------------- left column ---------------- */
-.ac-left { flex:0 0 268px; display:flex; flex-direction:column; gap:12px; min-height:0; overflow:auto; }
-.ac-block { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--ic-line, #494a50);
-  border-radius:var(--ic-radius, 10px); background:var(--ic-input, #171718); }
-.ac-grow { flex:1 1 auto; min-height:0; }
-.ac-label { font-size:10px; letter-spacing:.08em; color:var(--ic-soft, #8a8a8a); }
-.ac-list { display:flex; flex-direction:column; gap:4px; min-height:0; overflow:auto; }
-.ac-item { display:flex; align-items:center; gap:8px; width:100%; padding:8px 9px;
-  border:1px solid transparent; border-radius:var(--ic-ctrl-r, 7px); background:transparent;
-  color:var(--ic-text, #ffffff); text-align:left; }
-.ac-item:hover { background:var(--ic-hover, #313235); }
-.ac-item.is-active { border-color:var(--ic-brand, #0b8ce9); background:var(--ic-brand-soft, rgba(11,140,233,.15)); }
-.ac-item.is-dragging { opacity:.45; }
-.ac-item.is-drop { border-color:var(--ic-brand, #0b8ce9); background:var(--ic-brand-soft, rgba(11,140,233,.15)); }
-.ac-item-icon { flex:0 0 auto; color:var(--ic-soft, #8a8a8a); }
-.ac-item-name { flex:1 1 auto; min-width:0; font-size:var(--ic-ctrl-fs, 12px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ac-item-meta { flex:0 0 auto; font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-empty-list { padding:14px 10px; border:1px dashed var(--ic-line, #494a50); border-radius:var(--ic-ctrl-r, 7px);
-  font-size:11px; color:var(--ic-soft, #8a8a8a); text-align:center; }
-.ac-upload { height:var(--ic-ctrl-h, 30px); border:1px dashed var(--ic-line, #494a50); border-radius:var(--ic-ctrl-r, 7px);
-  background:transparent; color:var(--ic-soft, #8a8a8a); font-size:var(--ic-ctrl-fs, 12px); }
-.ac-upload:hover { border-color:var(--ic-brand, #0b8ce9); color:var(--ic-brand, #0b8ce9); }
-.ac-msg { padding:8px 10px; border-radius:var(--ic-ctrl-r, 7px); background:var(--ic-panel, #262729);
-  font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-msg.is-error { background:var(--ic-danger-soft, rgba(179,58,58,.16)); color:var(--ic-danger, #b33a3a); }
-
-/* ---------------- right column ---------------- */
-.ac-right { position:relative; flex:1 1 auto; display:flex; flex-direction:column; gap:12px;
-  min-width:0; min-height:0; }
-.ac-head { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px;
-  padding:10px 12px; border:1px solid var(--ic-line, #494a50); border-radius:var(--ic-radius, 10px);
-  background:var(--ic-input, #171718); }
-.ac-head-info { min-width:0; }
-.ac-name { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ac-sub { margin-top:2px; font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-actions { flex:0 0 auto; display:flex; gap:6px; }
-.ac-danger { height:var(--ic-ctrl-h, 30px); padding:0 12px; border:1px solid var(--ic-line, #494a50);
-  border-radius:var(--ic-ctrl-r, 7px); background:transparent; color:var(--ic-soft, #8a8a8a);
-  font-size:var(--ic-ctrl-fs, 12px); }
-.ac-danger:hover { border-color:var(--ic-danger, #b33a3a); background:var(--ic-danger-soft, rgba(179,58,58,.16));
-  color:var(--ic-danger, #b33a3a); }
-.ac-save { height:var(--ic-ctrl-h, 30px); padding:0 12px; border:1px solid var(--ic-brand, #0b8ce9);
-  border-radius:var(--ic-ctrl-r, 7px); background:var(--ic-brand, #0b8ce9); color:#fff;
-  font-size:var(--ic-ctrl-fs, 12px); }
-.ac-save:hover:not(:disabled) { filter:brightness(.9); }
-.ac-save:disabled { opacity:.45; cursor:default; }
+.ac-config { display:flex; height:100%; min-height:0; }
+/* The host sheet does NOT make [hidden] win over a utility like .flex (it lost
+   to inline-flex on the save button and to .flex on the field mask), so the
+   attribute is restored here for the whole dialog. */
+.ac-host [hidden], .ac-config [hidden] { display:none !important; }
+/* Category dropdown. The panel's sections clip their children, so the menu is
+   position:fixed and placed from the trigger rect (same trick as the widget
+   dropdown in infcanvas-flow.js). Everything else comes from the host's
+   menuContentClass string. */
+.ac-catmenu { position:fixed; z-index:10005; max-height:min(60vh, 460px); overflow-y:auto; }
 
 /* ---------------- graph preview ---------------- */
-.ac-preview { position:relative; flex:1 1 auto; min-height:0; border:1px solid var(--ic-line, #494a50);
-  border-radius:var(--ic-radius, 10px); overflow:hidden; background:var(--ic-input, #171718); }
+.ac-preview { position:relative; flex:1 1 auto; min-height:0; overflow:hidden; }
 .ac-viewport { position:absolute; inset:0; overflow:hidden; cursor:grab;
-  background-color:var(--ic-input, #171718);
-  background-image:radial-gradient(var(--ic-line, #494a50) 1px, transparent 1px);
+  background-color:#1d1d1d;
+  background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px);
   background-size:18px 18px; }
 .ac-viewport.is-panning { cursor:grabbing; }
 .ac-scene { position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
 .ac-edges { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; z-index:0; }
-.ac-edge { fill:none; stroke:var(--ic-soft, #8a8a8a); stroke-width:1.2; opacity:.55; }
-/* The hue border still distinguishes node TYPES; the card surface itself now
-   uses the same theme palette as every other panel. */
+.ac-edge { fill:none; stroke:#8a8a8a; stroke-width:1.2; opacity:.55; }
 .ac-node { position:absolute; z-index:1; width:168px; padding:6px 9px;
-  border:1px solid hsl(var(--n-hue) 42% 55% / .55); border-radius:var(--ic-ctrl-r, 7px);
-  background:var(--ic-panel, #262729); box-shadow:0 4px 12px rgba(0,0,0,.45);
+  border:1px solid hsl(var(--n-hue) 42% 55% / .55); border-radius:6px;
+  background:var(--card, #262729); box-shadow:0 4px 12px rgba(0,0,0,.45);
   cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease; }
-.ac-node:hover { border-color:hsl(var(--n-hue) 55% 70%); box-shadow:0 4px 16px rgba(0,0,0,.45); }
-.ac-node.is-configurable { border-color:var(--ic-brand, #0b8ce9); }
+.ac-node:hover { border-color:hsl(var(--n-hue) 55% 70%); }
+.ac-node.is-configurable { border-color:var(--primary, #0b8ce9); }
 .ac-node-title { display:flex; align-items:baseline; justify-content:space-between; gap:6px;
-  font-size:11px; font-weight:600; color:var(--ic-text, #ffffff); white-space:nowrap; overflow:hidden; }
+  font-size:11px; font-weight:600; color:var(--text-color, #fff); white-space:nowrap; overflow:hidden; }
 .ac-node-id { flex:0 0 auto; font-weight:400; font-size:10px; color:hsl(var(--n-hue) 55% 72%); }
 .ac-node-type { display:flex; align-items:center; gap:4px; margin-top:2px; font-size:10px;
-  color:var(--ic-soft, #8a8a8a); white-space:nowrap; overflow:hidden; }
-.ac-node-count { margin-left:auto; flex:0 0 auto; color:var(--ic-brand, #0b8ce9); }
+  color:var(--muted-foreground, #8a8a8a); white-space:nowrap; overflow:hidden; }
+.ac-node-count { margin-left:auto; flex:0 0 auto; color:var(--primary, #0b8ce9); }
 .ac-handle { position:absolute; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:50%;
   background:hsl(var(--n-hue) 45% 60% / .7); }
 .ac-handle--in { left:-4px; }
 .ac-handle--out { right:-4px; }
-.ac-tools { position:absolute; top:10px; right:10px; z-index:5; display:flex; align-items:center; gap:2px;
-  padding:3px; border:1px solid var(--ic-line, #494a50); border-radius:var(--ic-ctrl-r, 7px);
-  background:var(--ic-panel, #262729); }
-.ac-tools button { width:24px; height:24px; display:grid; place-items:center; border:0; border-radius:5px;
-  background:transparent; color:var(--ic-soft, #8a8a8a); font-size:13px; }
-.ac-tools button:hover { background:var(--ic-hover, #313235); color:var(--ic-text, #ffffff); }
-.ac-fit { width:auto !important; padding:0 8px; font-size:11px !important; }
-.ac-zoom { min-width:40px; text-align:center; font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-empty { position:absolute; inset:0; display:grid; place-items:center; font-size:var(--ic-ctrl-fs, 12px);
-  color:var(--ic-soft, #8a8a8a); pointer-events:none; }
+.ac-empty { position:absolute; inset:0; display:grid; place-items:center; font-size:12px;
+  color:var(--muted-foreground, #8a8a8a); pointer-events:none; }
 .ac-empty.is-tip { inset:auto 0 14px; font-size:11px; }
-
-/* ---------------- node fields inspector ---------------- */
-.ac-nf-mask { position:absolute; inset:0; z-index:15; display:flex; align-items:center;
-  justify-content:center; padding:24px; background:rgba(0,0,0,.66); backdrop-filter:blur(2px); }
-.ac-nf-card { display:flex; flex-direction:column; width:min(520px,100%); max-height:100%;
-  border:1px solid var(--ic-line, #494a50); border-radius:var(--ic-radius-lg, 14px);
-  background:var(--ic-panel, #262729); box-shadow:0 20px 50px rgba(0,0,0,.45); overflow:hidden; }
-.ac-nf-head { flex:0 0 auto; display:flex; align-items:flex-start; justify-content:space-between; gap:10px;
-  padding:14px 14px 10px; border-bottom:1px solid var(--ic-line, #494a50); }
-.ac-nf-title { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; }
-.ac-nf-dot { width:9px; height:9px; border-radius:2px; background:var(--ic-brand, #0b8ce9); transform:rotate(45deg); }
-.ac-nf-sub { margin-top:2px; font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-nf-close { width:26px; height:26px; flex:0 0 auto; display:grid; place-items:center; border:0;
-  border-radius:var(--ic-ctrl-r, 7px); background:transparent; color:var(--ic-soft, #8a8a8a);
-  font-size:16px; line-height:1; }
-.ac-nf-close:hover { background:var(--ic-hover, #313235); color:var(--ic-text, #ffffff); }
-.ac-nf-list { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:8px;
-  padding:12px; overflow-y:auto; }
-.ac-nf-item { padding:9px 10px; border:1px solid var(--ic-line, #494a50);
-  border-radius:var(--ic-radius, 10px); background:var(--ic-input, #171718); }
-.ac-nf-enable { display:flex; align-items:center; gap:8px; cursor:pointer; }
-.ac-nf-check { flex:0 0 auto; width:14px; height:14px; margin:0; border:1px solid var(--ic-line, #494a50);
-  border-radius:4px; background:var(--ic-input, #171718); appearance:none; -webkit-appearance:none; cursor:pointer; }
-.ac-nf-check:checked { border-color:var(--ic-brand, #0b8ce9); background:var(--ic-brand, #0b8ce9); }
-.ac-nf-key { font-size:var(--ic-ctrl-fs, 12px); color:var(--ic-text, #ffffff); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ac-nf-default { margin-left:auto; flex:0 1 auto; min-width:0; font-size:11px; color:var(--ic-soft, #8a8a8a);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ac-nf-detail { display:flex; flex-direction:column; gap:6px; margin-top:8px; padding-top:8px;
-  border-top:1px dashed var(--ic-line, #494a50); }
-.ac-nf-row { display:flex; gap:6px; }
-.ac-nf-select, .ac-nf-input { height:var(--ic-ctrl-h, 30px); padding:0 8px; border:1px solid var(--ic-line, #494a50);
-  border-radius:var(--ic-ctrl-r, 7px); background:var(--ic-input, #171718); color:var(--ic-text, #ffffff);
-  font-size:var(--ic-ctrl-fs, 12px); outline:none; min-width:0; }
-.ac-nf-select:focus, .ac-nf-input:focus { border-color:var(--ic-brand, #0b8ce9); }
-.ac-nf-select { flex:0 0 108px; }
-.ac-nf-input { flex:1 1 auto; }
-.ac-nf-options { display:flex; flex-direction:column; gap:6px; }
-.ac-nf-note { padding:6px 8px; border-radius:var(--ic-ctrl-r, 7px); background:var(--ic-panel, #262729);
-  font-size:11px; line-height:1.5; color:var(--ic-soft, #8a8a8a); }
-.ac-nf-remove { flex:0 0 auto; width:var(--ic-ctrl-h, 30px); height:var(--ic-ctrl-h, 30px); display:grid; place-items:center;
-  border:1px solid var(--ic-line, #494a50); border-radius:var(--ic-ctrl-r, 7px);
-  background:var(--ic-panel, #262729); color:var(--ic-soft, #8a8a8a); font-size:14px; line-height:1; }
-.ac-nf-remove:hover { border-color:var(--ic-danger, #b33a3a); background:var(--ic-danger-soft, rgba(179,58,58,.16));
-  color:var(--ic-danger, #b33a3a); }
-.ac-nf-add { height:var(--ic-ctrl-h, 30px); border:1px dashed var(--ic-brand, #0b8ce9);
-  border-radius:var(--ic-ctrl-r, 7px); background:transparent; color:var(--ic-brand, #0b8ce9);
-  font-size:var(--ic-ctrl-fs, 12px); }
-.ac-nf-add:hover { background:var(--ic-brand-soft, rgba(11,140,233,.15)); }
-.ac-nf-nums { gap:8px; }
-.ac-nf-num { flex:1 1 0; display:flex; align-items:center; gap:4px; min-width:0; font-size:11px;
-  color:var(--ic-soft, #8a8a8a); white-space:nowrap; }
-.ac-nf-num .ac-nf-input { width:100%; }
-.ac-nf-empty { padding:26px 10px; border:1px dashed var(--ic-line, #494a50);
-  border-radius:var(--ic-radius, 10px); font-size:var(--ic-ctrl-fs, 12px);
-  color:var(--ic-soft, #8a8a8a); text-align:center; }
-.ac-nf-foot { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px;
-  padding:10px 14px 12px; border-top:1px solid var(--ic-line, #494a50); }
-.ac-nf-count { font-size:11px; color:var(--ic-soft, #8a8a8a); }
-.ac-nf-done { height:var(--ic-ctrl-h, 30px); padding:0 16px; border:1px solid var(--ic-brand, #0b8ce9);
-  border-radius:var(--ic-ctrl-r, 7px); background:var(--ic-brand, #0b8ce9); color:#fff;
-  font-size:var(--ic-ctrl-fs, 12px); font-weight:600; }
-.ac-nf-done:hover { filter:brightness(.9); }
+/* Drag feedback only: the resting look of a row is NavItem's own class string. */
+.ac-item.is-dragging { opacity:.45; }
+.ac-item.is-drop { box-shadow:inset 0 0 0 1px var(--primary, #0b8ce9); }
 `;
 
   /* --------------------------- constants --------------------------- */
 
+  /* This module loads BEFORE infcanvas-i18n.js, so t() at module scope would
+     freeze every label to Chinese. Keep the Chinese source keys here and
+     translate at the render site (and again on language change). The first
+     element of each pair is the stored type identifier and stays as-is. */
   const TYPE_OPTIONS = [
     ["text", "文本"], ["textarea", "多行文本"], ["number", "数字"], ["slider", "滑块"],
     ["select", "下拉框"], ["switch", "开关"], ["image", "图像（单张）"],
@@ -206,14 +105,10 @@
   /* PreviewNode.vue */
   const NODE_W = 168, NODE_H = 42;
   const MIN_ZOOM = 0.2, MAX_ZOOM = 2;
-
-  const ICON_SVG =
-    '<svg class="ac-item-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">' +
-    '<circle cx="4" cy="3.5" r="1.8" stroke="currentColor" stroke-width="1.3" />' +
-    '<circle cx="4" cy="12.5" r="1.8" stroke="currentColor" stroke-width="1.3" />' +
-    '<circle cx="12" cy="8" r="1.8" stroke="currentColor" stroke-width="1.3" />' +
-    '<path d="M4 5.3v5.4M5.8 3.5h2.4a1.8 1.8 0 0 1 1.8 1.8v1M5.8 12.5h2.4a1.8 1.8 0 0 0 1.8-1.8v-1" ' +
-    'stroke="currentColor" stroke-width="1.3" /></svg>';
+  /* ComfyUI's own seed upper bound: object_info reports 2^64-1 for INT seeds
+     (18446744073709552000 once serialised). Doubles cannot tell neighbouring
+     values apart up there, which is exactly how the host behaves too. */
+  const SEED_MAX = 18446744073709552000;
 
   let injected = false;
   function injectStyles() {
@@ -234,6 +129,100 @@
     return node;
   };
 
+  /* lucide `tag`, inlined: the host's Tailwind sheet only ships the icons the
+     host itself uses, so `icon-[lucide--tag]` would resolve to nothing. */
+  const TAG_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 '
+    + '.586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 '
+    + '0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>';
+
+  /* lucide `chevron-down`, inlined. Rotated -90deg when collapsed so the arrow
+     points right, 0deg when expanded (down), matching a tree disclosure.
+     Drawn at 18px (ComfyUI's native disclosure arrow reads ~10x6px; at 14px
+     the lucide path inside its 24-unit viewBox was visibly too small). */
+  const CHEVRON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="m6 9 6 6 6-6"/></svg>';
+
+  /* Category glyphs: the same four lucide icons the add-node menu uses for
+     Text / Image / Video / Audio (infcanvas-flow.js ICONS: text-pen, image,
+     video, audio-lines), drawn at tree-header size. Paths are copied verbatim
+     so both surfaces stay in sync. 未分类 uses a fifth glyph, lucide
+     file-question-mark, matching the "unknown bucket" semantics. */
+  const CAT_SVG_OPEN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">';
+  const CAT_ICONS = {
+    text: CAT_SVG_OPEN
+      + '<path d="M12 12H3"/><path d="M21 5H3"/>'
+      + '<path d="M21.377 14.626a1 1 0 10-3.004-3.004l-5.01 5.012a2 2 0 00-.506.854l-.837 2.87a.5.5 0 00.62.62l2.87-.837a2 2 0 00.854-.506z"/>'
+      + '<path d="M8 19H3"/></svg>',
+    image: CAT_SVG_OPEN
+      + '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>'
+      + '<circle cx="9" cy="9" r="2"/>'
+      + '<path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>',
+    video: CAT_SVG_OPEN
+      + '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/>'
+      + '<rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
+    audio: CAT_SVG_OPEN
+      + '<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/>'
+      + '<path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>',
+    /* lucide file-question-mark — the 未分类 (uncategorised) bucket. */
+    fileQuestion: CAT_SVG_OPEN
+      + '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>'
+      + '<path d="M9 9.5a3 2.5 0 016 0c0 2-2 2-3 3.5"/>'
+      + '<path d="M12 17h.01"/></svg>',
+  };
+  /* Keyed by the internal (Chinese) category name; legacy aliases are
+     normalised first, so an old backend still gets the right glyph. */
+  const CAT_ICON_GROUPS = {
+    fileQuestion: ["未分类"],
+    text: ["智能对话"],
+    image: ["文生图", "图像编辑", "图像放大", "背景移除", "图像反推", "图像重打光",
+      "图像多角度", "局部重绘", "全景图", "扩图", "去水印", "抠图"],
+    video: ["参考生视频", "文生视频", "图生视频", "首尾帧视频", "视频反推",
+      "视频插帧", "视频编辑", "视频放大"],
+    audio: ["文生音乐", "音乐翻唱", "语音合成", "语音克隆", "语音转录", "文生音效"],
+  };
+  function catIcon(title) {
+    const key = NS.i18n?.normalizeCategory ? NS.i18n.normalizeCategory(title) : String(title || "");
+    if (!key) return "";
+    for (const [icon, names] of Object.entries(CAT_ICON_GROUPS)) {
+      if (names.includes(key)) return CAT_ICONS[icon];
+    }
+    return "";
+  }
+
+  /* Every real category starts COLLAPSED; 未分类 starts EXPANDED so its
+     workflows are visible immediately. Track the expanded internal keys so a
+     user toggle survives renderList() rebuilds (select / drag / language
+     switch). Seeded from DEFAULT_EXPANDED; keyed by the raw category title,
+     never the translated label. */
+  const DEFAULT_EXPANDED = new Set(["未分类"]);
+  const expandedGroups = new Set(DEFAULT_EXPANDED);
+
+  /* buttonVariants() verbatim, minus the two classes each size overrides
+     (base says rounded-md / text-sm, size md says rounded-lg / text-xs -- the
+     host resolves that with cn(), we pick the winning value by hand). */
+  const BTN = "relative inline-flex cursor-pointer touch-manipulation appearance-none "
+    + "items-center justify-center gap-2 border-none font-inter font-medium "
+    + "whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring "
+    + "focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50";
+  const BTN_MD = BTN + " h-8 rounded-lg p-2 text-xs";
+  const BTN_LG = BTN + " h-10 rounded-lg px-4 py-2 text-sm";
+  const BTN_SECONDARY = BTN_MD + " bg-secondary text-foreground hover:bg-accent";
+  const BTN_PRIMARY = BTN_MD + " bg-primary text-foreground hover:bg-primary/90";
+  const BTN_MUTED = BTN_MD + " bg-transparent text-muted-foreground hover:bg-accent";
+  const BTN_ICON = BTN + " size-8 rounded-lg bg-transparent text-muted-foreground hover:bg-accent";
+  /* BaseModalLayout's close button: <Button size="lg" class="w-10"
+     variant="textonly">, measured at 40x40 / rounded-lg with a 16px
+     `pi pi-times` glyph. */
+  const BTN_CLOSE = BTN + " h-10 w-10 rounded-lg px-4 py-2 text-sm "
+    + "bg-transparent text-foreground hover:bg-accent";
+
   /* Reference request(): reads the body as text, throws the backend's own
      error message, and complains when the endpoint returned nothing (which is
      what an un-restarted ComfyUI looks like for the new routes). */
@@ -246,8 +235,8 @@
     const text = await response.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
-    if (!response.ok) throw new Error((data && data.error) || `请求失败（${response.status}）`);
-    if (data === null) throw new Error("接口无响应，请完全重启 ComfyUI");
+    if (!response.ok) throw new Error((data && data.error) || t("请求失败（{status}）", { status: response.status }));
+    if (data === null) throw new Error(t("接口无响应，请完全重启 ComfyUI"));
     return data;
   }
 
@@ -287,137 +276,418 @@
     if (/text|prompt|string|caption/i.test(key) || text.includes("\n") || text.length > 40) return "textarea";
     return "text";
   }
-  function previewValue(value) {
-    if (typeof value === "string") return value ? `"${value.slice(0, 60)}"` : '""';
-    if (value === true || value === false) return String(value);
-    return String(value);
-  }
   const toNum = (raw) => {
     if (raw === "" || raw === null || raw === undefined) return undefined;
     const num = Number(raw);
     return Number.isFinite(num) ? num : undefined;
   };
   const clampZoom = (z) => Math.min(Math.max(z, MIN_ZOOM), MAX_ZOOM);
+
+  /* 「高级参数」的老规矩（字段还没有 advanced 布尔值时用）：这几个标签留在
+     明面上，其余折进节点的「显示高级输入」。和 js/infcanvas-flow.js 的
+     BASIC_LABELS 是同一张表——那边是节点面板的运行时兜底，这里是配置弹窗里
+     勾选框的初始状态，两边不一致就会出现「勾选框没勾、节点里却藏着」。
+     用户的勾选一旦落到 fields.json，就以文件里的布尔值为准。 */
+  const LEGACY_BASIC_LABELS = ["提示词优化", "提示词", "高宽比", "百万像素", "放大倍数", "种子"];
+  const defaultAdvanced = (label) => !LEGACY_BASIC_LABELS.includes(String(label || "").trim());
   /* This project's list returns `name` as a display label and `filename`/`id`
      as the actual file stem; every REST path must use the stem. */
   const wfKey = (item) => item.filename || item.id || item.name;
+
+  /* --------------------- default parameter detection ---------------------
+
+     Almost every API workflow of a medium exposes the same handful of inputs,
+     and ticking each one plus typing a label / picking a widget type by hand is
+     busywork. These rules recognise the well-known ones by input key — or, when
+     the key is generic (`value`), by the node's own title — and pre-fill the
+     inspector row: Chinese label, widget type, combo options and number range.
+
+     Order matters, first match wins: 提示词优化 sits before 提示词 because both
+     its key and its title mention "prompt". */
+  const AUTO_RULES = [
+    {
+      label: "提示词优化",
+      type: (value) => (typeof value === "boolean" ? "switch" : "textarea"),
+      match: ({ key, title }) =>
+        /(prompt|提示词)/i.test(title)
+        && /(refine|enhance|optimi[sz]e|rewrite|expand|improve|优化|润色|扩写)/i.test(title)
+        || /(prompt_?(refine|enhance|optimi[sz]e|rewrite|expand|improve)|(refine|enhance|optimi[sz]e|rewrite)_?prompt)/i.test(key),
+    },
+    {
+      label: "提示词", type: "textarea",
+      match: ({ key, value, title }) => {
+        if (typeof value !== "string") return false;
+        /* Titles that say "this is NOT the user's prompt": a negative prompt
+           (often on a plain `text` key, so the key match alone would mislabel
+           it) and the workflow's own instruction templates (system / task
+           prompt). Without this the gear ends up with two rows both named
+           提示词 and the typed text would be routed to the wrong node. */
+        if (/(negative|负面|system|系统|task[\s_-]?prompt)/i.test(title)) return false;
+        return /^(prompt|positive|positive_prompt|prompt_text|text|caption|instruction)$/i.test(key)
+          || /(prompt|提示词)/i.test(title);
+      },
+    },
+    { label: "高宽比", type: "select", match: ({ key }) => /^(aspect_?ratio|ratio)$/i.test(key) },
+    { label: "百万像素", type: "number", match: ({ key }) => /^(mega_?pixels?|mp)$/i.test(key) },
+    { label: "倍数", type: "number", match: ({ key }) => /^(multiple|multiple_of|round_to|align(ment)?)$/i.test(key) },
+    /* A widget group (`sampling_mode.seed`) is a different seed from the
+       sampler's own; name it after its group so two rows never read the same. */
+    {
+      label: ({ key }) => (key.includes(".") ? "采样种子" : "种子"),
+      type: "random", match: ({ key }) => /(^|\.)seed$/i.test(key),
+    },
+    { label: "最大长度", type: "number", match: ({ key }) => /^max_?(length|tokens|new_tokens)$/i.test(key) },
+    { label: "思考模式", type: "switch", match: ({ key }) => /^(thinking|thinking_mode|enable_thinking|think)$/i.test(key) },
+    { label: "步数", type: "slider", match: ({ key }) => /^(steps|num_steps|sample_steps|sampling_steps)$/i.test(key) },
+    { label: "CFG", type: "slider", match: ({ key }) => /^(cfg|cfg_scale|guidance_scale)$/i.test(key) },
+    { label: "采样器", type: "select", match: ({ key }) => /^(sampler_name|sampler)$/i.test(key) },
+    { label: "调度器", type: "select", match: ({ key }) => /^(scheduler|scheduler_name|noise_scheduler)$/i.test(key) },
+  ];
+
+  /* object_info is the only place a combo's option list and a number's range
+     live — a workflow JSON just stores the CURRENT value. Fetched once per
+     session (ComfyUI caches it server-side as well). */
+  let defsPromise = null;
+  function nodeDefs() {
+    if (!defsPromise) {
+      defsPromise = (async () => {
+        try {
+          const api = window.comfyAPI?.api?.api;
+          return (api?.getNodeDefs ? await api.getNodeDefs() : null) || {};
+        } catch (_) {
+          return {};
+        }
+      })();
+    }
+    return defsPromise;
+  }
+  /* Newer ComfyUI ships combos as ["COMBO", {options:[...]}]; older ones inline
+     the option array as the type. Both are handled. */
+  function inputSpec(defs, classType, key) {
+    const input = defs?.[classType]?.input;
+    const raw = input?.required?.[key] || input?.optional?.[key];
+    if (!Array.isArray(raw)) return {};
+    const [type, options] = raw;
+    if (Array.isArray(type)) return { kind: "COMBO", options: type.filter((v) => typeof v === "string") };
+    const spec = { kind: String(type || "") };
+    if (options && typeof options === "object") {
+      if (Array.isArray(options.options)) spec.options = options.options.filter((v) => typeof v === "string");
+      for (const numeric of ["min", "max", "step"]) {
+        if (typeof options[numeric] === "number" && Number.isFinite(options[numeric])) spec[numeric] = options[numeric];
+      }
+    }
+    return spec;
+  }
+
+  /* Per-workflow memory of the auto rows the user explicitly unticked, so the
+     defaults never fight with a deliberate removal. */
+  const OFF_KEY = "infcanvas:auto-fields-off";
+  function offFields(name) {
+    try {
+      const all = JSON.parse(localStorage.getItem(OFF_KEY) || "{}");
+      return new Set(Array.isArray(all?.[name]) ? all[name] : []);
+    } catch (_) { return new Set(); }
+  }
+  function setOffField(name, id, off) {
+    if (!name) return;
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(OFF_KEY) || "{}") || {}; } catch (_) { all = {}; }
+    const list = new Set(Array.isArray(all[name]) ? all[name] : []);
+    if (off) list.add(id); else list.delete(id);
+    writeOffFields(name, list, all);
+  }
+  function writeOffFields(name, list, all) {
+    let store = all;
+    if (!store) {
+      try { store = JSON.parse(localStorage.getItem(OFF_KEY) || "{}") || {}; } catch (_) { store = {}; }
+    }
+    store[name] = [...list];
+    try { localStorage.setItem(OFF_KEY, JSON.stringify(store)); } catch (_) { /* private mode */ }
+  }
 
   /* ------------------------------ state ------------------------------ */
 
   let ui = null;
   const D = {};                 // DOM refs
   let entries = [];             // NodeFields inspector rows
-  let messageTimer = 0;
+  let inspectorSnapshot = null; // state before the inspector was opened (for 取消)
+  let catDocDown = null;        // document handlers while the category menu is open
+  let catDocKey = null;
   let panDrag = null;
 
   const S = {
     workflows: [], currentName: "", currentWorkflow: null,
     dragIndex: -1, dropIndex: -1,
-    message: "", messageError: false,
     fields: [], fieldsDirty: false, inspecting: "",
+    autoAdded: 0, autoKeys: new Set(),
+    category: "", categories: [],
     zoom: 1, panX: 0, panY: 0,
   };
 
   const nodeCount = () => Object.keys(apiNodes(S.currentWorkflow)).length;
   const inspectNode = () => apiNodes(S.currentWorkflow)[S.inspecting] || null;
   const inspectFields = () => S.fields.filter((f) => String(f.nodeId) === S.inspecting);
+  const fieldKey = (nodeId, key) => String(nodeId) + ":" + String(key);
 
-  function notify(text, isError = false) {
-    S.message = text; S.messageError = !!isError;
-    renderMessage();
-    clearTimeout(messageTimer);
-    messageTimer = setTimeout(() => { S.message = ""; renderMessage(); }, 2500);
-  }
-  function renderMessage() {
-    if (!D.msg) return;
-    D.msg.hidden = !S.message;
-    D.msg.textContent = S.message || "";
-    D.msg.classList.toggle("is-error", S.messageError);
+  /* Inputs the default-parameter pass must LEAVE ALONE. A text-generation node
+     (TextGenerate / TextGenerateV2) carries its own LLM decode seed in
+     `sampling_mode.seed`; that belongs to the model's sampling setup, not to
+     the image's noise, so auto-exposing it would only add a second, meaningless
+     随机种子 next to the KSampler's. It is only skipped by the DETECTOR -- the
+     node inspector still lists it, so the user can tick it by hand when a
+     particular workflow actually wants it. */
+  function autoExcluded({ key, classType }) {
+    return /^TextGenerate/i.test(classType || "") && /(^|\.)seed$/i.test(key || "");
   }
 
-  /* --------------------------- dialog shell --------------------------- */
+  /* Literal inputs of the open workflow that match AUTO_RULES and are not
+     exposed yet. Links (arrays) and nested objects cannot be edited in a form,
+     and rows the user unticked earlier are skipped. */
+  function autoCandidates() {
+    const nodes = apiNodes(S.currentWorkflow);
+    const taken = new Set(S.fields.map((field) => fieldKey(field.nodeId, field.key)));
+    const off = offFields(S.currentName);
+    const out = [];
+    for (const [nodeId, node] of Object.entries(nodes)) {
+      const title = node._meta?.title || "";
+      const classType = node.class_type || "";
+      for (const [key, value] of Object.entries(node.inputs || {})) {
+        if (Array.isArray(value) || (value !== null && typeof value === "object")) continue;
+        if (taken.has(fieldKey(nodeId, key)) || off.has(fieldKey(nodeId, key))) continue;
+        if (autoExcluded({ key, classType })) continue;
+        const rule = AUTO_RULES.find((item) => item.match({ key, value, title, classType }));
+        if (rule) out.push({ nodeId, key, value, classType, rule });
+      }
+    }
+    return out;
+  }
+
+  /* Turn the candidates into persisted field rows, pulling options / ranges
+     from the node definition. */
+  async function detectFields() {
+    const candidates = autoCandidates();
+    if (!candidates.length) return [];
+    const defs = await nodeDefs();
+    return candidates.map(({ nodeId, key, value, classType, rule }) => {
+      const type = typeof rule.type === "function" ? rule.type(value) : rule.type;
+      const label = typeof rule.label === "function"
+        ? rule.label({ key, value, title: defs?.[classType]?._meta?.title })
+        : rule.label;
+      const spec = inputSpec(defs, classType, key);
+      const field = { nodeId, key, type, label, advanced: defaultAdvanced(label) };
+      if (type === "select") {
+        const options = spec.options?.length ? spec.options
+          : (typeof value === "string" && value ? [value] : []);
+        if (options.length) field.options = options;
+      }
+      if (type === "number" || type === "slider" || type === "random") {
+        let { min, max, step } = spec;
+        /* Seeds are 64-bit upstream: object_info reports 2^64-1 and the workflow
+           templates already carry values like 4.4e14. Keep that range -- forcing
+           32 bits made a scrub jump five orders of magnitude on open. */
+        if (type === "random") {
+          if (!Number.isFinite(min) || min < 0) min = 0;
+          if (!Number.isFinite(max) || max <= min) max = SEED_MAX;
+          step = 1;
+        }
+        if (typeof min === "number") field.min = min;
+        if (typeof max === "number") field.max = max;
+        /* object_info omits `step` for plain INT/FLOAT inputs; the panel's
+           scrubber needs one regardless. */
+        field.step = typeof step === "number" ? step : (spec.kind === "FLOAT" ? 0.01 : 1);
+      }
+      return field;
+    });
+  }
+
+  /* Feedback goes to the HOST toast dock, not to a line of text under the
+     sidebar: the host renders it as the standard card (status icon + title +
+     optional description + close button) and we hand it a 3 s life so it
+     disappears by itself. `notify(text, true)` is an error toast; the second
+     argument may also be a detail line. */
+  function notify(text, opts) {
+    const isError = opts === true || (opts && opts.error === true);
+    const detail = opts && typeof opts === "object" ? (opts.detail || "") : "";
+    NS.api?.toast?.(isError ? "error" : "success", text, detail);
+  }
+
+  /* --------------------------- dialog shell ---------------------------
+
+     Shell = ComfyUI's BaseModalLayout, class for class: the card is
+     rounded-2xl + bg-background, the left panel is bg-card with a h-18 header
+     (LeftPanelHeader) holding an icon + text-base font-semibold title, its rows
+     are NavItem (rounded-md px-4 py-3 text-sm, active bg-muted / hover
+     bg-accent) and every button carries buttonVariants' own string. Nothing in
+     this function invents a surface. */
 
   function buildUI(body) {
     body.classList.add("ac-host");
     body.style.display = "flex";
     body.style.flexDirection = "column";
     body.style.overflow = "hidden";
-    body.style.padding = "16px";
+    body.style.padding = "0";
     body.style.minHeight = "0";
 
     const config = el("div", "ac-config");
-    const left = el("aside", "ac-left");
-    const right = el("section", "ac-right");
+    const left = el("nav", "flex h-full shrink-0 flex-col overflow-hidden bg-card");
+    /* BaseModalLayout defaults its panel to 14rem; workflow names need 15rem. */
+    left.style.width = "15rem";
+    const right = el("section", "relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background");
     config.append(left, right);
     body.appendChild(config);
 
-    /* ---- left: workflow list ----
-       ComfyUI 插件直接跑在 ComfyUI 内部，没有可填的后端地址；参考项目的
-       「COMFYUI 后端地址」是 import.meta.env.DEV 才显示的调试项，上线形态省略。 */
-    const listBlock = el("section", "ac-block ac-grow");
-    listBlock.appendChild(el("div", "ac-label", "工作流列表（拖动可调整顺序）"));
-    D.list = el("div", "ac-list");
-    listBlock.appendChild(D.list);
-    D.upload = el("button", "ac-upload", "上传工作流");
+    /* ---- left: panel title (BaseModalLayout #leftPanelHeaderTitle) ---- */
+    const listHead = el("header", "flex h-18 w-full shrink-0 items-center-safe gap-2 pr-3 pl-6");
+    /* lucide `sliders-horizontal` (v1.34 path data) inlined: iconify classes only
+       resolve if that exact utility was generated into the host stylesheet. */
+    const brand = el("i", "flex size-5 shrink-0 items-center justify-center text-foreground");
+    brand.setAttribute("aria-hidden", "true");
+    brand.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M10 5H3M12 19H3M14 3v4M16 17v4M21 12h-9M21 19h-5M21 5h-7M8 10v4M8 12H3"/></svg>';
+    listHead.append(brand, el("h2", "text-base font-semibold text-foreground", t("API 配置")));
+    left.appendChild(listHead);
+
+    /* ---- left: upload action, directly under the "API 配置" header ----
+       Mirrors the right action row: same top edge (both headers are h-18) and
+       the same 32px button height (BTN_MD / h-8), with the left panel's own
+       px-4 gutter. The file input is hidden and rides along in this row. */
+    const listAction = el("div", "flex shrink-0 items-center px-4 pb-2");
+    D.upload = el("button", BTN_MD + " w-full bg-primary text-foreground hover:bg-primary/90", t("上传工作流"));
     D.upload.type = "button";
     D.upload.addEventListener("click", () => D.fileInput.click());
-    listBlock.appendChild(D.upload);
+    listAction.appendChild(D.upload);
     D.fileInput = document.createElement("input");
     D.fileInput.type = "file";
     D.fileInput.accept = ".json,application/json";
     D.fileInput.multiple = true;
     D.fileInput.hidden = true;
     D.fileInput.addEventListener("change", onFiles);
-    listBlock.appendChild(D.fileInput);
-    left.appendChild(listBlock);
+    listAction.appendChild(D.fileInput);
+    left.appendChild(listAction);
 
-    D.msg = el("div", "ac-msg");
-    D.msg.hidden = true;
-    left.appendChild(D.msg);
+    /* ---- left: workflow list (LeftSidePanel + NavItem) ----
+       ComfyUI 插件直接跑在 ComfyUI 内部，没有可填的后端地址；参考项目的
+       「COMFYUI 后端地址」是 import.meta.env.DEV 才显示的调试项，上线形态省略。 */
+    D.list = el("div", "scrollbar-hide flex min-h-0 w-full flex-auto flex-col gap-1 overflow-y-auto bg-card px-4 pb-2");
+    left.appendChild(D.list);
 
-    /* ---- right: head ---- */
-    const head = el("header", "ac-head");
-    const headInfo = el("div", "ac-head-info");
-    D.name = el("div", "ac-name", "未选择工作流");
-    D.sub = el("div", "ac-sub");
+    /* ---- right: header, BaseModalLayout #header (h-18 px-6, items-center-safe).
+       Title sits at the left edge of headerContentClass; the close button is the
+       last child and gets pushed to the far right by justify-between. ---- */
+    const head = el("header", "flex h-18 w-full shrink-0 items-center-safe justify-between gap-2 px-6");
+    /* headerContentClass = flex min-w-0 flex-1 gap-2. min-w-0 on both text items
+       is what lets `truncate` kick in instead of pushing the close button out. */
+    const headInfo = el("div", "flex min-w-0 flex-1 items-center gap-2");
+    D.name = el("div", "min-w-0 shrink truncate text-base font-medium text-foreground", t("未选择工作流"));
+    D.sub = el("div", "min-w-0 truncate text-xs text-muted-foreground");
     headInfo.append(D.name, D.sub);
-    const actions = el("div", "ac-actions");
-    D.save = el("button", "ac-save", "保存配置");
-    D.save.type = "button";
-    D.save.addEventListener("click", saveFields);
-    D.danger = el("button", "ac-danger", "删除");
+    /* The action row is its own line under the header, not part of it. */
+    const actions = el("div", "flex shrink-0 items-center gap-2 px-6 pb-2");
+    /* Rename edits the title, which IS the workflow's file stem, so the dialog
+       owns this action here. Field edits are saved inside their own inspector
+       now (保存 / 取消); there is no dialog-wide save button any more. */
+    D.rename = el("button", BTN_SECONDARY, t("重命名"));
+    D.rename.type = "button";
+    D.rename.title = t("重命名工作流（所有引用它的节点会一起更新）");
+    D.rename.addEventListener("click", renameWorkflow);
+    /* One default workflow per category. The list response already resolves the
+       fallback (first workflow of the category), so this only pins a choice. */
+    D.favorite = el("button", BTN_SECONDARY, t("设为默认"));
+    D.favorite.type = "button";
+    D.favorite.title = t("把当前工作流设为所在分类的默认工作流");
+    /* Solid secondary surface (--secondary #262729) reads clearly against the
+       header's --background #171718 -- the same look as the host's 应用 button. */
+    D.danger = el("button", BTN_SECONDARY, t("删除"));
     D.danger.type = "button";
     D.danger.addEventListener("click", removeWorkflow);
-    actions.append(D.save, D.danger);
-    head.append(headInfo, actions);
-    right.appendChild(head);
+    D.favorite.addEventListener("click", setDefaultWorkflow);
+    /* Templates dialog dropdown: selectTriggerVariants() with size md + the
+       dialog's own trigger-class, conflicts resolved the way cn() would have:
+       border-[2.5px] -> border, border-transparent -> border-border/50,
+       bg-secondary -> bg-transparent. */
+    D.catBtn = el("button", "relative inline-flex cursor-pointer items-center "
+      + "rounded-lg border border-solid bg-transparent text-foreground "
+      + "transition-all duration-200 ease-in-out outline-none select-none "
+      + "hover:bg-accent h-8 border-border/50 min-w-0 shrink basis-40 "
+      + "data-[state=open]:border-border");
+    D.catBtn.type = "button";
+    D.catBtn.dataset.state = "closed";
+    D.catBtn.title = t("工作流分类（决定节点 API 下拉框显示在哪类节点）");
+    /* MultiSelectTrigger markup: text column + chevron column (pl-3). */
+    const catText = el("div", "flex flex-1 items-center overflow-hidden py-2 pl-2 whitespace-nowrap");
+    D.catLabel = el("span", "text-xs", t("未分类"));
+    catText.appendChild(D.catLabel);
+    const catChev = el("div", "flex shrink-0 cursor-pointer items-center justify-center pl-3");
+    const catChevIcon = el("i", "flex size-4 items-center justify-center text-muted-foreground");
+    catChevIcon.setAttribute("aria-hidden", "true");
+    catChevIcon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="m6 9 6 6 6-6"/></svg>';
+    catChev.appendChild(catChevIcon);
+    D.catBtn.append(catText, catChev);
+    D.catBtn.setAttribute("aria-haspopup", "menu");
+    D.catBtn.setAttribute("aria-expanded", "false");
+    D.catBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (D.catMenu.hidden) openCatMenu(); else closeCatMenu();
+    });
 
-    /* ---- right: graph preview ---- */
-    const preview = el("div", "ac-preview");
+    /* selectContentClass (host) without the enter/leave animations: fixed so it
+       escapes the panel's overflow, and the height cap lives in .ac-catmenu. */
+    D.catMenu = el("div", "ac-catmenu z-overlay rounded-lg p-2 bg-background "
+      + "text-foreground border border-solid shadow-md outline-none");
+    D.catMenu.setAttribute("role", "menu");
+    D.catMenu.hidden = true;
+    /* Fixed-positioned, so it is not clipped by the panel; kept inside the
+       dialog so the [hidden] rule above applies. */
+    config.appendChild(D.catMenu);
+    /* Host close button: 40x40, textonly, pi pi-times, last child of the header. */
+    const closeBtn = el("button", BTN_CLOSE);
+    closeBtn.type = "button";
+    closeBtn.title = t("关闭");
+    closeBtn.setAttribute("aria-label", t("关闭"));
+    const closeGlyph = el("i", "pi pi-times");
+    closeGlyph.setAttribute("aria-hidden", "true");
+    closeBtn.appendChild(closeGlyph);
+    closeBtn.addEventListener("click", () => close());
+    head.append(headInfo, closeBtn);
+    right.appendChild(head);
+    actions.append(D.catBtn, D.rename, D.favorite, D.danger);
+    right.appendChild(actions);
+
+    /* ---- right: content (BaseModalLayout #content, px-6 pb-10) ----
+       pb is matched to the horizontal px (24px each) so the preview frame
+       sits with equal right/bottom breathing room instead of floating high. */
+    const content = el("main", "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 pb-6");
+    right.appendChild(content);
+
+    const preview = el("div", "ac-preview flex-1 rounded-lg border border-border/50 bg-card");
+    preview.style.minHeight = "320px";
     D.viewport = el("div", "ac-viewport");
     D.scene = el("div", "ac-scene");
     D.viewport.appendChild(D.scene);
     preview.appendChild(D.viewport);
 
-    const tools = el("div", "ac-tools");
-    const zoomOut = el("button", "", "−");
-    zoomOut.type = "button"; zoomOut.title = "缩小";
+    const tools = el("div", "absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border bg-card/90 p-1 backdrop-blur");
+    const zoomOut = el("button", BTN_ICON, "−");
+    zoomOut.type = "button"; zoomOut.title = t("缩小");
     zoomOut.addEventListener("click", () => zoomTo(S.zoom - 0.2));
-    D.zoomLabel = el("span", "ac-zoom", "100%");
-    const zoomIn = el("button", "", "+");
-    zoomIn.type = "button"; zoomIn.title = "放大";
+    D.zoomLabel = el("span", "min-w-10 text-center text-xs text-muted-foreground", "100%");
+    const zoomIn = el("button", BTN_ICON, "+");
+    zoomIn.type = "button"; zoomIn.title = t("放大");
     zoomIn.addEventListener("click", () => zoomTo(S.zoom + 0.2));
-    const fitBtn = el("button", "ac-fit", "适应");
-    fitBtn.type = "button"; fitBtn.title = "适应画布";
+    const fitBtn = el("button", BTN_MUTED, t("适应"));
+    fitBtn.type = "button"; fitBtn.title = t("适应画布");
     fitBtn.addEventListener("click", fit);
     tools.append(zoomOut, D.zoomLabel, zoomIn, fitBtn);
     preview.appendChild(tools);
 
-    D.empty = el("div", "ac-empty", "选择左侧工作流查看预览");
-    D.tip = el("div", "ac-empty is-tip", "点击节点配置可暴露给画布的参数");
+    D.empty = el("div", "ac-empty", t("选择左侧工作流查看预览"));
+    D.tip = el("div", "ac-empty is-tip", t("点击节点配置可暴露给画布的参数"));
     D.tip.hidden = true;
     preview.append(D.empty, D.tip);
-    right.appendChild(preview);
+    content.appendChild(preview);
 
     /* wheel zoom + background pan, matching Vue Flow's default preview gestures */
     D.viewport.addEventListener("wheel", (event) => {
@@ -447,37 +717,52 @@
     D.viewport.addEventListener("pointerup", endPan);
     D.viewport.addEventListener("pointercancel", endPan);
 
-    /* ---- right: node fields inspector ---- */
-    D.nfMask = el("div", "ac-nf-mask");
+    /* ---- node fields inspector: a dialog on top of the dialog ----
+       Same surface as BaseModalLayout (rounded-2xl / border / bg-background) and
+       the same Button recipes, so it reads as one more host dialog. */
+    D.nfMask = el("div", "absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-6");
     D.nfMask.hidden = true;
-    D.nfCard = el("div", "ac-nf-card");
-    const nfHead = el("header", "ac-nf-head");
-    const nfHeadText = el("div", "ac-nf-head-text");
-    D.nfTitle = el("div", "ac-nf-title");
-    D.nfTitleDot = el("span", "ac-nf-dot");
-    D.nfTitleText = el("span", "", "");
+    D.nfCard = el("div", "flex max-h-full max-w-full flex-col overflow-hidden rounded-2xl border bg-background shadow-lg");
+    /* w-[520px] is an arbitrary value the host never emits, so it is not in the
+       prebuilt sheet; the width is set inline instead. */
+    D.nfCard.style.width = "520px";
+    D.nfCard.dataset.nfCard = "1";
+    const nfHead = el("header", "flex items-start justify-between gap-2 px-6 pt-5 pb-3");
+    const nfHeadText = el("div", "flex min-w-0 flex-1 flex-col gap-1");
+    D.nfTitle = el("div", "flex items-center gap-2 text-base font-semibold text-foreground");
+    D.nfTitleDot = el("i", "size-2 rounded-sm bg-primary");
+    D.nfTitleText = el("span", "truncate", "");
     D.nfTitle.append(D.nfTitleDot, D.nfTitleText);
-    D.nfSub = el("div", "ac-nf-sub");
+    D.nfSub = el("div", "truncate text-xs text-muted-foreground");
     nfHeadText.append(D.nfTitle, D.nfSub);
-    const nfClose = el("button", "ac-nf-close", "×");
-    nfClose.type = "button"; nfClose.title = "关闭";
-    nfClose.addEventListener("click", closeNodeFields);
+    const nfClose = el("button", BTN_ICON, "✕");
+    nfClose.type = "button"; nfClose.title = t("关闭");
+    nfClose.addEventListener("click", cancelNodeFields);
     nfHead.append(nfHeadText, nfClose);
-    D.nfList = el("div", "ac-nf-list");
-    const nfFoot = el("footer", "ac-nf-foot");
-    D.nfCount = el("span", "ac-nf-count", "已启用 0 个字段");
-    const nfDone = el("button", "ac-nf-done", "完成");
-    nfDone.type = "button";
-    nfDone.addEventListener("click", closeNodeFields);
-    nfFoot.append(D.nfCount, nfDone);
+    D.nfList = el("div", "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-6 pb-4");
+    const nfFoot = el("footer", "flex items-center justify-between gap-2 border-t px-6 py-3");
+    D.nfCount = el("span", "text-xs text-muted-foreground", t("已启用 0 个字段"));
+    /* Save lives INSIDE the inspector now: the dialog no longer has a global
+       保存配置 button. 取消 rolls the field table back to what it was when this
+       inspector opened, including the localStorage memory of unticked auto rows. */
+    const nfActions = el("div", "flex items-center gap-2");
+    const nfSave = el("button", BTN_PRIMARY, t("保存"));
+    nfSave.type = "button";
+    nfSave.addEventListener("click", () => { saveFields().then((ok) => { if (ok) closeNodeFields(); }); });
+    const nfCancel = el("button", BTN_SECONDARY, t("取消"));
+    nfCancel.type = "button";
+    nfCancel.addEventListener("click", cancelNodeFields);
+    nfActions.append(nfSave, nfCancel);
+    nfFoot.append(D.nfCount, nfActions);
     D.nfCard.append(nfHead, D.nfList, nfFoot);
     D.nfMask.appendChild(D.nfCard);
-    right.appendChild(D.nfMask);
+    /* Over the WHOLE dialog, not just the right column: a mask that leaves the
+       left panel bright reads as two unrelated surfaces. */
+    body.appendChild(D.nfMask);
 
     renderList();
     renderHead();
     renderPreview();
-    renderMessage();
   }
 
   /* --------------------------- backend readiness --------------------------- */
@@ -489,7 +774,7 @@
     try {
       await request("/settings");
     } catch (error) {
-      if (/404|无响应|请求失败/.test(String(error?.message || "")) && ui?.setApiReady) ui.setApiReady(false);
+      if (/404|No API response|Request failed|无响应|请求失败/.test(String(error?.message || "")) && ui?.setApiReady) ui.setApiReady(false);
       notify(error.message, true);
     }
   }
@@ -500,6 +785,7 @@
     try {
       const data = await request("/workflows");
       S.workflows = data.workflows || [];
+      if (Array.isArray(data.categories)) S.categories = data.categories;
       const exists = S.workflows.some((item) => wfKey(item) === S.currentName);
       if (!exists) {
         S.currentName = ""; S.currentWorkflow = null; S.fields = []; S.fieldsDirty = false;
@@ -510,7 +796,7 @@
       /* Reference: let the canvas pick up the newest order / first workflow. */
       window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
     } catch (error) {
-      if (/404|无响应|请求失败/.test(String(error?.message || "")) && ui?.setApiReady) ui.setApiReady(false);
+      if (/404|No API response|Request failed|无响应|请求失败/.test(String(error?.message || "")) && ui?.setApiReady) ui.setApiReady(false);
       notify(error.message, true);
     }
   }
@@ -518,34 +804,150 @@
   function renderList() {
     if (!D.list) return;
     D.list.replaceChildren();
-    if (!S.workflows.length) {
-      D.list.appendChild(el("div", "ac-empty-list", "还没有工作流，先上传一个"));
-      return;
-    }
+    /* List EVERY backend category (27), not only those that already hold a
+       workflow: empty categories get a row with a count of 0. The early "no
+       workflows" bail-out is gone so a fresh setup still shows the full tree. */
+    /* Group workflows by their category. Built from real workflows for
+       drag/drop addressing; expanded to the full category list below. */
+    const groups = new Map();
     S.workflows.forEach((item, index) => {
-      const button = el("button", "ac-item");
-      button.type = "button";
-      button.draggable = true;
-      button.innerHTML = ICON_SVG;
-      button.appendChild(el("span", "ac-item-name", item.name || wfKey(item)));
-      button.appendChild(el("span", "ac-item-meta", (item.nodes ?? 0) + " 个节点"));
-      button.classList.toggle("is-active", wfKey(item) === S.currentName);
-      button.classList.toggle("is-dragging", S.dragIndex === index);
-      button.classList.toggle("is-drop", S.dropIndex === index && S.dragIndex !== index);
-      button.addEventListener("click", () => selectWorkflow(wfKey(item)));
-      button.addEventListener("dragstart", (event) => onDragStart(event, index));
-      button.addEventListener("dragover", (event) => onDragOver(event, index));
-      button.addEventListener("drop", (event) => onDrop(event, index));
-      button.addEventListener("dragend", onDragEnd);
-      D.list.appendChild(button);
+      const key = (item.category || "").trim() || "未分类";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, index });
     });
+    /* Group titles follow the canonical category order from the backend; within
+       each group the workflows are sorted by name. `index` stays the item's
+       index in S.workflows so drag/drop keeps addressing the real array. */
+    const byName = (a, b) => String(a.item.name || wfKey(a.item))
+      .localeCompare(String(b.item.name || wfKey(b.item)), "zh-Hans-CN");
+    for (const entries of groups.values()) entries.sort(byName);
+    const catRank = (title) => {
+      if (title === "未分类") return -1;
+      const at = S.categories.indexOf(title);
+      return at < 0 ? S.categories.length : at;
+    };
+    /* Start from the full backend category table; keep any stray category that
+       a workflow carries but the backend list omits (sorted to the end), so no
+       workflow silently disappears. 未分类 always sorts FIRST. */
+    const keys = [];
+    for (const c of S.categories) if (!keys.includes(c)) keys.push(c);
+    for (const key of groups.keys()) if (!keys.includes(key)) keys.push(key);
+    const ordered = keys.sort((a, b) => catRank(a) - catRank(b));
+    for (const title of ordered) {
+      const entries = groups.get(title) || [];
+      const group = el("div", "flex flex-col gap-1");
+      /* Clickable disclosure head. NavTitle.vue type scale (text-xs font-bold
+         uppercase, muted) at the tree's level-1 indent; the chevron sits at the
+         trailing edge (justify-between) so every group's arrow lines up right.
+         pt-2 keeps collapsed group titles compact (was pt-4, too airy). */
+      const head = el("div", "m-0 flex w-full cursor-pointer items-center justify-between gap-2 pt-2 pr-2");
+      head.style.paddingLeft = "8px";
+      /* Title + a small count badge share the left side; the chevron stays at
+         the trailing edge. The count is a SIBLING of h3 (not its text) so the
+         group title stays a clean category name for sorting / a11y checks. */
+      const headLeft = el("div", "flex min-w-0 items-center gap-1.5");
+      /* One glyph for every group so all titles stay aligned: the four medium
+         icons, plus file-question-mark for 未分类. */
+      const iconWrap = el("span", "flex size-4 shrink-0 items-center justify-center text-muted-foreground");
+      iconWrap.innerHTML = catIcon(title);
+      headLeft.appendChild(iconWrap);
+      headLeft.appendChild(el("h3", "text-xs font-bold text-muted-foreground uppercase", cat(title)));
+      const count = el("span", "shrink-0 leading-none text-muted-foreground",
+        String(entries.length));
+      /* Inline styles: the host's Tailwind is prebuilt, so arbitrary-value
+         classes like text-[10px] resolve to nothing. Use host CSS vars. */
+      count.style.cssText = "font-size:10px;font-weight:600;line-height:1;"
+        + "padding:2px 6px;border-radius:9999px;background:var(--muted,#3a3b3d);";
+      count.setAttribute("aria-label", entries.length + t("个工作流"));
+      headLeft.appendChild(count);
+      head.appendChild(headLeft);
+      const caretWrap = el("span", "flex size-5 shrink-0 items-center justify-center text-muted-foreground");
+      caretWrap.innerHTML = CHEVRON_SVG;
+      head.appendChild(caretWrap);
+      head.setAttribute("role", "button");
+      head.setAttribute("tabindex", "0");
+      group.appendChild(head);
+
+      /* Workflow rows live in their own container so the disclosure can show /
+         hide them without rebuilding the DOM (keeps drag state and scroll). */
+      const items = el("div", "flex flex-col gap-2");
+
+      for (const { item, index } of entries) {
+        /* NavItem.vue verbatim: rounded-md px-4 py-3 text-sm, active bg-muted,
+           hover bg-accent. "ac-item" is kept as the drag marker so the drag
+           handlers can toggle classes without rebuilding the list. */
+        /* treeStyles.ts treeItemClass (rounded-lg / py-3 / pr-2 / hover:bg-accent),
+           no leading icon: the workflow name is the whole row, so the text starts
+           at the group label's indent. A <button> would paint the UA buttonface on
+           top of these classes, so the row is a div with role="button". */
+        const button = el("div", "ac-item group/tree-node flex w-full min-w-0 cursor-pointer "
+          + "items-center rounded-lg py-3 pr-2 text-left text-sm text-foreground "
+          + "outline-none select-none transition-colors hover:bg-accent");
+        button.style.paddingLeft = "16px";
+        button.setAttribute("role", "button");
+        button.draggable = true;
+        button.dataset.index = String(index);
+        /* Name + optional 默认 tag. The tag is per-row state from the list
+           endpoint: `is_default` is true for the pinned workflow, or for the
+           first workflow of the category while nothing is pinned. */
+        const label = el("div", "flex min-w-0 flex-1 items-center gap-1.5");
+        label.appendChild(el("span", "min-w-0 truncate", item.name || wfKey(item)));
+        button.appendChild(label);
+        /* The tag sits at the row's trailing edge, not next to the name: the
+           label above is flex-1, so a sibling appended after it is pushed to the
+           right (button's own pr-2 sets the inset). */
+        if (item.is_default) {
+          const tag = el("i", "ml-2 flex size-4 shrink-0 items-center justify-center text-primary");
+          tag.innerHTML = TAG_SVG;
+          tag.setAttribute("role", "img");
+          tag.setAttribute("aria-label", item.default_pinned ? t("默认工作流") : t("未指定默认时的首个工作流"));
+          tag.title = item.default_pinned
+            ? t("该分类的默认工作流")
+            : t("该分类还没指定默认，自动使用第一个工作流");
+          button.appendChild(tag);
+        }
+        button.title = (item.name || wfKey(item)) + " · " + cat(item.category)
+          + " · " + (item.nodes ?? 0) + t(" 个节点");        button.classList.toggle("bg-muted", wfKey(item) === S.currentName);
+        button.classList.toggle("is-dragging", S.dragIndex === index);
+        button.classList.toggle("is-drop", S.dropIndex === index && S.dragIndex !== index);
+        button.addEventListener("click", () => selectWorkflow(wfKey(item)));
+        button.addEventListener("dragstart", (event) => onDragStart(event, index));
+        button.addEventListener("dragover", (event) => onDragOver(event, index));
+        button.addEventListener("drop", (event) => onDrop(event, index));
+        button.addEventListener("dragend", onDragEnd);
+        items.appendChild(button);
+      }
+
+      /* Disclosure state. Default collapsed; apply() is the single place that
+         syncs the caret rotation, items visibility and a11y title together. */
+      const apply = () => {
+        const open = expandedGroups.has(title);
+        items.style.display = open ? "flex" : "none";
+        caretWrap.firstElementChild.style.transform = open ? "rotate(0deg)" : "rotate(-90deg)";
+        head.setAttribute("aria-expanded", open ? "true" : "false");
+        head.title = (open ? t("折叠分类") : t("展开分类")) + " · " + cat(title);
+      };
+      const toggle = () => {
+        if (expandedGroups.has(title)) expandedGroups.delete(title);
+        else expandedGroups.add(title);
+        apply();
+      };
+      head.addEventListener("click", toggle);
+      head.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
+      });
+      apply();
+      group.appendChild(items);
+      D.list.appendChild(group);
+    }
   }
 
   /* Drag state must only toggle classes. Rebuilding the list here would remove
      the very element being dragged and cancel the HTML5 drag immediately. */
   function updateDragClasses() {
     if (!D.list) return;
-    D.list.querySelectorAll(".ac-item").forEach((item, index) => {
+    D.list.querySelectorAll(".ac-item").forEach((item) => {
+      const index = Number(item.dataset.index);
       item.classList.toggle("is-dragging", S.dragIndex === index);
       item.classList.toggle("is-drop", S.dropIndex === index && S.dragIndex !== index);
     });
@@ -578,7 +980,7 @@
     try {
       const data = await request("/workflows/order", jsonOptions("PUT", { names: list.map(wfKey) }));
       if (data.workflows) S.workflows = data.workflows;
-      notify("顺序已保存");
+      notify(t("顺序已保存"));
       window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
     } catch (error) {
       notify(error.message, true);
@@ -618,35 +1020,187 @@
   }
 
   async function loadFields(name) {
+    const workflow = S.currentWorkflow;
     try {
       const data = await request("/workflows/" + encodeURIComponent(name) + "/fields");
       S.fields = data.fields || [];
+      S.category = data.category || "";
+      if (Array.isArray(data.categories)) S.categories = data.categories;
     } catch (_) {
       S.fields = [];
+      S.category = "";
     }
     S.fieldsDirty = false;
+    S.autoAdded = 0;
+    S.autoKeys = new Set();
+
+    /* Auto-expose the well-known parameters (提示词 / 种子 / 步数 / CFG /
+       采样器 …). They are persisted right away: the point of the defaults is
+       that the node's settings popover already shows them, without the user
+       having to tick a dozen rows first. Nothing is written into apiValues, so
+       a workflow that nobody edits keeps generating exactly as before. */
+    const added = await detectFields();
+    if (!added.length || S.currentWorkflow !== workflow) return;
+    S.fields = [...S.fields, ...added];
+    S.autoKeys = new Set(added.map((field) => fieldKey(field.nodeId, field.key)));
+    try {
+      const saved = await request("/workflows/" + encodeURIComponent(name) + "/fields",
+        jsonOptions("PUT", { fields: S.fields }));
+      S.fields = saved.fields || S.fields;
+      S.autoAdded = added.length;
+      notify(t("已自动识别 {n} 个常用参数", { n: added.length }));
+      window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
+    } catch (_) {
+      /* Route missing (un-restarted ComfyUI): keep the rows visible and let the
+         user save them once the backend is up. */
+      S.fieldsDirty = true;
+    }
   }
 
   function renderHead() {
     if (!D.name) return;
-    D.name.textContent = S.currentName || "未选择工作流";
-    D.sub.textContent = S.currentName ? `${nodeCount()} 个节点 · 已暴露 ${S.fields.length} 个字段` : "";
-    D.save.hidden = !S.currentName;
-    D.save.disabled = !S.fieldsDirty;
+    D.name.textContent = S.currentName || t("未选择工作流");
+    D.sub.textContent = S.currentName
+      ? t("{n} 个节点 · 已暴露 {f} 个字段", { n: nodeCount(), f: S.fields.length })
+        + (S.autoAdded ? t("（自动识别 {n} 个）", { n: S.autoAdded }) : "")
+      : "";
+    D.favorite.hidden = !S.currentName;
+    D.rename.hidden = !S.currentName;
     D.danger.hidden = !S.currentName;
+    if (D.catBtn) {
+      D.catBtn.disabled = !S.currentName;
+      D.catLabel.textContent = cat(S.category);
+      if (D.catMenu && !D.catMenu.hidden) openCatMenu();
+    }
+  }
+
+  /* ------------------------- category dropdown ------------------------- */
+
+  function openCatMenu() {
+    if (!D.catMenu || !D.catBtn) return;
+    /* menuContentClass (host) + min-h-8 px-3 py-1.5 text-sm; the checked entry
+       uses menuStyles' selectedMenuButtonClass. */
+    D.catMenu.replaceChildren();
+    const entry = (label, value) => {
+      const active = (S.category || "") === value;
+      /* selectItemVariants({ layout: 'single' }) verbatim; `<button>` brings the
+         UA text-align:center with it, so text-left is spelled out. */
+      const item = el("button", "relative flex w-full cursor-pointer items-center "
+        + "justify-between gap-3 rounded-sm border-0 px-2 py-3 text-left text-sm "
+        + "select-none outline-none focus:bg-accent "
+        + (active ? "bg-muted hover:bg-muted" : "bg-transparent hover:bg-accent"), label);
+      item.type = "button";
+      item.dataset.state = active ? "checked" : "unchecked";
+      item.setAttribute("role", "menuitem");
+      item.setAttribute("aria-checked", active ? "true" : "false");
+      if (active) {
+        const check = el("i", "flex size-4 shrink-0 items-center justify-center text-foreground");
+        check.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" '
+          + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+          + '<path d="M20 6 9 17l-5-5"/></svg>';
+        item.appendChild(check);
+      }
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeCatMenu();
+        if (!active) saveCategory(value);
+      });
+      D.catMenu.appendChild(item);
+    };
+    entry(cat(""), "");
+    for (const c of S.categories) entry(cat(c), c);
+
+    D.catMenu.hidden = false;
+    D.catBtn.setAttribute("aria-expanded", "true");
+    D.catBtn.dataset.state = "open";
+    if (!catDocDown) {
+      /* Outside-click / Escape close, bound only while the menu is open so a
+         closed dialog leaves nothing listening on document. */
+      catDocDown = (event) => {
+        if (D.catMenu.hidden) return;
+        if (D.catMenu.contains(event.target) || D.catBtn.contains(event.target)) return;
+        closeCatMenu();
+      };
+      catDocKey = (event) => {
+        if (event.key !== "Escape" || D.catMenu.hidden) return;
+        /* Capture on window: the modal listens for Escape on window/document too,
+           and a later-registered document listener never gets the first word. */
+        event.stopImmediatePropagation(); event.preventDefault();
+        closeCatMenu();
+      };
+      document.addEventListener("pointerdown", catDocDown, true);
+      window.addEventListener("keydown", catDocKey, true);
+    }
+    const r = D.catBtn.getBoundingClientRect();
+    const w = Math.max(Math.round(r.width), 192);
+    const h = D.catMenu.offsetHeight;
+    D.catMenu.style.width = w + "px";
+    /* Right-aligned to the trigger: the list is wider than the button, and
+       growing rightwards pushed it past the panel edge. */
+    D.catMenu.style.left = Math.round(Math.min(Math.max(8, r.right - w), innerWidth - w - 8)) + "px";
+    /* Flip above the trigger when the list would run off the bottom. */
+    D.catMenu.style.top = (r.bottom + h > innerHeight - 8
+      ? Math.max(8, Math.round(r.top - h - 6))
+      : Math.round(r.bottom + 6)) + "px";
+  }
+
+  function closeCatMenu() {
+    if (!D.catMenu) return;
+    D.catMenu.hidden = true;
+    if (D.catBtn) {
+      D.catBtn.setAttribute("aria-expanded", "false");
+      D.catBtn.dataset.state = "closed";
+    }
+    if (catDocDown) {
+      document.removeEventListener("pointerdown", catDocDown, true);
+      window.removeEventListener("keydown", catDocKey, true);
+      catDocDown = null; catDocKey = null;
+    }
+  }
+
+  async function saveCategory(category) {
+    if (!S.currentName) return;
+    try {
+      await request("/workflows/" + encodeURIComponent(S.currentName) + "/category",
+        jsonOptions("PUT", { category }));
+      S.category = category;
+      await loadWorkflows();
+      renderList(); renderHead();
+      window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
+      notify(category ? t("分类已设为「{category}」", { category: cat(category) }) : t("已清除分类"));
+    } catch (error) {
+      notify(error.message, true);
+      renderHead();
+    }
   }
 
   async function saveFields() {
-    if (!S.currentName) return;
+    if (!S.currentName) return false;
     try {
       const data = await request("/workflows/" + encodeURIComponent(S.currentName) + "/fields",
         jsonOptions("PUT", { fields: S.fields }));
       S.fields = data.fields || [];
       S.fieldsDirty = false;
+      /* 默认值可能被后端夹进 min/max（或者解析成了别的写法），以落盘值为准
+         回填，免得输入框还显示一个早就被改掉的数。 */
+      for (const entry of entries) {
+        const hit = S.fields.find((field) => String(field.nodeId) === String(S.inspecting)
+          && String(field.key) === entry.key);
+        if (!hit) continue;
+        entry.original = hit.default;
+        entry.draft = hit.default === null || hit.default === undefined ? "" : String(hit.default);
+      }
+      if (entries.length) paintNodeFields();
       renderHead(); updateExposedCounts();
-      notify("配置已保存");
+      /* 画布上已建的节点要重新取一次字段表，才会显示新的默认值。 */
+      window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
+      /* Title + description is the host toast's own two-line form: the title
+         says what happened, the second line says to what. */
+      notify(t("配置已保存"), { detail: S.currentName });
+      return true;
     } catch (error) {
       notify(error.message, true);
+      return false;
     }
   }
 
@@ -659,34 +1213,122 @@
       try {
         let workflow;
         try { workflow = JSON.parse(await file.text()); }
-        catch (_) { throw new Error(`${file.name} 不是合法 JSON`); }
-        if (!isApiWorkflow(workflow)) throw new Error(`${file.name} 不是 ComfyUI API 格式工作流`);
+        catch (_) { throw new Error(t("{name} 不是合法 JSON", { name: file.name })); }
+        if (!isApiWorkflow(workflow)) throw new Error(t("{name} 不是 ComfyUI API 格式工作流", { name: file.name }));
         const name = file.name.replace(/\.json$/i, "");
         const saved = await request("/workflows", jsonOptions("POST", { name, workflow }));
         await loadWorkflows();
         await selectWorkflow(saved.name);
-        notify(`已保存 ${saved.name}`);
+        notify(t("已保存 {name}", { name: saved.name }));
       } catch (error) {
         notify(error.message, true);
       }
     }
   }
 
+  /* ------------------------------ rename ------------------------------
+
+     The title is the workflow's file stem. Renaming moves <name>.json and
+     <name>.fields.json on the backend; nodes hold the same stem, so they are
+     retargeted here (NS.flow.renameWorkflowRefs) before the shared list is
+     refreshed — that event is also what makes every API selector show the new
+     label without a reload. */
+
+  const WF_NAME_RE = /^[^/\\:*?"<>|]{1,120}$/;
+
+  function checkWorkflowName(name) {
+    if (!name) return t("名称不能为空");
+    if (!WF_NAME_RE.test(name)) return t("名称不能包含 / \\ : * ? \" < > |");
+    if (name === "." || name === ".." || name.includes("..")) return t("名称不能包含 ..");
+    if (name.toLowerCase().endsWith(".fields")) return t("名称不能以 .fields 结尾");
+    return "";
+  }
+
+  /* ---------------------------- default workflow ----------------------------
+
+     api_settings.json keeps one pinned default per category; the list endpoint
+     resolves the fallback (first workflow of the category in drag order) when
+     nothing is pinned, so `is_default` is always present on the rows. Pinning
+     only writes that map -- the node selectors keep their own behaviour. */
+
+  async function setDefaultWorkflow() {
+    if (!S.currentName) return;
+    const category = (S.category || "").trim();
+    if (!category) { notify(t("请先给这个工作流设置分类"), true); return; }
+    const current = S.workflows.find((item) => wfKey(item) === S.currentName);
+    if (current && current.default_pinned) {
+      notify(t("它已经是「{category}」的默认工作流", { category: cat(category) }));
+      return;
+    }
+    try {
+      const data = await request(
+        "/workflows/" + encodeURIComponent(S.currentName) + "/default",
+        jsonOptions("POST", {}));
+      if (data && Array.isArray(data.workflows)) S.workflows = data.workflows;
+      renderList(); renderHead();
+      /* The generate nodes mirror this list: the event is what makes every node
+         that still follows its category default switch to the new one. */
+      window.dispatchEvent(new CustomEvent("infcanvas:workflows-changed"));
+      notify(t("已设为默认工作流"), { detail: t("{name} · 分类「{category}」", { name: S.currentName, category: cat(category) }) });
+    } catch (error) {
+      notify(error.message, true);
+    }
+  }
+
+  async function renameWorkflow() {
+    if (!S.currentName) return;
+    const from = S.currentName;
+    const answer = await NS.api?.promptDialog?.({
+      title: t("重命名工作流"),
+      message: "新的工作流名称（所有引用它的节点会一起更新）",
+      defaultValue: from,
+    });
+    if (answer === null || answer === undefined) return;
+    const to = String(answer).trim();
+    if (!to || to === from) return;
+    const invalid = checkWorkflowName(to);
+    if (invalid) { notify(invalid, true); return; }
+    try {
+      await request("/workflows/" + encodeURIComponent(from) + "/rename",
+        jsonOptions("POST", { to }));
+    } catch (error) {
+      notify(error.message, true);
+      return;
+    }
+    /* The template name IS the workflow id, so between the API call and the list
+       refresh every referencing node holds a name the list does not know yet.
+       Mute the nodes' "adopt the category default" watcher for that window or it
+       rewrites all of them to the default and the rename silently disappears. */
+    S.currentName = to;
+    NS.flow?.setRenaming?.(true);
+    let changed = 0;
+    try {
+      changed = NS.flow?.renameWorkflowRefs?.(from, to) || 0;
+      await loadWorkflows();
+    } finally {
+      /* loadWorkflows already awaited, so the pending watchers have flushed. */
+      NS.flow?.setRenaming?.(false);
+    }
+    renderHead();
+    notify(t("已重命名"), { detail: changed ? t("{to} · {n} 个节点已更新", { to, n: changed }) : to });
+  }
+
   async function removeWorkflow() {
     if (!S.currentName) return;
     const ok = await NS.api?.confirmDialog?.({
-      title: "删除工作流",
-      message: `删除工作流「${S.currentName}」？`,
-      confirmLabel: "删除", denyLabel: "取消",
+      title: t("删除工作流"),
+      message: t("删除工作流「{name}」？", { name: S.currentName }),
+      confirmLabel: t("删除"), denyLabel: t("取消"),
     });
     if (!ok) return;
+    const name = S.currentName;
     try {
-      await request("/workflows/" + encodeURIComponent(S.currentName), { method: "DELETE" });
+      await request("/workflows/" + encodeURIComponent(name), { method: "DELETE" });
       S.currentName = ""; S.currentWorkflow = null; S.fields = []; S.fieldsDirty = false;
       closeNodeFields();
       await loadWorkflows();
       renderHead(); renderPreview();
-      notify("已删除");
+      notify(t("已删除工作流"), { detail: name });
     } catch (error) {
       notify(error.message, true);
     }
@@ -805,7 +1447,7 @@
       title.appendChild(el("span", "ac-node-id", "#" + node.id));
       const type = el("div", "ac-node-type");
       type.appendChild(el("span", "", node.classType));
-      if (node.exposed) type.appendChild(el("span", "ac-node-count ac-exposed", node.exposed + " 已用"));
+      if (node.exposed) type.appendChild(el("span", "ac-node-count ac-exposed", node.exposed + t(" 已用")));
       card.append(title, type, el("span", "ac-handle ac-handle--in"), el("span", "ac-handle ac-handle--out"));
       card.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -834,7 +1476,7 @@
       if (!type) continue;
       const badge = type.querySelector(".ac-exposed");
       if (badge) badge.remove();
-      if (count) type.appendChild(el("span", "ac-node-count ac-exposed", count + " 已用"));
+      if (count) type.appendChild(el("span", "ac-node-count ac-exposed", count + t(" 已用")));
     }
     if (D.tip) D.tip.hidden = !S.currentWorkflow || !!S.fields.length;
   }
@@ -881,12 +1523,35 @@
   function openNodeFields(nodeId) {
     const node = apiNodes(S.currentWorkflow)[String(nodeId)];
     if (!node) return;
+    inspectorSnapshot = {
+      name: S.currentName,
+      nodeId: String(nodeId),
+      fields: JSON.parse(JSON.stringify(S.fields)),
+      fieldsDirty: S.fieldsDirty,
+      autoKeys: new Set(S.autoKeys),
+      off: offFields(S.currentName),
+    };
     S.inspecting = String(nodeId);
     renderNodeFields();
   }
   function closeNodeFields() {
+    inspectorSnapshot = null;
     S.inspecting = "";
     if (D.nfMask) D.nfMask.hidden = true;
+  }
+  /* 取消 = 把这次打开面板后的所有改动丢掉：字段表、脏标记、自动识别集合，
+     以及取消勾选自动字段时写进 localStorage 的「不再自动暴露」名单。 */
+  function cancelNodeFields() {
+    const snap = inspectorSnapshot;
+    if (snap && snap.name === S.currentName) {
+      S.fields = JSON.parse(JSON.stringify(snap.fields));
+      S.fieldsDirty = snap.fieldsDirty;
+      S.autoKeys = new Set(snap.autoKeys);
+      writeOffFields(snap.name, snap.off);
+    }
+    closeNodeFields();
+    renderHead();
+    updateExposedCounts();
   }
 
   function renderNodeFields() {
@@ -906,46 +1571,120 @@
       const field = saved.get(key);
       let options = [...(field?.options || [])];
       if (!options.length && typeof value === "string" && value) options = [value];
+      /* 默认值优先取 S.fields 里的那份：它可能是刚改过、还没保存的值。直接读
+         模板 `value` 会让「改 → 完成 → 再打开」又跳回模板里的旧数，看起来像
+         没有改成功。 */
+      const shown = field && field.default !== undefined ? field.default : value;
       entries.push({
         key, enabled: !!field,
+        /* Filled by the default-parameter pass, not by the user: unticking it
+           has to be remembered or the next open would resurrect it. */
+        auto: S.autoKeys.has(fieldKey(S.inspecting, key)),
         type: field?.type || guessType(value, key),
         label: field?.label || "", options,
+        /* 高级参数。文件里写了布尔值就以它为准；老文件没有这个键，按标签
+           白名单兜底——这样勾选框显示的状态和节点里「显不显示」是一致的。
+           还没暴露的参数默认算普通，用户刚勾上就应当看得见。 */
+        advanced: field
+          ? (typeof field.advanced === "boolean" ? field.advanced : defaultAdvanced(field.label))
+          : false,
         min: field?.min ?? "", max: field?.max ?? "", step: field?.step ?? "",
-        defaultText: previewValue(value),
+        /* 默认值 = 模板里这个输入自己存的值，改它就是改模板（保存时写回）。
+           `original` 留着做类型判断：后端要按它的类型把文本解析回去，否则
+           INT 字段会写成 "20"，ComfyUI 直接拒。`draft` 是输入框里的文本。 */
+        original: shown,
+        draft: shown === null || shown === undefined ? "" : String(shown),
+        /* {{image}} / {{prompt}} 这类占位符在运行时由连线或节点内容填，
+           改它会破坏替换，所以这一行禁用编辑。 */
+        placeholder: typeof value === "string" && value.includes("{{"),
       });
     }
     paintNodeFields();
   }
 
+  /* Checkbox.vue's string, with our own data-state: the host drives it with
+     reka-ui, we write the same attribute from the change handler. Shared by the
+     「启用」and the「高级」box so the two can never drift apart. */
+  function checkboxEl(checked) {
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "inline-flex size-4 shrink-0 cursor-pointer appearance-none items-center "
+      + "justify-center rounded-sm border bg-transparent text-background outline-none "
+      + "focus-visible:ring-1 focus-visible:ring-ring "
+      + "data-[state=checked]:border-primary data-[state=checked]:bg-primary";
+    box.checked = checked;
+    box.setAttribute("data-state", checked ? "checked" : "unchecked");
+    return box;
+  }
+
   function paintNodeFields() {
     D.nfList.replaceChildren();
     if (!entries.length) {
-      D.nfList.appendChild(el("div", "ac-nf-empty", "这个节点没有可直接修改的参数（连线字段不可暴露）"));
+      D.nfList.appendChild(el("div", "rounded-lg border border-dashed px-4 py-8 text-center text-xs text-muted-foreground",
+        t("这个节点没有可直接修改的参数（连线字段不可暴露）")));
     }
     for (const entry of entries) {
-      const item = el("div", "ac-nf-item");
-      const enable = el("label", "ac-nf-enable");
-      const check = document.createElement("input");
-      check.type = "checkbox"; check.className = "ac-nf-check"; check.checked = entry.enabled;
+      const item = el("div", "rounded-lg border bg-card px-3 py-2.5");
+      const head = el("div", "flex items-center gap-2");
+      const enable = el("label", "flex min-w-0 flex-1 cursor-pointer items-center gap-2");
+      const check = checkboxEl(entry.enabled);
+      const tick = el("i", "icon-[lucide--check] size-3 text-background");
+      tick.hidden = !entry.enabled;
       check.addEventListener("change", () => {
         entry.enabled = check.checked;
+        check.setAttribute("data-state", check.checked ? "checked" : "unchecked");
+        tick.hidden = !check.checked;
+        if (entry.auto) {
+          const id = fieldKey(S.inspecting, entry.key);
+          setOffField(S.currentName, id, !check.checked);
+          if (!check.checked) S.autoKeys.delete(id);
+        }
         paintNodeFields(); syncNodeFields();
       });
-      const key = el("span", "ac-nf-key", entry.key);
+      const checkWrap = el("span", "relative flex size-4 shrink-0 items-center justify-center");
+      checkWrap.append(check, tick);
+      const key = el("span", "min-w-0 truncate text-sm text-foreground", entry.key);
       key.title = entry.key;
-      const def = el("span", "ac-nf-default", "默认值: " + entry.defaultText);
-      def.title = entry.defaultText;
-      enable.append(check, key, def);
-      item.appendChild(enable);
+      enable.append(checkWrap, key);
+      head.appendChild(enable);
 
-      const detail = el("div", "ac-nf-detail");
+      /* 高级参数：勾上的在节点面板里折进「显示高级输入」，不勾的直接摆在
+         底栏齿轮里。只有「已启用」才出现——没暴露的参数谈不上高级，而勾选
+         状态留在 entry 上，所以取消再勾回来不会丢。 */
+      if (entry.enabled) {
+        const advLabel = el("label", "ml-2 flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground");
+        advLabel.title = t("勾选后，这个参数在节点里收进「显示高级输入」");
+        const adv = checkboxEl(entry.advanced);
+        const advTick = el("i", "icon-[lucide--check] size-3 text-background");
+        advTick.hidden = !entry.advanced;
+        adv.addEventListener("change", () => {
+          entry.advanced = adv.checked;
+          adv.setAttribute("data-state", adv.checked ? "checked" : "unchecked");
+          advTick.hidden = !adv.checked;
+          syncNodeFields();
+        });
+        const advWrap = el("span", "relative flex size-4 shrink-0 items-center justify-center");
+        advWrap.append(adv, advTick);
+        advLabel.append(advWrap, el("span", "", t("高级")));
+        head.appendChild(advLabel);
+      }
+
+      const def = el("span", "ml-2 min-w-0 shrink truncate text-xs text-muted-foreground",
+        t("默认值:") + " " + (entry.draft === "" ? '""' : entry.draft));
+      def.title = entry.draft;
+      /* A prompt is 200 characters long; without a ceiling it eats the row. */
+      def.style.maxWidth = "40%";
+      head.appendChild(def);
+      item.appendChild(head);
+
+      const detail = el("div", "mt-2 flex flex-col gap-2 border-t pt-2");
       detail.hidden = !entry.enabled;
       if (entry.enabled) {
-        const row = el("div", "ac-nf-row");
-        const select = el("select", "ac-nf-select");
+        const row = el("div", "flex gap-2");
+        const select = el("select", "h-6 w-28 shrink-0 cursor-pointer rounded-md border-0 bg-input px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring");
         for (const [value, label] of TYPE_OPTIONS) {
           const option = document.createElement("option");
-          option.value = value; option.textContent = label;
+          option.value = value; option.textContent = t(label);
           if (value === entry.type) option.selected = true;
           select.appendChild(option);
         }
@@ -953,32 +1692,77 @@
           entry.type = select.value;
           paintNodeFields(); syncNodeFields();
         });
-        const labelInput = el("input", "ac-nf-input");
-        labelInput.placeholder = "显示名";
+        const labelInput = el("input", "h-6 min-w-0 flex-1 rounded-md border-0 bg-input px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring");
+        labelInput.placeholder = t("显示名");
         labelInput.spellcheck = false;
         labelInput.value = entry.label;
         labelInput.addEventListener("input", () => { entry.label = labelInput.value; syncNodeFields(); });
         row.append(select, labelInput);
         detail.appendChild(row);
 
+        /* 默认值：这里显示的就是模板里这个输入自己的值，改动会在面板里的
+           「保存」时写回工作流文件——节点没手动改过的参数就直接显示新值，运行也用
+           新值，所以不需要第二份副本。类型跟着原值走：下拉 / 开关给选择器，
+           其余给文本框；{{image}} 这类占位符运行时才填，禁用编辑。 */
+        const defRow = el("label", "flex items-center gap-2 text-xs text-muted-foreground");
+        defRow.setAttribute("data-def-row", entry.key);
+        defRow.appendChild(el("span", "shrink-0", t("默认值")));
+        const setDraft = (text) => {
+          entry.draft = text;
+          def.textContent = t("默认值:") + " " + (text === "" ? '""' : text);
+          def.title = text;
+          syncNodeFields();
+        };
+        const DEF_INPUT = "h-6 min-w-0 flex-1 rounded-md border-0 bg-input px-2 text-xs text-foreground "
+          + "outline-none focus-visible:ring-1 focus-visible:ring-ring";
+        const isBoolField = entry.type === "switch" || typeof entry.original === "boolean";
+        if (entry.placeholder) {
+          const ro = el("input", DEF_INPUT + " cursor-not-allowed opacity-60");
+          ro.value = entry.draft;
+          ro.disabled = true;
+          defRow.appendChild(ro);
+          defRow.appendChild(el("span", "shrink-0 text-xs text-muted-foreground", t("运行时由连线填")));
+        } else if (entry.type === "select" || isBoolField) {
+          const pick = el("select", DEF_INPUT + " cursor-pointer");
+          const choices = isBoolField ? ["true", "false"] : entry.options.slice();
+          if (!choices.includes(entry.draft)) choices.unshift(entry.draft);
+          for (const value of choices) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value === "" ? t("（空）") : value;
+            if (value === entry.draft) option.selected = true;
+            pick.appendChild(option);
+          }
+          pick.addEventListener("change", () => setDraft(pick.value));
+          defRow.appendChild(pick);
+        } else {
+          const input = el("input", DEF_INPUT);
+          input.value = entry.draft;
+          input.spellcheck = false;
+          input.placeholder = t("模板里的值");
+          input.addEventListener("input", () => setDraft(input.value));
+          defRow.appendChild(input);
+        }
+        detail.appendChild(defRow);
+
         if (entry.type === "select") {
-          const options = el("div", "ac-nf-options");
+          const options = el("div", "flex flex-col gap-2");
           entry.options.forEach((value, index) => {
-            const optionRow = el("div", "ac-nf-row");
-            const input = el("input", "ac-nf-input");
-            input.placeholder = `选项 ${index + 1}`;
+            const optionRow = el("div", "flex gap-2");
+            const input = el("input", "h-6 min-w-0 flex-1 rounded-md border-0 bg-input px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring");
+            input.placeholder = t("选项 {n}", { n: index + 1 });
             input.spellcheck = false;
             input.value = value;
             input.addEventListener("input", () => { entry.options[index] = input.value; syncNodeFields(); });
-            const remove = el("button", "ac-nf-remove", "×");
-            remove.type = "button"; remove.title = "删除这个选项";
+            const remove = el("button", "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent text-muted-foreground hover:bg-accent", "×");
+            remove.type = "button"; remove.title = t("删除这个选项");
             remove.addEventListener("click", () => {
               entry.options.splice(index, 1); paintNodeFields(); syncNodeFields();
             });
             optionRow.append(input, remove);
             options.appendChild(optionRow);
           });
-          const add = el("button", "ac-nf-add", "+ 添加选项");
+          const add = el("button", "" + BTN_SECONDARY + " w-full", t("+ 添加选项"));
           add.type = "button";
           add.addEventListener("click", () => {
             entry.options.push(""); paintNodeFields(); syncNodeFields();
@@ -988,10 +1772,10 @@
         }
 
         if (["slider", "number", "random"].includes(entry.type)) {
-          const nums = el("div", "ac-nf-row ac-nf-nums");
-          for (const [prop, text] of [["min", "最小"], ["max", "最大"], ["step", "步长"]]) {
-            const wrap = el("label", "ac-nf-num", text);
-            const input = el("input", "ac-nf-input");
+          const nums = el("div", "flex gap-2");
+          for (const [prop, text] of [["min", t("最小")], ["max", t("最大")], ["step", t("步长")]]) {
+            const wrap = el("label", "flex min-w-0 flex-1 items-center gap-1 text-xs text-muted-foreground", text);
+            const input = el("input", "h-6 min-w-0 flex-1 rounded-md border-0 bg-input px-2 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring");
             input.type = "number"; input.value = entry[prop];
             input.addEventListener("input", () => { entry[prop] = input.value; syncNodeFields(); });
             wrap.appendChild(input);
@@ -1001,14 +1785,25 @@
         }
 
         if (MEDIA_LABELS[entry.type]) {
-          detail.appendChild(el("div", "ac-nf-note",
-            `运行时自动取节点上的${MEDIA_LABELS[entry.type]}，优先上游、其次自身，这里不用填。`));
+          detail.appendChild(el("div", "rounded-md bg-muted px-2 py-1.5 text-xs leading-relaxed text-muted-foreground",
+            t("运行时自动取节点上的{label}，优先上游、其次自身，这里不用填。",
+              { label: t(MEDIA_LABELS[entry.type]) })));
         }
       }
       item.appendChild(detail);
       D.nfList.appendChild(item);
     }
-    D.nfCount.textContent = `已启用 ${entries.filter((e) => e.enabled).length} 个字段`;
+    D.nfCount.textContent = countText(entries.filter((e) => e.enabled));
+  }
+
+  /* 底栏一句话：启用几个、其中几个是高级（高级的在节点里折进「显示高级输入」）。
+     有未保存的改动时补一句——默认值就在这一层里改，按「取消」会整表回滚，
+     按「保存」才落到工作流文件。 */
+  function countText(list) {
+    const advanced = list.filter((entry) => entry.advanced).length;
+    const base = t("已启用 {n} 个字段", { n: list.length })
+      + (advanced ? t("（{n} 个高级）", { n: advanced }) : "");
+    return S.fieldsDirty ? base + t(" · 未保存") : base;
   }
 
   /* NodeFields.collect(): emit the full field table for the inspected node. */
@@ -1017,11 +1812,18 @@
       const field = {
         nodeId: S.inspecting, key: entry.key, type: entry.type,
         label: entry.label.trim() || entry.key,
+        /* 一律写明确的布尔值：以后改了节点面板的兜底表也不会把已经定好的
+           参数悄悄挪到另一边。 */
+        advanced: !!entry.advanced,
       };
+      /* 默认值以文本回传，由后端按模板现有值的类型解析回去（int / float /
+         bool / str）。没改过时传的就是原值，后端比对后不会重复写。占位符
+         字段整行禁用，不参与。 */
+      if (!entry.placeholder) field.default = entry.draft;
       if (entry.type === "select") {
         field.options = entry.options.map((item) => String(item).trim()).filter(Boolean);
       }
-      if (entry.type === "number" || entry.type === "slider") {
+      if (entry.type === "number" || entry.type === "slider" || entry.type === "random") {
         const min = toNum(entry.min), max = toNum(entry.max), step = toNum(entry.step);
         if (min !== undefined) field.min = min;
         if (max !== undefined) field.max = max;
@@ -1038,41 +1840,75 @@
     S.fieldsDirty = true;
     renderHead();
     updateExposedCounts();
-    D.nfCount.textContent = `已启用 ${list.length} 个字段`;
+    D.nfCount.textContent = countText(list);
   }
 
   /* ------------------------------- open ------------------------------- */
 
   function open() {
-    if (!NS.tools?.openModal) return;
     injectStyles();
-    ui = NS.tools.openModal({
-      title: "API配置",
-      width: 1100,
-      applyLabel: null,
-      cancelLabel: "关闭",
-      /* Shown when the new Python routes are not loaded (an un-restarted
-         ComfyUI answers 404). Same banner pattern as the FFmpeg tools. */
-      warn: "<strong>请完全重启 ComfyUI</strong>：API 配置接口是后端新增路由，" +
-            "仅刷新浏览器无效。重启后重新打开本弹窗即可。",
-      build(body) { buildUI(body); },
-      onClose() {
-        clearTimeout(messageTimer);
+    /* Subscribe on first open: i18n.js loads after this module alphabetically,
+       so a top-level subscription would be skipped. */
+    if (!NS._i18nApiCfgSubscribed && NS.i18n?.onChange) {
+      NS.i18n.onChange(() => {
+        if (ui?.mask?.isConnected) {
+          const keep = S.currentName;
+          close();
+          open();
+          if (keep) setTimeout(() => { try { selectWorkflow(keep); } catch (e) {} }, 400);
+        }
+      });
+      NS._i18nApiCfgSubscribed = true;
+    }
+    close();
+    const host = document.getElementById("infcanvas-root") || document.body;
+    /* DialogOverlay + BaseModalLayout size "md", class for class. The dialog is
+       NOT built on NS.tools.openModal any more: that shell carries the tools'
+       own ict-* skin (14px radius, #494a50 border, 15px head), which is exactly
+       what this rewrite is getting rid of. */
+    const mask = el("div", "fixed inset-0 flex items-center justify-center bg-black/70 p-6");
+    mask.style.zIndex = "9999";
+    const panel = el("div", "relative flex h-[80vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl border bg-background shadow-lg");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", t("API 配置"));
+    mask.appendChild(panel);
+
+    const banner = el("div", "shrink-0 border-b bg-destructive/10 px-6 py-2 text-xs leading-relaxed text-destructive");
+    banner.textContent = t("请完全重启 ComfyUI：API 配置接口是后端新增路由，仅刷新浏览器无效。")
+      + t("重启后重新打开本弹窗即可。");
+    banner.hidden = true;
+    panel.appendChild(banner);
+
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      if (!D.nfMask?.hidden) { cancelNodeFields(); return; }
+      close();
+    };
+    document.addEventListener("keydown", onKey, true);
+    const onMaskDown = (event) => { if (event.target === mask) close(); };
+    mask.addEventListener("pointerdown", onMaskDown);
+
+    buildUI(panel);
+    host.appendChild(mask);
+
+    ui = {
+      mask, panel,
+      setApiReady(ready) { banner.hidden = ready !== false; },
+      close() {
+        document.removeEventListener("keydown", onKey, true);
+        mask.remove();
         ui = null;
       },
-    });
-    /* FloatingWindow: width="92vw" height="86vh", centered, head + body only. */
-    ui.panel.style.width = "92vw";
-    ui.panel.style.height = "86vh";
-    ui.panel.style.maxWidth = "96vw";
-    ui.panel.style.maxHeight = "92vh";
-    const foot = ui.panel.querySelector(".ict-foot");
-    if (foot) foot.style.display = "none";
+    };
     probeBackend();
     loadWorkflows();
   }
 
-  function close() { if (ui?.close) ui.close(); }
+  function close() { ui?.close?.(); }
 
+  /* Rebuild the open dialog on language change so its commandeered host-class
+     strings are re-created with the new language. The selected workflow is kept
+     in S and reselected by open()->loadWorkflows. */
   NS.apiConfig = { open, close, isOpen: () => !!ui?.mask?.isConnected };
 })();

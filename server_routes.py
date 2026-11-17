@@ -25,7 +25,11 @@ from server import PromptServer
 PACK_ROOT = os.path.dirname(os.path.realpath(__file__))
 WORKFLOW_DIR = os.path.join(PACK_ROOT, "api")
 
-NAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]{1,120}$")
+# Canvas names come from unconflictedName()/duplicateDoc() as e.g.
+# "Unsaved Canva (3)" and "Foo (Copy)", and users may type Chinese names.
+# Reject only characters that are illegal in a file name (plus the ".."
+# traversal check in _safe_name); this mirrors WF_NAME_RE used by workflows.
+NAME_RE = re.compile(r"^[^/\\:*?\"<>|]{1,120}$")
 STEM_RE = re.compile(r"[^A-Za-z0-9_\- ]")
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_ASSETS = 600
@@ -71,7 +75,12 @@ def _safe_name(name: Any) -> str:
     if not isinstance(name, str):
         raise web.HTTPBadRequest(reason="Invalid name")
     value = name.strip()
-    if not NAME_RE.fullmatch(value) or value in (".", "..") or ".." in value:
+    if (
+        not NAME_RE.fullmatch(value)
+        or value in (".", "..")
+        or ".." in value
+        or any(ord(ch) < 32 for ch in value)
+    ):
         raise web.HTTPBadRequest(reason="Invalid name")
     return value
 
@@ -84,9 +93,31 @@ def _kind_of(filename: str) -> str | None:
     return KIND_BY_EXT.get(os.path.splitext(filename)[1].lower())
 
 
+def _user_segment() -> str:
+    """多用户素材隔离下，input/output 的"当前根"其实在 <全局根>/<user>。
+
+    浏览器 <img> 无法带 comfy-user 头，只给 filename 的话宿主 /view 会按全局
+    目录解析，正好命中全局池里的同名旧文件（生成结果因此显示成别人的图）。
+    把用户段塞进 subfolder，URL 自己就带上了身份——这也是宿主 assets API 的
+    形状。单用户模式两处根相同，返回空串，行为不变。"""
+    try:
+        import folder_paths
+        root = os.path.abspath(folder_paths.input_directory)
+        current = os.path.abspath(folder_paths.get_input_directory())
+        if current != root:
+            return os.path.basename(current)
+    except Exception:
+        pass
+    return ""
+
+
 def _view_url(filename: str, subfolder: str, folder_type: str) -> str:
+    user = _user_segment()
+    sub = str(subfolder or "")
+    if user and sub != user and not sub.startswith(user + "/"):
+        sub = "%s/%s" % (user, sub) if sub else user
     query = urllib.parse.urlencode(
-        {"filename": filename, "subfolder": subfolder, "type": folder_type}
+        {"filename": filename, "subfolder": sub, "type": folder_type}
     )
     return "/view?" + query
 
@@ -281,8 +312,53 @@ def _workflow_path(name: str) -> str:
     return os.path.join(WORKFLOW_DIR, name + ".json")
 
 
+# Workflow categories shown in the API dialog and used by the generate nodes
+# to filter their API selector. Keep this list in sync with the node tabs.
+WORKFLOW_CATEGORIES = [
+    "文生图", "图像编辑", "图像放大", "背景移除",
+    "参考生视频", "文生视频", "图生视频", "首尾帧视频",
+    "文生音乐", "音乐翻唱", "语音合成", "语音克隆",
+    "智能对话", "语音转录",
+    "视频反推", "图像反推", "视频插帧", "文生音效", "视频编辑",
+    "视频放大", "图像重打光", "图像多角度", "局部重绘", "全景图",
+    "扩图", "去水印", "抠图",
+]
+
+# Renamed 2026-11-17 (twice: the original names, then a clarity pass). Old
+# fields.json / category_defaults / saved nodes may still carry ANY previous
+# name, including the intermediate ones from the first pass. Map every alias
+# straight to the FINAL name so a single lookup is enough (no chained renames).
+CATEGORY_RENAMES = {
+    "图片生成": "文生图", "图片编辑": "图像编辑", "图片放大": "图像放大",
+    "移除背景": "背景移除", "全能参考": "参考生视频", "参考视频": "参考生视频",
+    "首帧": "图生视频", "首尾帧": "首尾帧视频", "音乐设计": "文生音乐",
+    "音乐翻唱": "音乐翻唱", "语音设计": "语音合成", "TTS": "语音合成",
+    "语音克隆": "语音克隆", "LLM": "智能对话", "LLM对话": "智能对话",
+}
+
+
+def _normalize_category(value: Any) -> str:
+    text = str(value or "").strip()
+    return CATEGORY_RENAMES.get(text, text)
+
+
 def _fields_path(name: str) -> str:
     return os.path.join(WORKFLOW_DIR, name + ".fields.json")
+
+
+def _load_raw_fields(name: str) -> dict:
+    """Raw fields.json as a dict ({fields, category}); {} when absent/invalid."""
+    try:
+        with open(_fields_path(name), "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _load_category(name: str) -> str:
+    category = _normalize_category(_load_raw_fields(name).get("category", ""))
+    return category if category in WORKFLOW_CATEGORIES else ""
 
 
 def _read_workflow_data(name: str) -> dict | None:
@@ -344,6 +420,11 @@ def _clean_fields(raw: Any, workflow: dict) -> list[dict]:
             "type": str(item.get("type") or "text"),
             "label": str(item.get("label") or key),
         }
+        # 高级参数：由 API 配置里的那个勾选框决定，节点面板据此决定收不收进
+        # 「显示高级输入」。老 fields.json 没有这个键，就不写——前端按标签白名单
+        # 兜底，行为与加入本字段之前一致。
+        if isinstance(item.get("advanced"), bool):
+            field["advanced"] = item["advanced"]
         if item.get("options") is not None:
             field["options"] = [str(v) for v in item["options"]] if isinstance(item["options"], list) else []
         for numeric in ("min", "max", "step"):
@@ -354,25 +435,159 @@ def _clean_fields(raw: Any, workflow: dict) -> list[dict]:
     return cleaned
 
 
+def _coerce_default(text: Any, current: Any) -> Any:
+    """Parse the inspector's text back into the type the template already holds.
+
+    The dialog can only give us strings, while an input may be an int seed, a
+    float CFG, a bool switch or a string prompt. Casting everything to str would
+    make ComfyUI reject the prompt ("expected INT, got '20'"), so the current
+    value decides the type. Returns None when the text does not fit.
+    """
+    if isinstance(current, bool):
+        if isinstance(text, bool):
+            return text
+        low = str(text).strip().lower()
+        if low in ("true", "1", "yes", "on"):
+            return True
+        if low in ("false", "0", "no", "off"):
+            return False
+        return None
+    if isinstance(current, int):
+        raw = str(text).strip()
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+        try:
+            return int(float(raw))
+        except ValueError:
+            return None
+    if isinstance(current, float):
+        try:
+            return float(str(text).strip())
+        except ValueError:
+            return None
+    return str(text)
+
+
+def _apply_field_defaults(workflow: dict, raw: Any, fields: list[dict]) -> int:
+    """Write edited defaults back into the workflow file, return how many changed.
+
+    The default of an exposed parameter IS the value stored in the template --
+    that is the single source of truth every consumer reads (the node panel's
+    untouched row, the run that never touches the field, the value-control
+    baseline). Keeping a second copy in fields.json would only drift.
+    """
+    nodes = _api_nodes(workflow)
+    allowed = {(f["nodeId"], f["key"]): f for f in fields}
+    changed = 0
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or "default" not in item:
+            continue
+        node_id = str(item.get("nodeId") or "")
+        key = str(item.get("key") or "")
+        spec = allowed.get((node_id, key))
+        if spec is None:
+            continue
+        inputs = (nodes.get(node_id) or {}).get("inputs")
+        if not isinstance(inputs, dict) or key not in inputs:
+            continue
+        current = inputs[key]
+        # Links and nested groups cannot be exposed at all; a placeholder is
+        # filled at run time and must keep its {{token}}.
+        if isinstance(current, (list, dict)):
+            continue
+        if isinstance(current, str) and "{{" in current:
+            continue
+        value = _coerce_default(item.get("default"), current)
+        if value is None and current is not None:
+            continue
+        if isinstance(value, str) and "{{" in value:
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            low, high = spec.get("min"), spec.get("max")
+            if isinstance(low, (int, float)) and not isinstance(low, bool) and value < low:
+                value = int(low) if isinstance(current, int) else low
+            if isinstance(high, (int, float)) and not isinstance(high, bool) and value > high:
+                value = int(high) if isinstance(current, int) else high
+        if value == current and isinstance(value, bool) == isinstance(current, bool):
+            continue
+        inputs[key] = value
+        changed += 1
+    return changed
+
+
+def _node_input_options(class_type: str, key: str) -> dict:
+    """Live options (min / max / step) for one input, straight from the node class.
+
+    A seed ceiling belongs to the node, not to the workflow file: on one install
+    KSampler reports 2^64-1, SeedNode 2^63-1 and several Flux nodes 2^32-1. A
+    fields.json keeps whatever was current when the field was ticked, so the
+    range is refreshed from INPUT_TYPES on every read instead of drifting.
+    """
+    if not class_type:
+        return {}
+    try:
+        # Local import: ComfyUI registers custom nodes after this module loads.
+        import nodes as comfy_nodes
+        cls = comfy_nodes.NODE_CLASS_MAPPINGS.get(class_type)
+        if cls is None:
+            return {}
+        spec = cls.INPUT_TYPES()
+    except Exception:
+        return {}
+    for section in ("required", "optional"):
+        entry = (spec.get(section) or {}).get(key)
+        if isinstance(entry, (list, tuple)) and len(entry) > 1 and isinstance(entry[1], dict):
+            return entry[1]
+    return {}
+
+
 def _public_fields(name: str, workflow: dict) -> list[dict]:
     """Field list with the workflow's current value attached as `default`."""
     fields = _clean_fields(_load_fields(name), workflow)
     nodes = _api_nodes(workflow)
     for field in fields:
-        value = (nodes[field["nodeId"]].get("inputs") or {}).get(field["key"])
+        node = nodes.get(field["nodeId"]) or {}
+        if field.get("type") == "random":
+            options = _node_input_options(str(node.get("class_type") or ""), field["key"])
+            for numeric in ("min", "max", "step"):
+                value = options.get(numeric)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    field[numeric] = value
+        value = (node.get("inputs") or {}).get(field["key"])
         field["default"] = value if isinstance(value, (str, int, float, bool)) else ""
     return fields
 
 
+def _has_prompt_placeholder(workflow: dict) -> bool:
+    """模板里有没有接提示词的占位符（`{{prompt}}` / `{{text}}`）。
+
+    老式模板靠占位符收提示词，不在 fields.json 里暴露参数；新式模板反过来。
+    两者都没有时，节点上那个提示词框填了也送不进工作流，前端据此不画它。
+    """
+    try:
+        text = json.dumps(workflow, ensure_ascii=False)
+    except Exception:
+        return False
+    return "{{prompt}}" in text or "{{text}}" in text
+
+
 def _save_fields(name: str, fields: list[dict]) -> None:
     path = _fields_path(name)
-    if not fields:
+    category = _load_category(name)
+    if not fields and not category:
         if os.path.isfile(path):
             os.remove(path)
         return
     os.makedirs(WORKFLOW_DIR, exist_ok=True)
+    payload = {}
+    if fields:
+        payload["fields"] = fields
+    if category:
+        payload["category"] = category
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"fields": fields}, handle, ensure_ascii=False, indent=2)
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
 
 
 async def api_config_ready(request: web.Request) -> web.Response:
@@ -433,7 +648,93 @@ async def api_delete_workflow(request: web.Request) -> web.Response:
     os.remove(_workflow_path(name))
     if os.path.isfile(_fields_path(name)):
         os.remove(_fields_path(name))
+    # Keep the saved drag order and the category default map free of dangling
+    # references; the list falls back to the category's first entry on its own.
+    settings = _load_api_settings()
+    patch: dict[str, Any] = {}
+    order = settings.get("workflow_order")
+    if isinstance(order, list) and name in [str(item) for item in order]:
+        patch["workflow_order"] = [item for item in order if str(item) != name]
+    defaults = settings.get("category_defaults")
+    if isinstance(defaults, dict) and name in [str(v) for v in defaults.values()]:
+        patch["category_defaults"] = {
+            key: value for key, value in defaults.items() if str(value) != name
+        }
+    if patch:
+        _save_api_settings(**patch)
     return web.json_response({"ok": True})
+
+
+async def api_set_default(request: web.Request) -> web.Response:
+    """Mark a workflow as the default one of its category.
+
+    One default per category, stored in api_settings.json as
+    {"category_defaults": {category: workflow}}. A workflow must already carry a
+    category -- there is no "default of nothing" slot -- and the list response
+    falls back to the first workflow of the category (in saved drag order) when
+    nothing has been pinned yet.
+    """
+    name = _safe_workflow_name(request.match_info.get("name", ""))
+    if not os.path.isfile(_workflow_path(name)):
+        return web.json_response({"error": "工作流不存在"}, status=404)
+    category = _load_category(name)
+    if not category:
+        return web.json_response({"error": "请先给这个工作流设置分类"}, status=400)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict) and payload.get("clear"):
+        defaults = _load_api_settings().get("category_defaults") or {}
+        if isinstance(defaults, dict) and defaults.get(category) == name:
+            defaults.pop(category, None)
+            _save_api_settings(category_defaults=defaults)
+        return await list_workflows(request)
+    defaults = _load_api_settings().get("category_defaults") or {}
+    if not isinstance(defaults, dict):
+        defaults = {}
+    defaults[category] = name
+    _save_api_settings(category_defaults=defaults)
+    return await list_workflows(request)
+
+
+async def api_rename_workflow(request: web.Request) -> web.Response:
+    """Rename a workflow: the title IS the file stem, so this moves
+    <name>.json and <name>.fields.json and rewrites the saved drag order.
+    Nodes reference the same stem, so the client retargets them afterwards."""
+    name = _safe_workflow_name(request.match_info.get("name", ""))
+    if not os.path.isfile(_workflow_path(name)):
+        return web.json_response({"error": "工作流不存在"}, status=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+    try:
+        target = _safe_workflow_name(str(payload.get("to", "") or ""))
+    except web.HTTPBadRequest:
+        return web.json_response({"error": "工作流名称不合法"}, status=400)
+    if target == name:
+        return web.json_response({"name": target, "previous": name, "unchanged": True})
+    if os.path.isfile(_workflow_path(target)) or os.path.isfile(_fields_path(target)):
+        return web.json_response({"error": "已存在同名工作流"}, status=409)
+    try:
+        os.replace(_workflow_path(name), _workflow_path(target))
+        if os.path.isfile(_fields_path(name)):
+            os.replace(_fields_path(name), _fields_path(target))
+    except OSError as error:
+        return web.json_response({"error": f"重命名失败：{error}"}, status=500)
+    order = _load_api_settings().get("workflow_order")
+    if isinstance(order, list) and name in order:
+        _save_api_settings(workflow_order=[
+            target if str(item) == name else item for item in order
+        ])
+    defaults = _load_api_settings().get("category_defaults")
+    if isinstance(defaults, dict) and name in [str(v) for v in defaults.values()]:
+        _save_api_settings(category_defaults={
+            key: (target if str(value) == name else value)
+            for key, value in defaults.items()
+        })
+    return web.json_response({"name": target, "previous": name})
 
 
 async def api_get_fields(request: web.Request) -> web.Response:
@@ -441,7 +742,40 @@ async def api_get_fields(request: web.Request) -> web.Response:
     workflow = _read_workflow_data(name)
     if workflow is None:
         return web.json_response({"error": "工作流不存在"}, status=404)
-    return web.json_response({"fields": _public_fields(name, workflow)})
+    return web.json_response({
+        "fields": _public_fields(name, workflow),
+        "category": _load_category(name),
+        "categories": WORKFLOW_CATEGORIES,
+        "prompt_placeholder": _has_prompt_placeholder(workflow),
+    })
+
+
+async def api_save_category(request: web.Request) -> web.Response:
+    name = _safe_workflow_name(request.match_info.get("name", ""))
+    if not os.path.isfile(_workflow_path(name)):
+        return web.json_response({"error": "工作流不存在"}, status=404)
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+    category = str(payload.get("category", "") or "")
+    if category and category not in WORKFLOW_CATEGORIES:
+        return web.json_response({"error": "未知分类"}, status=400)
+    os.makedirs(WORKFLOW_DIR, exist_ok=True)
+    raw = _load_raw_fields(name)
+    fields = raw.get("fields") or []
+    if not fields and not category:
+        if os.path.isfile(_fields_path(name)):
+            os.remove(_fields_path(name))
+    else:
+        payload_out = {}
+        if fields:
+            payload_out["fields"] = _clean_fields(fields, _read_workflow_data(name) or {})
+        if category:
+            payload_out["category"] = category
+        with open(_fields_path(name), "w", encoding="utf-8") as handle:
+            json.dump(payload_out, handle, ensure_ascii=False, indent=2)
+    return web.json_response({"category": category})
 
 
 async def api_save_fields(request: web.Request) -> web.Response:
@@ -453,9 +787,20 @@ async def api_save_fields(request: web.Request) -> web.Response:
         payload = await request.json()
     except Exception:
         return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
-    fields = _clean_fields(payload.get("fields"), workflow)
+    raw = payload.get("fields")
+    fields = _clean_fields(raw, workflow)
+    changed = _apply_field_defaults(workflow, raw, fields)
+    if changed:
+        os.makedirs(WORKFLOW_DIR, exist_ok=True)
+        with open(_workflow_path(name), "w", encoding="utf-8") as handle:
+            json.dump(workflow, handle, ensure_ascii=False, indent=2)
+        # Re-read so the returned defaults are exactly what is on disk now.
+        workflow = _read_workflow_data(name) or workflow
     _save_fields(name, fields)
-    return web.json_response({"fields": _public_fields(name, workflow)})
+    return web.json_response({
+        "fields": _public_fields(name, workflow),
+        "defaults_changed": changed,
+    })
 
 
 async def list_workflows(request: web.Request) -> web.Response:
@@ -489,10 +834,36 @@ async def list_workflows(request: web.Request) -> web.Response:
                 "hint": data.get("hint", ""),
                 "nodes": len(_api_nodes(data)),
                 "updated": int(os.path.getmtime(path)),
+                "category": _load_category(name),
                 "builtin": False,
             })
     workflows.sort(key=lambda item: (ranked.get(item["id"], len(ranked)), item["id"]))
-    return web.json_response({"workflows": workflows})
+    # One default per category. A pinned name wins; otherwise the category's
+    # first workflow in saved drag order is the fallback, so a freshly imported
+    # set of templates already behaves as if every category had a default.
+    pinned = _load_api_settings().get("category_defaults")
+    pinned = pinned if isinstance(pinned, dict) else {}
+    # category_defaults was keyed by the old names; normalise so pins survive
+    # the rename without touching the user's settings file.
+    pinned = {_normalize_category(key): value for key, value in pinned.items()}
+    first_of: dict[str, str] = {}
+    for item in workflows:
+        category = item.get("category") or ""
+        if category and category not in first_of:
+            first_of[category] = item["id"]
+    effective: dict[str, str] = {}
+    for category, fallback in first_of.items():
+        chosen = pinned.get(category)
+        effective[category] = chosen if chosen in {
+            entry["id"] for entry in workflows if (entry.get("category") or "") == category
+        } else fallback
+    for item in workflows:
+        category = item.get("category") or ""
+        item["is_default"] = bool(category) and effective.get(category) == item["id"]
+        item["default_pinned"] = bool(category) and pinned.get(category) == item["id"]
+    return web.json_response({
+        "workflows": workflows, "defaults": effective, "categories": WORKFLOW_CATEGORIES,
+    })
 
 
 async def get_workflow(request: web.Request) -> web.Response:
@@ -616,8 +987,15 @@ async def _probe_video(path: str) -> dict | None:
              and not (s.get("disposition") or {}).get("attached_pic")),
             None,
         )
+        try:
+            vw = int((video or {}).get("width") or 0)
+            vh = int((video or {}).get("height") or 0)
+        except (TypeError, ValueError):
+            vw = vh = 0
         return {
             "duration": duration if duration > 0 else None,
+            "width": vw or None,
+            "height": vh or None,
             "has_audio": any(s.get("codec_type") == "audio" for s in streams),
             "has_video": video is not None,
         }
@@ -818,6 +1196,86 @@ async def media_resolve(request: web.Request) -> web.Response:
     })
 
 
+def _import_target(source: str, filename: str) -> tuple[str, bool]:
+    """Name inside input/infcanvas for a copy of `source`, and whether to copy.
+
+    Same name + same byte size means this exact file was imported before, so it
+    is reused — upscaling the same result twice must not pile up
+    `..._1.png` / `..._2.png`. A DIFFERENT file that happens to share the name
+    gets a `_N` suffix instead of clobbering the older copy.
+    """
+    base = os.path.basename(filename) or "asset.bin"
+    stem, ext = os.path.splitext(base)
+    try:
+        size = os.path.getsize(source)
+    except OSError:
+        size = -1
+    for index in range(0, 500):
+        candidate = base if index == 0 else "%s_%d%s" % (stem, index, ext)
+        path = os.path.join(_upload_dir(), candidate)
+        if not os.path.exists(path):
+            return candidate, True
+        if size >= 0 and os.path.getsize(path) == size:
+            return candidate, False
+    return "%s_%s%s" % (stem, uuid.uuid4().hex[:6], ext), True
+
+
+async def media_import(request: web.Request) -> web.Response:
+    """POST /api/infcanvas/media/import  body: {filename, subfolder, type}
+
+    Copy a canvas asset into input/infcanvas and return it as an input ref.
+
+    LoadImage / LoadVideo / LoadAudio only read the input directory, while every
+    generated result lands in output — so chaining 「生成 → 放大 / 编辑 / 再生成」
+    used to fail with 「图像素材需来自 input 目录」and the user had to re-drop the
+    same picture onto the canvas just to upload it again. Now the run loop calls
+    this first and feeds the copy to the template.
+
+    Idempotent: a ref already inside input is returned untouched; a copy that
+    already exists under the same name is reused instead of duplicated.
+    """
+    payload = await _read_payload(request)
+    filename = str(payload.get("filename") or "")
+    try:
+        source = _resolve_media_path(
+            filename, payload.get("subfolder", ""), payload.get("type", "input"))
+    except MediaError as exc:
+        return web.json_response({"error": str(exc), "detail": exc.detail}, status=404)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+    real = os.path.realpath(source)
+    base_input = os.path.realpath(_dir_for_type("input"))
+    if real.startswith(base_input + os.sep):
+        rel = os.path.relpath(os.path.dirname(real), base_input).replace("\\", "/")
+        return web.json_response({
+            "asset": {
+                "filename": os.path.basename(real),
+                "subfolder": "" if rel == "." else rel,
+                "type": "input",
+                "copied": False,
+                "url": _view_url(os.path.basename(real), "" if rel == "." else rel, "input"),
+            }
+        })
+
+    name, needs_copy = _import_target(real, filename)
+    target = os.path.join(_upload_dir(), name)
+    if needs_copy:
+        try:
+            shutil.copyfile(real, target)
+        except OSError as exc:
+            return web.json_response({"error": "复制失败：%s" % exc}, status=500)
+    return web.json_response({
+        "asset": {
+            "filename": name,
+            "subfolder": "infcanvas",
+            "type": "input",
+            "copied": needs_copy,
+            "url": _view_url(name, "infcanvas", "input"),
+        }
+    })
+
+
 async def _read_payload(request: web.Request) -> dict:
     try:
         return await request.json()
@@ -905,8 +1363,10 @@ async def process_audio(request: web.Request) -> web.Response:
 
 async def process_video(request: web.Request) -> web.Response:
     """POST /api/infcanvas/video/process
-    body: {ref, action: "extractAudio"|"separate"|"trim"|"frame",
-           start?, end?, frame?: "current"|"first"|"last", time?}
+    body: {ref, action: "extractAudio"|"crop"|"speed"|"reverse"|"rotate"|"trim"|"frame",
+           start?, end?, frame?: "current"|"first"|"last", time?,
+           x?, y?, w?, h?, speed?, angle?, mode?}
+    rotate: mode = "flipX"|"flipY"|"90"|"180"|"270" (angle is the legacy alias).
     """
     payload = await _read_payload(request)
     ref = payload.get("ref") or {}
@@ -920,7 +1380,7 @@ async def process_video(request: web.Request) -> web.Response:
         return web.json_response({"error": str(exc)}, status=400)
 
     action = payload.get("action")
-    if action not in ("extractAudio", "separate", "trim", "frame"):
+    if action not in ("extractAudio", "crop", "speed", "reverse", "rotate", "trim", "frame"):
         return web.json_response({"error": "未知操作"}, status=400)
 
     info = await _probe_video(src)
@@ -943,15 +1403,93 @@ async def process_video(request: web.Request) -> web.Response:
         made.append(item)
         return item["path"]
 
-    if action in ("extractAudio", "separate"):
+    if action == "extractAudio":
         if info is not None and not info["has_audio"]:
             return web.json_response({"error": "该视频没有音轨"}, status=400)
         audio_path = add_out("m4a", "asset-audio", "音轨", duration)
         cmd = base + ["-i", src] + _AUDIO_OUT_ARGS + [audio_path]
-        if action == "separate":
-            # One command, two outputs: the second drops the audio track.
-            video_path = add_out("mp4", "asset-video", "静音视频", duration)
-            cmd += ["-an"] + _VIDEO_OUT_ARGS + [video_path]
+    elif action in ("crop", "speed", "reverse", "rotate"):
+        # All four keep the video (and its audio when present) in one mp4 and
+        # share the same libx264/faststart output; only the filter chain and
+        # the expected duration differ. Audio presence comes from the probe:
+        # areverse/atempo must be skipped for silent videos or ffmpeg fails.
+        vf_parts: list[str] = []
+        af_parts: list[str] = []
+        out_duration = duration
+        label = {"crop": "裁剪", "speed": "倍数", "reverse": "倒放", "rotate": "旋转"}[action]
+        has_audio = bool((info or {}).get("has_audio"))
+
+        if action == "crop":
+            try:
+                x, y, w, h = (int(payload.get(k)) for k in ("x", "y", "w", "h"))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "裁剪参数错误"}, status=400)
+            if min(x, y) < 0 or w < 2 or h < 2:
+                return web.json_response({"error": "裁剪区域无效"}, status=400)
+            iw, ih = (info or {}).get("width"), (info or {}).get("height")
+            if iw and ih and (x + w > iw + 1 or y + h > ih + 1):
+                return web.json_response({"error": "裁剪区域超出画面"}, status=400)
+            vf_parts.append(f"crop={w}:{h}:{x}:{y}")
+            label = f"裁剪 {w}×{h}"
+        elif action == "speed":
+            try:
+                speed = float(payload.get("speed"))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "倍数参数错误"}, status=400)
+            if not (speed == speed and abs(speed) != float("inf")) or not (0.1 <= speed <= 4):
+                return web.json_response({"error": "倍数须在 0.1–4 之间"}, status=400)
+            vf_parts.append(f"setpts=PTS/{speed:.6f}")
+            # atempo accepts 0.5–2 per filter; chain for the full 0.1–4 range.
+            remaining, tempo = speed, []
+            while remaining < 0.5 - 1e-9:
+                tempo.append("0.5"); remaining /= 0.5
+            while remaining > 2 + 1e-9:
+                tempo.append("2"); remaining /= 2
+            if abs(remaining - 1.0) > 1e-9:
+                tempo.append(f"{remaining:.6f}")
+            if has_audio and tempo:
+                af_parts.append(",".join("atempo=" + v for v in tempo))
+            out_duration = (duration / speed) if duration else None
+            label = f"{speed:g}× 倍数"
+        elif action == "reverse":
+            vf_parts.append("reverse")
+            if has_audio:
+                af_parts.append("areverse")
+        else:  # rotate — mirrors + turns, same five transforms as the image tool.
+            # mode is the primary key; angle is the legacy numeric alias.
+            mode = payload.get("mode")
+            if mode is None and payload.get("angle") is not None:
+                mode = str(payload.get("angle"))
+            rotations = {
+                "flipX": (["hflip"], "左右翻转"),
+                "flipY": (["vflip"], "上下翻转"),
+                "90": (["transpose=1"], "顺时针 90°"),
+                "270": (["transpose=2"], "逆时针 90°"),
+                "180": (["hflip", "vflip"], "旋转 180°"),
+                "rotate90": (["transpose=1"], "顺时针 90°"),
+                "rotate270": (["transpose=2"], "逆时针 90°"),
+                "rotate180": (["hflip", "vflip"], "旋转 180°"),
+            }
+            key = str(mode) if mode is not None else ""
+            if key not in rotations:
+                return web.json_response({"error": "旋转方式错误"}, status=400)
+            filters, label = rotations[key]
+            vf_parts.extend(filters)
+
+        # Normalise even dimensions for yuv420p after crop/transpose.
+        vf_parts.append("pad=ceil(iw/2)*2:ceil(ih/2)*2")
+        video_path = add_out("mp4", "asset-video", label, out_duration)
+        cmd = base + ["-i", src, "-map", "0:V:0"]
+        if has_audio:
+            cmd += ["-map", "0:a:0?"]
+        cmd += ["-vf", ",".join(vf_parts)]
+        if af_parts:
+            cmd += ["-af", ",".join(af_parts)]
+        cmd += [
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-f", "mp4", "-movflags", "+faststart", video_path,
+        ]
     elif action == "trim":
         try:
             start = float(payload.get("start"))
@@ -1045,6 +1583,7 @@ def register_routes() -> None:
         ("POST", "/api/infcanvas/upload", upload_asset),
         ("GET", "/api/infcanvas/media/health", media_health),
         ("GET", "/api/infcanvas/media/resolve", media_resolve),
+        ("POST", "/api/infcanvas/media/import", media_import),
         ("POST", "/api/infcanvas/audio/process", process_audio),
         ("POST", "/api/infcanvas/video/process", process_video),
         ("GET", "/api/infcanvas/assets", list_assets),
@@ -1054,6 +1593,9 @@ def register_routes() -> None:
         ("POST", "/api/infcanvas/workflows", api_save_workflow),
         ("GET", "/api/infcanvas/workflows/{name}/fields", api_get_fields),
         ("PUT", "/api/infcanvas/workflows/{name}/fields", api_save_fields),
+        ("PUT", "/api/infcanvas/workflows/{name}/category", api_save_category),
+        ("POST", "/api/infcanvas/workflows/{name}/rename", api_rename_workflow),
+        ("POST", "/api/infcanvas/workflows/{name}/default", api_set_default),
         ("GET", "/api/infcanvas/workflows/{name}", api_get_workflow),
         ("DELETE", "/api/infcanvas/workflows/{name}", api_delete_workflow),
         ("GET", "/api/infcanvas/workflows", list_workflows),

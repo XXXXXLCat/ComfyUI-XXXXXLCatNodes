@@ -3,7 +3,7 @@
    The operation flow is ported from the reference project's
    xcat-video-edit.js / xcat-audio-edit.js / xcat-media-core.js:
 
-     video 提取 / 分离 : click -> progress dialog -> 1 / 2 result nodes
+     video 音频分离            : click -> progress dialog -> 1 audio node
      video 截取                : preview + 10 thumbnails + two draggable
                                  handles + ruler + numeric start/end, playback
                                  confined to the selection -> 1 mp4 node
@@ -23,6 +23,9 @@
    readiness banner from createProbe() instead of a JSON parse error. */
 (() => {
   const NS = (window.InfCanvas = window.InfCanvas || {});
+  /* i18n: lazy reference; i18n.js loads after most modules, but every call
+     site runs after app init when NS.i18n is available. */
+  const t = (key, params) => (NS.i18n ? NS.i18n.t(key, params) : key);
   const R = (NS.icRegistry = NS.icRegistry || {});
   const T = () => NS.tools;
 
@@ -54,10 +57,10 @@
     const probe = getProbes()[opts.kind];
     const ok = await probe.check();
     if (!ok) {
-      toast("error", T().NOT_READY);
+      toast("error", t(T().NOT_READY));
       ui?.setApiReady?.(false);
       ui?.setWarn?.(false);
-      ui?.setStatus?.("后端接口未就绪，需重启 ComfyUI", true);
+      ui?.setStatus?.(t("后端接口未就绪，需重启 ComfyUI"), true);
       T().closeModal();
       return false;
     }
@@ -68,15 +71,15 @@
     try {
       const data = await T().request(api, payload, ui?.signal);
       const files = data.files || [];
-      if (!files.length) throw new Error("后端没有返回产物");
+      if (!files.length) throw new Error(t("后端没有返回产物"));
       T().spawnRefs(files, ctx);
       T().closeModal();
-      toast("success", opts.done || `已生成 ${files.length} 个新节点`);
+      toast("success", opts.done || t("已生成 {n} 个新节点", { n: files.length }));
       return true;
     } catch (error) {
       if (error?.name === "AbortError") {
         T().closeModal();
-        toast("info", "已取消");
+        toast("info", t("已取消"));
         return false;
       }
       if (String(error?.message || "").includes("接口未就绪")) {
@@ -87,7 +90,7 @@
       ui?.setStatus?.(String(error?.message || error), true);
       ui?.setBusy?.(false);
       ui?.lock?.(false);
-      toast("error", (opts.label || "媒体") + "处理失败", String(error?.message || error));
+      toast("error", t(opts.label || "媒体") + t("处理失败"), String(error?.message || error));
       return false;
     }
   }
@@ -96,7 +99,7 @@
     const ok = await getProbes()[kind].check();
     ui.setApiReady(ok);
     ui.setWarn(ok);
-    if (!ok) ui.setStatus("后端接口未就绪，需重启 ComfyUI", true);
+    if (!ok) ui.setStatus(t("后端接口未就绪，需重启 ComfyUI"), true);
     else ui.setStatus("");
     /* The reference paints the timeline/waveform regardless of readiness;
        the shell's apiReady gate keeps Apply disabled in the same render pass. */
@@ -110,50 +113,113 @@
     T().openModal({
       title, sub, width: 440,
       progress: true,
-      progressText: `正在用 FFmpeg 处理${kind === "audio" ? "音频" : "视频"}，请稍候…`,
-      cancelLabel: "取消处理",
-      warn: T().WARN_HTML,
+      progressText: t("正在用 FFmpeg 处理{kind}，请稍候…", { kind: t(kind === "audio" ? "音频" : "视频") }),
+      cancelLabel: t("取消处理"),
+      warn: T().warnHtml(),
       run: (ui) => runRequest(api, payload, ctx, {
-        ui, kind, label: kind === "audio" ? "音频" : "视频", done: opts.done,
+        ui, kind, label: t(kind === "audio" ? "音频" : "视频"), done: opts.done,
       }),
     });
   }
 
   /* --------------------------- video: no-arg actions --------------------- */
 
-  R.extractAudio = (ctx) => progressModal("video", "提取",
-    "提取音轨并生成音频节点，保留原视频", ctx,
+  R.extractAudio = (ctx) => progressModal("video", t("音频分离"),
+    t("提取音轨并生成音频节点，保留原视频"), ctx,
     { ref: refOf(ctx), action: "extractAudio" },
-    { done: "已生成音轨节点" });
+    { done: t("已生成音轨节点") });
 
-  R.separate = (ctx) => progressModal("video", "分离",
-    "生成静音视频和音轨两个节点，保留原视频", ctx,
-    { ref: refOf(ctx), action: "separate" },
-    { done: "已生成静音视频和音轨两个节点" });
+  R.reverse = (ctx) => progressModal("video", t("倒放"),
+    t("将视频与音轨倒序播放，生成新视频节点，原视频保留"), ctx,
+    { ref: refOf(ctx), action: "reverse" },
+    { done: t("已生成倒放视频节点") });
+
+  /* --------------------------- video: mirror / rotate -------------------- */
+  /* Same five transforms and same icon set as the image tool (R.mirror in
+     infcanvas-tools.js). Labels use a LIVE t() (not the image tool's
+     load-time-frozen ones) so switching language updates them. Hover/focus
+     previews the transform on the first frame; a click generates at once. */
+  R.rotate = async (ctx) => {
+    const mediaUrl = (NS.api?.resolveMediaUrl
+      ? await NS.api.resolveMediaUrl(ctx.data?.asset || {}).catch(() => ctx.url)
+      : ctx.url) || ctx.url;
+    let frameUrl;
+    try { frameUrl = await firstFrameUrl(mediaUrl); }
+    catch (e) { toast("error", t("视频加载失败")); return; }
+    const items = [
+      { key: "flipX", mode: "flipX", label: t("左右翻转"), css: "scaleX(-1)" },
+      { key: "flipY", mode: "flipY", label: t("上下翻转"), css: "scaleY(-1)" },
+      { key: "rotate90", mode: "90", label: t("顺时针 90°"), css: "rotate(90deg)" },
+      { key: "rotate270", mode: "270", label: t("逆时针 90°"), css: "rotate(-90deg)" },
+      { key: "rotate180", mode: "180", label: "180°", css: "rotate(180deg)" },
+    ];
+    let current = items[0], ui = null;
+    const mirrorIcon = T().mirrorIcon;
+    T().openModal({
+      title: t("镜像 / 旋转"), width: 860,
+      applyLabel: null, cancelLabel: t("关闭"),
+      warn: T().warnHtml(),
+      build(body, modalUi) {
+        ui = modalUi;
+        body.innerHTML = `
+          <div class="ict-split">
+            <div class="ict-preview ict-mirror-preview"><img alt="${t("镜像效果预览")}" /></div>
+            <aside class="ict-side">
+              <p class="ict-label">${t("变换")}</p>
+              <div class="ict-mirror-grid"></div>
+            </aside>
+          </div>`;
+        const preview = body.querySelector("img");
+        preview.src = frameUrl;
+        const grid = body.querySelector(".ict-mirror-grid");
+        for (const item of items) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ict-mirror-btn" + (item.key === "rotate180" ? " is-wide" : "");
+          const icon = typeof mirrorIcon === "function"
+            ? mirrorIcon(item.key) : "";
+          button.innerHTML = `<span class="ict-mirror-icon">${icon}</span>` +
+            `<span class="ict-mirror-label">${item.label}</span>`;
+          const show = () => { preview.style.transform = item.css; };
+          const hide = () => { preview.style.transform = ""; };
+          button.addEventListener("mouseenter", show);
+          button.addEventListener("mouseleave", hide);
+          button.addEventListener("focus", show);
+          button.addEventListener("blur", hide);
+          button.addEventListener("click", () => { current = item; ui.apply(); });
+          grid.appendChild(button);
+        }
+        preflight(ui, "video", () => {});
+      },
+      onApply: () => runRequest(T().API_VIDEO,
+        { ref: refOf(ctx), action: "rotate", mode: current.mode }, ctx,
+        { ui, kind: "video", label: t("视频"), done: t("已生成旋转视频节点") }),
+    });
+  };
 
   /* --------------------------- video: frame menu ------------------------- */
 
   R.frame = (ctx) => {
     const anchor = ctx.button || document.querySelector(
       `.vue-flow__node[data-id="${ctx.id}"] .icn__tool[data-action="frame"]`);
-    if (!anchor) { toast("error", "无法定位抽帧按钮"); return; }
+    if (!anchor) { toast("error", t("无法定位抽帧按钮")); return; }
     const wrap = document.querySelector(`.vue-flow__node[data-id="${ctx.id}"]`);
     const nodeVideo = wrap?.querySelector("video");
     const current = nodeVideo && Number.isFinite(nodeVideo.currentTime) && nodeVideo.currentTime > 0
       ? nodeVideo.currentTime : 0;
     T().openMenu(anchor, [
-      { label: "抽取当前帧", value: fmt(current), onPick: () => runFrame("current", ctx, current) },
-      { label: "抽取首帧", onPick: () => runFrame("first", ctx, 0) },
-      { label: "抽取尾帧", onPick: () => runFrame("last", ctx, 0) },
+      { label: t("抽取当前帧"), value: fmt(current), onPick: () => runFrame("current", ctx, current) },
+      { label: t("抽取首帧"), onPick: () => runFrame("first", ctx, 0) },
+      { label: t("抽取尾帧"), onPick: () => runFrame("last", ctx, 0) },
     ]);
   };
 
   function runFrame(which, ctx, time) {
-    const labels = { current: "当前帧", first: "首帧", last: "尾帧" };
-    progressModal("video", "抽帧",
-      `导出${labels[which]}为 PNG 图片节点，保留原视频`, ctx,
+    const labels = { current: t("当前帧"), first: t("首帧"), last: t("尾帧") };
+    progressModal("video", t("捕捉帧"),
+      t("导出{label}为 PNG 图片节点，保留原视频", { label: labels[which] }), ctx,
       { ref: refOf(ctx), action: "frame", frame: which, time: time || 0 },
-      { done: "已生成图片节点" });
+      { done: t("已生成图片节点") });
   }
 
   /* ------------------------------ video: trim ---------------------------- */
@@ -163,9 +229,33 @@
       const video = document.createElement("video");
       video.muted = true; video.playsInline = true; video.preload = "auto"; video.src = url;
       video.addEventListener("loadedmetadata", () => resolve(video), { once: true });
-      video.addEventListener("error", () => reject(new Error("视频加载失败")), { once: true });
+      video.addEventListener("error", () => reject(new Error(t("视频加载失败"))), { once: true });
       video.load();
     });
+  }
+
+  /* Snapshot of video frame 0 as a data URL, used as the still preview behind
+     transform tools (seeking a paused video straight to 0 is reliable). */
+  async function firstFrameUrl(mediaUrl) {
+    const video = await loadVideo(mediaUrl);
+    const W = video.videoWidth, H = video.videoHeight;
+    try { video.currentTime = 0; } catch (e) { /* optional */ }
+    const url = await new Promise((resolve) => {
+      const done = (u) => resolve(u);
+      const grab = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = W; canvas.height = H;
+          canvas.getContext("2d").drawImage(video, 0, 0, W, H);
+          done(canvas.toDataURL("image/png"));
+        } catch (e) { done(mediaUrl); }
+      };
+      video.addEventListener("seeked", grab, { once: true });
+      setTimeout(grab, 1500);
+      if (video.readyState >= 2 && video.currentTime === 0) setTimeout(grab, 0);
+    });
+    try { video.removeAttribute("src"); video.load(); } catch (e) { /* optional */ }
+    return url;
   }
 
   /* Fixed 10 thumbnails, independent of clip length; offscreen video seeks and
@@ -241,21 +331,21 @@
       if (hs) {
         hs.style.left = startPct + "%";
         hs.setAttribute("aria-valuenow", S.start.toFixed(2));
-        hs.setAttribute("aria-valuetext", S.start.toFixed(2) + " 秒");
+        hs.setAttribute("aria-valuetext", S.start.toFixed(2) + t(" 秒"));
       }
       if (he) {
         he.style.left = endPct + "%";
         he.setAttribute("aria-valuenow", S.end.toFixed(2));
-        he.setAttribute("aria-valuetext", S.end.toFixed(2) + " 秒");
+        he.setAttribute("aria-valuetext", S.end.toFixed(2) + t(" 秒"));
       }
       const sub = q(".ict-tl-dur");
-      if (sub) sub.textContent = "原视频 " + fmt(S.duration);
+      if (sub) sub.textContent = t("原视频 ") + fmt(S.duration);
       const length = q(".ict-length");
-      if (length) length.textContent = "时长 " + (valid() ? (S.end - S.start).toFixed(2) : "—") + " 秒";
+      if (length) length.textContent = t("时长 ") + (valid() ? (S.end - S.start).toFixed(2) : "—") + t(" 秒");
       const hint = q(".ict-trim-hint");
       if (hint) hint.textContent = valid()
-        ? "点击时间轴可预览对应画面；播放只播放选中的片段。"
-        : "请选择有效的起止时间。";
+        ? t("点击时间轴可预览对应画面；播放只播放选中的片段。")
+        : t("请选择有效的起止时间。");
       if (!skipInputs) {
         if (startInput && document.activeElement !== startInput) startInput.value = S.start.toFixed(2);
         if (endInput && document.activeElement !== endInput) endInput.value = S.end.toFixed(2);
@@ -334,32 +424,32 @@
     }
 
     T().openModal({
-      title: "截取", sub: "正在读取视频…", width: 760,
-      applyLabel: "截取", applyDisabled: true, cancelLabel: "取消",
-      warn: T().WARN_HTML,
+      title: t("截取"), sub: t("正在读取视频…"), width: 760,
+      applyLabel: t("截取"), applyDisabled: true, cancelLabel: t("取消"),
+      warn: T().warnHtml(),
       build(body, modalUi) {
         ui = modalUi;
         body.innerHTML = `
           <div class="ict-video-preview"><video controls playsinline preload="auto"></video></div>
           <div class="ict-tl">
-            <div class="ict-tl-head"><span>拖动左右边界，选择保留的片段</span><span class="ict-tl-dur">原视频 00:00.00</span></div>
+            <div class="ict-tl-head"><span>${t('拖动左右边界，选择保留的片段')}</span><span class="ict-tl-dur">${t('原视频')} 00:00.00</span></div>
             <div class="ict-track">
               <div class="ict-strip"></div>
               <div class="ict-tl-mask ict-ml"></div><div class="ict-tl-mask ict-mr"></div>
               <div class="ict-tl-sel"></div><div class="ict-tl-playhead"></div>
               <button type="button" class="ict-tl-handle ict-hs" role="slider"
-                      aria-label="片段开始边界" aria-orientation="horizontal"><span></span></button>
+                      aria-label="${t('片段开始边界')}" aria-orientation="horizontal"><span></span></button>
               <button type="button" class="ict-tl-handle ict-he" role="slider"
-                      aria-label="片段结束边界" aria-orientation="horizontal"><span></span></button>
+                      aria-label="${t('片段结束边界')}" aria-orientation="horizontal"><span></span></button>
             </div>
             <div class="ict-tl-ruler"></div>
           </div>
           <div class="ict-times">
-            <label>开始时间 <input class="ict-input ict-start" type="number" step="0.01" min="0" value="0.00" /><span>秒</span></label>
-            <label>结束时间 <input class="ict-input ict-end" type="number" step="0.01" min="0" value="0.00" /><span>秒</span></label>
-            <span class="ict-length ict-length">时长 — 秒</span>
+            <label>${t('开始时间')} <input class="ict-input ict-start" type="number" step="0.01" min="0" value="0.00" /><span>${t('秒')}</span></label>
+            <label>${t('结束时间')} <input class="ict-input ict-end" type="number" step="0.01" min="0" value="0.00" /><span>${t('秒')}</span></label>
+            <span class="ict-length ict-length">${t('时长')} — ${t('秒')}</span>
           </div>
-          <p class="ict-hint ict-trim-hint">点击时间轴可预览对应画面；播放只播放选中的片段。</p>`;
+          <p class="ict-hint ict-trim-hint">${t('点击时间轴可预览对应画面；播放只播放选中的片段。')}</p>`;
         video = q("video");
         track = q(".ict-track");
         strip = q(".ict-strip");
@@ -388,7 +478,7 @@
         });
         video.addEventListener("loadedmetadata", () => {
           const d = Number(video.duration);
-          if (!Number.isFinite(d) || d <= 0) { ui.setStatus("无法读取视频时长", true); return; }
+          if (!Number.isFinite(d) || d <= 0) { ui.setStatus(t("无法读取视频时长"), true); return; }
           S.duration = d;
           S.limit = Math.floor(d * 100) / 100;
           S.minLen = Math.min(0.01, S.limit);
@@ -421,7 +511,7 @@
             try { video.currentTime = S.start; } catch (error) { /* optional */ }
           }
         });
-        video.addEventListener("error", () => ui.setStatus("视频预览加载失败，缩略图可能不可用", true));
+        video.addEventListener("error", () => ui.setStatus(t("视频预览加载失败，缩略图可能不可用"), true));
         ui.lock = (on) => {
           for (const element of [startInput, endInput, q(".ict-hs"), q(".ict-he")]) {
             if (element) element.disabled = !!on;
@@ -432,10 +522,10 @@
       },
       onClose: () => { try { video?.pause(); } catch (error) { /* optional */ } },
       onApply: () => {
-        if (!valid()) throw new Error("请选择有效的起止时间");
+        if (!valid()) throw new Error(t("请选择有效的起止时间"));
         return runRequest(T().API_VIDEO,
           { ref: refOf(ctx), action: "trim", start: S.start, end: S.end }, ctx,
-          { ui, kind: "video", label: "视频", done: "已生成新的视频节点" });
+          { ui, kind: "video", label: t("视频"), done: t("已生成新的视频节点") });
       },
     });
   };
@@ -444,12 +534,12 @@
 
   function offlineContext(length = 1, sampleRate = 44100) {
     const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    if (!OC) throw new Error("浏览器不支持音频解码");
+    if (!OC) throw new Error(t("浏览器不支持音频解码"));
     return new OC(1, Math.max(1, length), sampleRate);
   }
   async function decodeUrl(url) {
     const response = await fetch(url);
-    if (!response.ok) throw new Error("素材读取失败：HTTP " + response.status);
+    if (!response.ok) throw new Error(t("素材读取失败：HTTP") + " " + response.status);
     const data = await response.arrayBuffer();
     return await offlineContext().decodeAudioData(data);
   }
@@ -547,7 +637,7 @@
       });
       peaks = fakePeaks(mediaUrl);
     }
-    if (!duration) throw new Error("无法读取音频时长，不能剪辑");
+    if (!duration) throw new Error(t("无法读取音频时长，不能剪辑"));
 
     const S = {
       duration, peaks, groups: [[{ start: 0, end: duration }]],
@@ -689,7 +779,7 @@
       if (S.playhead >= totalDuration() - 0.01) S.playhead = 0;
       seekPlayer();
       const promise = S.audio.play();
-      promise?.catch?.(() => ui?.setStatus("播放失败：浏览器无法解码该音频", true));
+      promise?.catch?.(() => ui?.setStatus(t("播放失败：浏览器无法解码该音频"), true));
       render();
     }
 
@@ -718,7 +808,7 @@
           button.dataset.index = String(index);
           button.style.left = (clip.offset / span * 100) + "%";
           button.style.width = (clip.length / span * 100) + "%";
-          button.textContent = `片段 ${index + 1} · ${clip.length.toFixed(2)}s`;
+          button.textContent = t("片段 {index} · {length}s", { index: index + 1, length: clip.length.toFixed(2) });
           track.appendChild(button);
         });
       }
@@ -746,9 +836,9 @@
     S.audio.addEventListener("ended", () => render());
 
     T().openModal({
-      title: "截取与拼接", sub: "正在读取音频…", width: 760,
-      applyLabel: "导出音频", applyDisabled: true, cancelLabel: "取消",
-      warn: T().WARN_HTML,
+      title: t("截取与拼接"), sub: t("正在读取音频…"), width: 760,
+      applyLabel: t("导出音频"), applyDisabled: true, cancelLabel: t("取消"),
+      warn: T().warnHtml(),
       build(body, modalUi) {
         ui = modalUi;
         body.innerHTML = `
@@ -761,18 +851,18 @@
             <div class="ict-clip-ruler"></div>
           </div>
           <div class="ict-toolrow">
-            <button class="ict-btn" type="button" data-act="undo">撤销</button>
-            <button class="ict-btn" type="button" data-act="redo">重做</button>
+            <button class="ict-btn" type="button" data-act="undo">${t('撤销')}</button>
+            <button class="ict-btn" type="button" data-act="redo">${t('重做')}</button>
             <span class="ict-sep"></span>
-            <button class="ict-btn" type="button" data-act="split">分割</button>
-            <button class="ict-btn" type="button" data-act="merge">粘合</button>
-            <button class="ict-btn" type="button" data-act="remove">删除片段</button>
-            <span class="ict-hint">Ctrl+Z 撤销 · Ctrl+Y 重做 · ←/→ 微调 0.1 秒</span>
+            <button class="ict-btn" type="button" data-act="split">${t('分割')}</button>
+            <button class="ict-btn" type="button" data-act="merge">${t('粘合')}</button>
+            <button class="ict-btn" type="button" data-act="remove">${t('删除片段')}</button>
+            <span class="ict-hint">${t('Ctrl+Z 撤销 · Ctrl+Y 重做 · ←/→ 微调 0.1 秒')}</span>
           </div>
           <div class="ict-player">
-            <button class="ict-btn ict-play" type="button" title="播放 / 暂停试听">▶</button>
+            <button class="ict-btn ict-play" type="button" title="${t('播放 / 暂停试听')}">▶</button>
             <time><b class="ict-cur">0:00.00</b> / <span class="ict-total">0:00.00</span></time>
-            <span class="ict-hint">点击片段或时间刻度定位播放头，分割后删除不需要的段落，导出时按保留顺序拼接。</span>
+            <span class="ict-hint">${t('点击片段或时间刻度定位播放头，分割后删除不需要的段落，导出时按保留顺序拼接。')}</span>
           </div>`;
         const stage = q(".ict-clip-stage");
         const waveEl = q(".ict-clip-wave");
@@ -858,13 +948,13 @@
       },
       onClose: () => pause(),
       onApply: () => {
-        if (!valid()) throw new Error("片段无效，请检查音频时长");
+        if (!valid()) throw new Error(t("片段无效，请检查音频时长"));
         const segments = S.groups.reduce((all, group) => all.concat(group.map((r) => ({
           start: +r.start.toFixed(4), end: +r.end.toFixed(4),
         }))), []);
         return runRequest(T().API_AUDIO,
           { ref: refOf(ctx), action: "clip", segments }, ctx,
-          { ui, kind: "audio", label: "音频", done: "已在右侧生成新的音频节点" });
+          { ui, kind: "audio", label: t("音频"), done: t("已在右侧生成新的音频节点") });
       },
     });
   };
@@ -891,7 +981,7 @@
       const info = q(".ict-speedinfo");
       if (info) info.textContent = duration
         ? `原时长 ${fmt(duration)}  →  预计 ${fmt(duration / speed)}`
-        : "正在读取音频时长…";
+        : t("正在读取音频时长…");
       const slider = q(".ict-slider-range"), number = q(".ict-speed-number");
       if (slider && String(speed) !== slider.value) slider.value = String(speed);
       if (number && document.activeElement !== number) number.value = speed.toFixed(2);
@@ -901,7 +991,7 @@
       });
       if (audition && !audition.paused) audition.playbackRate = speed;
       const audBtn = q(".ict-audition");
-      if (audBtn) audBtn.textContent = (audition && !audition.paused) ? "❚❚ 停止试听" : "▶ 试听";
+      if (audBtn) audBtn.textContent = (audition && !audition.paused) ? t("❚❚ 停止试听") : t("▶ 试听");
     };
     const ensureAudition = () => {
       if (!audition) {
@@ -915,30 +1005,30 @@
       const a = ensureAudition();
       if (!a.paused) { a.pause(); render(); return; }
       a.playbackRate = speed;
-      a.play().then(() => render()).catch(() => ui?.setStatus("试听播放失败", true));
+      a.play().then(() => render()).catch(() => ui?.setStatus(t("试听播放失败"), true));
     };
     T().openModal({
-      title: "音频变速", sub: "0.1× – 4× · FFmpeg atempo 保持音调", width: 560,
-      applyLabel: "生成变速音频", applyDisabled: true, cancelLabel: "取消",
-      warn: T().WARN_HTML,
+      title: t("音频变速"), sub: t("0.1× – 4× · FFmpeg atempo 保持音调"), width: 560,
+      applyLabel: t("生成变速音频"), applyDisabled: true, cancelLabel: t("取消"),
+      warn: T().warnHtml(),
       build(body, modalUi) {
         ui = modalUi;
         body.innerHTML = `
-          <div class="ict-hint ict-speedinfo" style="margin-top:0">正在读取音频…</div>
+          <div class="ict-hint ict-speedinfo" style="margin-top:0">${t('正在读取音频…')}</div>
           <div class="ict-slider-field" style="margin-top:12px">
             <input class="ict-slider-range" type="range" min="0.1" max="4" step="0.1" value="1"
-                   aria-label="变速倍数" />
-            <input class="ict-input ict-speed-number" type="number" min="0.1" max="4" step="0.1" value="1.00" aria-label="变速倍数数值" />
+                   aria-label="${t('变速倍数')}" />
+            <input class="ict-input ict-speed-number" type="number" min="0.1" max="4" step="0.1" value="1.00" aria-label="${t('变速倍数数值')}" />
           </div>
           <div class="ict-chips ict-presets" style="margin-top:12px">
             ${[0.5, 0.75, 1, 1.5, 2, 3].map((v) =>
               `<button class="ict-chip" type="button" data-speed="${v}">${v}×</button>`).join("")}
           </div>
           <div class="ict-speed-preview" style="margin-top:12px;display:flex;align-items:center;gap:10px">
-            <button class="ict-btn ict-audition" type="button">▶ 试听</button>
-            <span class="ict-hint">按当前倍速实时播放试听（浏览器原生变速，音调会随速度变化）</span>
+            <button class="ict-btn ict-audition" type="button">▶ ${t('试听')}</button>
+            <span class="ict-hint">${t('按当前倍速实时播放试听（浏览器原生变速，音调会随速度变化）')}</span>
           </div>
-          <p class="ict-hint">变速使用 FFmpeg atempo 链式处理，保持音调不变；结果会在右侧生成新的素材音频节点，原音频保留。</p>`;
+          <p class="ict-hint">${t('变速使用 FFmpeg atempo 链式处理，保持音调不变；结果会在右侧生成新的素材音频节点，原音频保留。')}</p>`;
         const slider = q(".ict-slider-range"), number = q(".ict-speed-number");
         const audBtn = q(".ict-audition");
         audBtn?.addEventListener("click", toggleAudition);
@@ -966,8 +1056,329 @@
       },
       onApply: () => runRequest(T().API_AUDIO,
         { ref: refOf(ctx), action: "speed", speed }, ctx,
-        { ui, kind: "audio", label: "音频", done: "已在右侧生成新的音频节点" }),
+        { ui, kind: "audio", label: t("音频"), done: t("已在右侧生成新的音频节点") }),
       onClose: () => { try { audition?.pause(); } catch (e) { /* optional */ } audition = null; },
+    });
+  };
+
+  /* --------------------------- video: speed ------------------------------ */
+  /* Mirrors the audio speed dialog: slider + presets + numeric, with a live
+     duration estimate. Video uses setpts; audio (when present) uses chained
+     atempo so the pitch stays natural. */
+
+  R.videoSpeed = async (ctx) => {
+    const mediaUrl = (NS.api?.resolveMediaUrl
+      ? await NS.api.resolveMediaUrl(ctx.data?.asset || {}).catch(() => ctx.url)
+      : ctx.url) || ctx.url;
+    let duration = 0;
+    try {
+      const v = await loadVideo(mediaUrl);
+      duration = Number.isFinite(v.duration) ? v.duration : 0;
+      try { v.removeAttribute("src"); v.load(); } catch (e) { /* optional */ }
+    } catch (e) { /* duration stays 0 */ }
+    let speed = 1, ui = null;
+    const q = (selector) => ui?.body.querySelector(selector);
+    const render = () => {
+      const info = q(".ict-speedinfo");
+      if (info) info.textContent = duration
+        ? t("原时长") + " " + fmt(duration) + "  →  " + t("预计") + " " + fmt(duration / speed)
+        : t("正在读取视频时长…");
+      const slider = q(".ict-slider-range"), number = q(".ict-speed-number");
+      if (slider && String(speed) !== slider.value) slider.value = String(speed);
+      if (number && document.activeElement !== number) number.value = speed.toFixed(2);
+      T().paintRanges?.(ui?.body);
+      ui?.body.querySelectorAll(".ict-chip[data-speed]").forEach((chip) => {
+        chip.classList.toggle("is-active", Math.abs(Number(chip.dataset.speed) - speed) < 0.001);
+      });
+    };
+    T().openModal({
+      title: t("视频变速"), sub: t("0.1× – 4× · 视频 setpts + 音轨 atempo 保持音调"), width: 560,
+      applyLabel: t("生成变速视频"), applyDisabled: true, cancelLabel: t("取消"),
+      warn: T().warnHtml(),
+      build(body, modalUi) {
+        ui = modalUi;
+        body.innerHTML = `
+          <div class="ict-hint ict-speedinfo" style="margin-top:0">${t("正在读取视频…")}</div>
+          <div class="ict-slider-field" style="margin-top:12px">
+            <input class="ict-slider-range" type="range" min="0.1" max="4" step="0.1" value="1"
+                   aria-label="${t("变速倍数")}" />
+            <input class="ict-input ict-speed-number" type="number" min="0.1" max="4" step="0.1" value="1.00" aria-label="${t("变速倍数数值")}" />
+          </div>
+          <div class="ict-chips ict-presets" style="margin-top:12px">
+            ${[0.5, 0.75, 1, 1.5, 2, 3].map((v) =>
+              `<button class="ict-chip" type="button" data-speed="${v}">${v}×</button>`).join("")}
+          </div>
+          <p class="ict-hint">${t("视频用 setpts 改变时长、音轨用 atempo 链式处理保持音调；结果会在右侧生成新的视频节点，原视频保留。")}</p>`;
+        const slider = q(".ict-slider-range"), number = q(".ict-speed-number");
+        number.addEventListener("focus", function () { this.select(); });
+        body.addEventListener("click", (event) => {
+          const chip = event.target.closest(".ict-chip[data-speed]");
+          if (!chip) return;
+          speed = Number(chip.dataset.speed); render();
+        });
+        body.addEventListener("input", (event) => {
+          if (event.target === slider) { speed = clamp(Number(slider.value) || 1, 0.1, 4); render(); }
+        });
+        body.addEventListener("change", (event) => {
+          if (event.target !== number) return;
+          const value = Number(number.value);
+          speed = Number.isFinite(value) ? clamp(value, 0.1, 4) : 1; render();
+        });
+        render();
+        preflight(ui, "video", () => ui.setApplyEnabled(true));
+      },
+      onApply: () => runRequest(T().API_VIDEO,
+        { ref: refOf(ctx), action: "speed", speed }, ctx,
+        { ui, kind: "video", label: t("视频"), done: t("已在右侧生成新的视频节点") }),
+    });
+  };
+
+  /* --------------------------- video: crop -------------------------------- */
+  /* Crop a video by selecting a region on its first frame. Reuses the image
+     crop's global .ict-crop-* styles; the background is a canvas snapshot of
+     frame 0 (seeking a paused video straight to frame 0 is reliable). */
+
+  R.videoCrop = async (ctx) => {
+    const mediaUrl = (NS.api?.resolveMediaUrl
+      ? await NS.api.resolveMediaUrl(ctx.data?.asset || {}).catch(() => ctx.url)
+      : ctx.url) || ctx.url;
+    let video;
+    try { video = await loadVideo(mediaUrl); }
+    catch (e) { toast("error", t("视频加载失败")); return; }
+    const W = video.videoWidth, H = video.videoHeight;
+    try { video.currentTime = 0; } catch (e) { /* optional */ }
+    const frameUrl = await new Promise((resolve) => {
+      const done = (url) => resolve(url);
+      const grab = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = W; canvas.height = H;
+          canvas.getContext("2d").drawImage(video, 0, 0, W, H);
+          done(canvas.toDataURL("image/png"));
+        } catch (e) { done(mediaUrl); }
+      };
+      video.addEventListener("seeked", grab, { once: true });
+      setTimeout(grab, 1500);
+      if (video.readyState >= 2 && video.currentTime === 0) setTimeout(grab, 0);
+    });
+    try { video.removeAttribute("src"); video.load(); } catch (e) { /* optional */ }
+
+    /* Same ratio locks as the image crop (tools.js RATIOS) — defined inside
+       the handler so t() is evaluated at run time, not module load time. */
+    const RATIOS = [
+      { key: "origin", label: t("原图"), value: 0 },
+      { key: "1:1", label: "1:1", value: 1 },
+      { key: "2:3", label: "2:3", value: 2 / 3 },
+      { key: "3:2", label: "3:2", value: 3 / 2 },
+      { key: "3:4", label: "3:4", value: 3 / 4 },
+      { key: "4:3", label: "4:3", value: 4 / 3 },
+      { key: "9:16", label: "9:16", value: 9 / 16 },
+      { key: "16:9", label: "16:9", value: 16 / 9 },
+      { key: "21:9", label: "21:9", value: 21 / 9 },
+      { key: "free", label: t("自由"), value: null },
+    ];
+    const S = { rect: { x: Math.round(W * 0.1), y: Math.round(H * 0.1),
+                        w: Math.round(W * 0.8), h: Math.round(H * 0.8) },
+                scale: 1, drag: null, ready: true, ratioKey: "origin", ratio: 1 };
+    let stage, frameEl, inputs = {}, ui = null;
+    const q = (selector) => ui?.body.querySelector(selector);
+    const ratioValue = () => {
+      const entry = RATIOS.find((r) => r.key === S.ratioKey);
+      if (!entry) return null;
+      if (entry.value === 0) return W / H;
+      return entry.value;
+    };
+    const valid = () => S.rect.w >= 2 && S.rect.h >= 2 &&
+      S.rect.x >= 0 && S.rect.y >= 0 &&
+      S.rect.x + S.rect.w <= W + 0.6 && S.rect.y + S.rect.h <= H + 0.6;
+    function normalise() {
+      const c = S.rect;
+      c.w = clamp(Math.round(c.w), 2, W);
+      c.h = clamp(Math.round(c.h), 2, H);
+      c.x = clamp(Math.round(c.x), 0, Math.max(0, W - c.w));
+      c.y = clamp(Math.round(c.y), 0, Math.max(0, H - c.h));
+    }
+    function paint(skipInputs = false) {
+      if (!frameEl) return;
+      const c = S.rect, s = S.scale;
+      frameEl.style.left = (c.x * s) + "px";
+      frameEl.style.top = (c.y * s) + "px";
+      frameEl.style.width = Math.max(1, c.w * s) + "px";
+      frameEl.style.height = Math.max(1, c.h * s) + "px";
+      for (const key of ["w", "h"]) {
+        const el = inputs[key];
+        if (el && !skipInputs && document.activeElement !== el) el.value = Math.round(c[key]);
+      }
+      const summary = q(".ict-crop-size");
+      if (summary) summary.textContent = t("原视频") + " " + W + " × " + H;
+      ui?.setApplyEnabled?.(valid());
+    }
+    /* Opposite edge/corner stays fixed, ratio lock derives h from w. */
+    function resizeRect(dir, p, anchor, r) {
+      const hasW = dir.includes("w"), hasE = dir.includes("e");
+      const hasN = dir.includes("n"), hasS = dir.includes("s");
+      const x0 = anchor.x, y0 = anchor.y, x1 = x0 + anchor.w, y1 = y0 + anchor.h;
+      const fx = hasW ? x1 : (hasE ? x0 : (x0 + x1) / 2);
+      const fy = hasN ? y1 : (hasS ? y0 : (y0 + y1) / 2);
+      const dx = hasW ? -1 : (hasE ? 1 : 0);
+      const dy = hasN ? -1 : (hasS ? 1 : 0);
+      let w = (hasW || hasE) ? Math.abs(p.x - fx) : anchor.w;
+      let h = (hasN || hasS) ? Math.abs(p.y - fy) : anchor.h;
+      if (r) { w = Math.max(w, h * r); h = w / r; }
+      const availW = dx > 0 ? W - fx : (dx < 0 ? fx : Math.min(fx, W - fx) * 2);
+      const availH = dy > 0 ? H - fy : (dy < 0 ? fy : Math.min(fy, H - fy) * 2);
+      if (r) { const limit = Math.min(availW, availH * r); w = Math.min(w, limit); h = w / r; }
+      else { w = Math.min(w, availW); h = Math.min(h, availH); }
+      w = Math.max(1, Math.min(w, W));
+      h = Math.max(1, Math.min(h, H));
+      return {
+        x: clamp(dx > 0 ? fx : (dx < 0 ? fx - w : fx - w / 2), 0, Math.max(0, W - w)),
+        y: clamp(dy > 0 ? fy : (dy < 0 ? fy - h : fy - h / 2), 0, Math.max(0, H - h)),
+        w, h,
+      };
+    }
+    function setRatio(key) {
+      S.ratioKey = key;
+      const entry = RATIOS.find((r) => r.key === key);
+      if (entry && entry.value > 0) S.ratio = entry.value;
+      const chips = ui?.body.querySelectorAll(".ict-ratio") || [];
+      chips.forEach((chip) => {
+        const on = chip.dataset.ratio === key;
+        chip.classList.toggle("is-active", on);
+        chip.setAttribute("aria-pressed", String(on));
+      });
+      const r = ratioValue();
+      if (!r || !Number.isFinite(r) || r <= 0) return paint();
+      const c = S.rect, cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+      const maxW = Math.min(cx, W - cx) * 2, maxH = Math.min(cy, H - cy) * 2;
+      const w = Math.max(1, Math.min(Math.max(c.w, c.h * r), maxW, maxH * r));
+      const h = w / r;
+      S.rect = { x: clamp(cx - w / 2, 0, Math.max(0, W - w)),
+                 y: clamp(cy - h / 2, 0, Math.max(0, H - h)), w, h };
+      paint();
+    }
+    function setField(key, value) {
+      const c = { ...S.rect }, r = ratioValue();
+      let w = key === "w" ? value : c.w, h = key === "h" ? value : c.h;
+      if (r) { if (key === "w") h = w / r; else w = h * r; }
+      w = clamp(w, 2, Math.max(2, W - c.x));
+      h = clamp(h, 2, Math.max(2, H - c.y));
+      if (r) { const limit = Math.min(W - c.x, (H - c.y) * r);
+               w = Math.min(w, Math.max(2, limit)); h = w / r; }
+      c.w = w; c.h = h;
+      S.rect = c;
+      paint(true);
+    }
+    function layout() {
+      if (!stage) return;
+      const box = q(".ict-preview");
+      if (!box) return;
+      const scale = Math.min(Math.max(40, box.clientWidth) / W, Math.max(40, box.clientHeight) / H);
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      S.scale = scale;
+      stage.style.width = Math.round(W * scale) + "px";
+      stage.style.height = Math.round(H * scale) + "px";
+      paint();
+    }
+    T().openModal({
+      title: t("裁剪"), sub: t("在首帧上框选保留区域，生成新视频节点，原视频保留"), width: 760,
+      applyLabel: t("生成裁剪视频"), applyDisabled: false, cancelLabel: t("取消"),
+      warn: T().warnHtml(),
+      build(body, modalUi) {
+        ui = modalUi;
+        body.innerHTML = `
+          <div class="ict-split">
+            <div class="ict-preview">
+              <div class="ict-crop-stage">
+                <img alt="${t("首帧")}" src="${frameUrl}" />
+                <div class="ict-crop-frame">
+                  ${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((d) => `<i class="ict-handle ict-h-${d}" data-d="${d}"></i>`).join("")}
+                </div>
+              </div>
+            </div>
+            <aside class="ict-side">
+              <div><p class="ict-label">${t("比例")}</p><div class="ict-chips ict-ratios"></div></div>
+              <div class="ict-4">
+                <label>${t("宽")} <input class="ict-input" type="number" data-f="w" /></label>
+                <label>${t("高")} <input class="ict-input" type="number" data-f="h" /></label>
+              </div>
+              <p class="ict-summary ict-crop-size">${t("读取视频中…")}</p>
+            </aside>
+          </div>`;
+        stage = body.querySelector(".ict-crop-stage");
+        frameEl = body.querySelector(".ict-crop-frame");
+        const chips = body.querySelector(".ict-ratios");
+        for (const entry of RATIOS) {
+          const chip = document.createElement("button");
+          chip.type = "button"; chip.className = "ict-chip ict-ratio";
+          chip.dataset.ratio = entry.key; chip.textContent = entry.label;
+          chip.setAttribute("aria-pressed", String(entry.key === S.ratioKey));
+          if (entry.key === S.ratioKey) chip.classList.add("is-active");
+          chip.addEventListener("click", () => setRatio(entry.key));
+          chips.appendChild(chip);
+        }
+        body.querySelectorAll(".ict-4 input[data-f]").forEach((input) => {
+          inputs[input.dataset.f] = input;
+          input.addEventListener("input", () => {
+            const value = parseFloat(input.value);
+            if (Number.isFinite(value)) setField(input.dataset.f, value);
+          });
+        });
+        const at = (event) => {
+          const box = stage.getBoundingClientRect();
+          return { x: clamp((event.clientX - box.left) / S.scale, 0, W),
+                   y: clamp((event.clientY - box.top) / S.scale, 0, H) };
+        };
+        stage.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          const p = at(event);
+          const handle = event.target.closest?.(".ict-handle");
+          const c = S.rect;
+          const inside = p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h;
+          S.drag = { mode: handle ? "resize" : (inside ? "move" : "new"),
+                     dir: handle?.dataset.d || "", anchor: p, rect: { ...c }, r: ratioValue() };
+          if (S.drag.mode === "new") S.rect = { x: p.x, y: p.y, w: 0, h: 0 };
+          try { stage.setPointerCapture(event.pointerId); } catch (e) { /* optional */ }
+          paint();
+        });
+        stage.addEventListener("pointermove", (event) => {
+          const d = S.drag;
+          if (!d) return;
+          const p = at(event);
+          if (d.mode === "move") {
+            S.rect = { x: clamp(d.rect.x + (p.x - d.anchor.x), 0, Math.max(0, W - d.rect.w)),
+                       y: clamp(d.rect.y + (p.y - d.anchor.y), 0, Math.max(0, H - d.rect.h)),
+                       w: d.rect.w, h: d.rect.h };
+          } else if (d.mode === "new") {
+            const dirX = p.x >= d.anchor.x ? 1 : -1, dirY = p.y >= d.anchor.y ? 1 : -1;
+            let w = Math.abs(p.x - d.anchor.x), h = Math.abs(p.y - d.anchor.y);
+            if (d.r) { w = Math.max(w, h * d.r); h = w / d.r; }
+            const maxW = dirX > 0 ? W - d.anchor.x : d.anchor.x;
+            const maxH = dirY > 0 ? H - d.anchor.y : d.anchor.y;
+            if (d.r) { const limit = Math.min(maxW, maxH * d.r); w = Math.min(w, limit); h = w / d.r; }
+            else { w = Math.min(w, maxW); h = Math.min(h, maxH); }
+            S.rect = { x: dirX > 0 ? d.anchor.x : d.anchor.x - w,
+                       y: dirY > 0 ? d.anchor.y : d.anchor.y - h, w, h };
+          } else {
+            S.rect = resizeRect(d.dir, p, d.rect, d.r);
+          }
+          paint();
+          event.preventDefault();
+        });
+        const stop = () => { S.drag = null; normalise(); paint(); };
+        stage.addEventListener("pointerup", stop);
+        stage.addEventListener("pointercancel", stop);
+        layout();
+        preflight(ui, "video", () => {});
+      },
+      onApply: () => {
+        const c = S.rect;
+        return runRequest(T().API_VIDEO,
+          { ref: refOf(ctx), action: "crop",
+            x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h) }, ctx,
+          { ui, kind: "video", label: t("视频"), done: t("已在右侧生成新的视频节点") });
+      },
     });
   };
 })();

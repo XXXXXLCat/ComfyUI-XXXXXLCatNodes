@@ -70,6 +70,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('setup:', await ev(`(async () => {
     const NS = window.InfCanvas;
     await NS.api.enter();
+    NS.api.newCanvas();   /* blank doc: earlier runs left nodes behind */
     await new Promise((r) => setTimeout(r, 900));
     const gen = NS.api.addNodeByType('infcanvas/gen_audio', [700, 260]);
     NS.flow.selectNodes([gen.id]);
@@ -78,12 +79,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   })()`, true));
   await sleep(900);
 
-  /* real click so the panel is actually visible (is-selected) */
-  const gp = JSON.parse(await ev(`(() => { const el = document.querySelector('.icn--gen');
-    const b = el.getBoundingClientRect(); return JSON.stringify([Math.round(b.x + b.width / 2), Math.round(b.y + 24)]); })()`));
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: gp[0], y: gp[1], button: 'left', clickCount: 1 });
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: gp[0], y: gp[1], button: 'left', clickCount: 1 });
-  await sleep(600);
+  /* Select through the API: the overlay panel is inert until the node is
+     selected, and the node's class is icn--media (role), not icn--gen. */
+  console.log('select:', await ev(`(() => { InfCanvas.flow.selectNodes([window.__probe.genId]);
+    InfCanvas.api.revealNode(window.__probe.genId); return 'ok'; })()`));
+  await sleep(700);
 
   console.log('modes:', await ev(`(() => {
     const els = [...document.querySelectorAll('.icn__gpa .icn__gpv-mode')];

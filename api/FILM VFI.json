@@ -1,0 +1,168 @@
+{
+  "4": {
+    "inputs": {
+      "file": "white_armored_warrior.mp4",
+      "video-preview": ""
+    },
+    "class_type": "LoadVideo",
+    "_meta": {
+      "title": "加载视频",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+        "20",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "18": {
+    "inputs": {
+      "model_name": "film_net_fp16.safetensors"
+    },
+    "class_type": "FrameInterpolationModelLoader",
+    "_meta": {
+      "title": "加载帧插值模型",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "19": {
+    "inputs": {
+      "multiplier": [
+        "21",
+        0
+      ],
+      "interp_model": [
+        "18",
+        0
+      ],
+      "images": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "FrameInterpolate",
+    "_meta": {
+      "title": "帧插值",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "20": {
+    "inputs": {
+      "fps": [
+        "22",
+        0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "chroma_subsampling": "auto",
+      "codec": "none",
+      "images": [
+        "19",
+        0
+      ],
+      "audio": [
+        "24",
+        1
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "21": {
+    "inputs": {
+      "value": 2
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Multiplier)",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "22": {
+    "inputs": {
+      "switch": [
+        "23",
+        0
+      ],
+      "on_false": [
+        "24",
+        2
+      ],
+      "on_true": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "切换",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "23": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean (Apply multiplier to FPS?)",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "24": {
+    "inputs": {
+      "video": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "GetVideoComponents",
+    "_meta": {
+      "title": "获取视频元素",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  },
+  "25": {
+    "inputs": {
+      "expression": "min(abs(b), 16) * a",
+      "values.a": [
+        "24",
+        2
+      ],
+      "values.b": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式",
+      "cnr_id": "comfy-core",
+      "ver": "0.19.3"
+    }
+  }
+}

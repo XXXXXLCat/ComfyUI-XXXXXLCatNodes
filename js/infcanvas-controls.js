@@ -19,6 +19,9 @@
    host renders those through Vue components. */
 (() => {
   const NS = (window.InfCanvas = window.InfCanvas || {});
+  /* i18n: lazy reference; i18n.js loads after most modules, but every call
+     site runs after app init when NS.i18n is available. */
+  const t = (key, params) => (NS.i18n ? NS.i18n.t(key, params) : key);
   const api = () => NS.api;
 
   /* Button.vue renders cn(buttonVariants({ variant: 'secondary', size: 'md' }),
@@ -209,8 +212,8 @@
        sits on its own bg-muted chip and the whole 54x32 button turns accent
        (bg-accent! + group-hover:bg-accent) while hovered. */
     const mode = styledButton(BTN_MODE);
-    mode.title = "画布模式";
-    mode.setAttribute("aria-label", "画布模式");
+    mode.title = t("画布模式");
+    mode.setAttribute("aria-label", t("画布模式"));
     mode.setAttribute("aria-haspopup", "menu");
     mode.setAttribute("aria-expanded", "false");
     const modeInner = el("div", "flex items-center gap-1 pr-0.5");
@@ -223,12 +226,12 @@
     /* GraphCanvasMenu.vue: <Button size-8 bg-transparent p-0> with
        icon-[lucide--focus] for Comfy.Canvas.FitView. Native aria-label /
        tooltip is "适应视图 (.)". */
-    const fit = iconButton("focus", "适应视图 (" + shortcutText("Comfy.Canvas.FitView") + ")");
+    const fit = iconButton("focus", t("适应视图 (") + shortcutText("Comfy.Canvas.FitView") + ")");
 
     /* Percentage trigger: h-8 w-15, the label and chevron in one text-xs row. */
     const zoom = styledButton(BTN_ZOOM);
-    zoom.title = "缩放控制";
-    zoom.setAttribute("aria-label", "缩放控制");
+    zoom.title = t("缩放控制");
+    zoom.setAttribute("aria-label", t("缩放控制"));
     zoom.setAttribute("data-testid", "zoom-controls-button");
     const zoomInner = el("span", "inline-flex items-center gap-1 px-2 text-xs");
     const zoomLabel = el("span");
@@ -236,15 +239,15 @@
     zoomInner.append(zoomLabel, icon("chevron-down"));
     zoom.appendChild(zoomInner);
 
-    const map = iconButton("map", "显示小地图");
-    const snap = iconButton("grid-3x3", "网格吸附");
-    const links = iconButton("route-off", "隐藏链接");
+    const map = iconButton("map", t("显示小地图"));
+    const snap = iconButton("grid-3x3", t("网格吸附"));
+    const links = iconButton("route-off", t("隐藏链接"));
 
     const bar = el("div",
       "pointer-events-auto ml-auto flex max-w-full min-w-0 gap-1 " +
       "overflow-x-auto floating-panel");
     bar.setAttribute("role", "toolbar");
-    bar.setAttribute("aria-label", "画布工具栏");
+    bar.setAttribute("aria-label", t("画布工具栏"));
     bar.append(mode, divider(), fit, zoom, divider(), map, snap, links);
     bar.addEventListener("wheel", onToolbarWheel, { passive: false });
 
@@ -308,11 +311,11 @@
       "absolute z-1300 w-auto min-w-39 max-w-full select-none overflow-y-auto " +
       "rounded-lg border bg-background p-1 text-foreground shadow-lg outline-none");
     pop.setAttribute("role", "menu");
-    pop.setAttribute("aria-label", "画布模式");
+    pop.setAttribute("aria-label", t("画布模式"));
 
     const items = [
-      { id: "Comfy.Canvas.Unlock", icon: "mouse-pointer-2", label: "选择", active: !readOnly, readOnly: false },
-      { id: "Comfy.Canvas.Lock", icon: "hand", label: "拖拽", active: readOnly, readOnly: true },
+      { id: "Comfy.Canvas.Unlock", icon: "mouse-pointer-2", label: t("选择"), active: !readOnly, readOnly: false },
+      { id: "Comfy.Canvas.Lock", icon: "hand", label: t("拖拽"), active: readOnly, readOnly: true },
     ];
     for (const item of items) {
       /* menuButtonClass + 'justify-between' after cn(): one min-height, one
@@ -387,7 +390,7 @@
       ? "icon-[lucide--hand] block size-4"
       : "icon-[lucide--mouse-pointer-2] block size-4";
     for (const item of ui.modePop?.querySelectorAll("[role=menuitemradio]") || []) {
-      const isHand = item.getAttribute("aria-label") === "拖拽";
+      const isHand = item.getAttribute("aria-label") === t("拖拽");
       const active = isHand === readOnly;
       item.setAttribute("aria-checked", active ? "true" : "false");
       item.setAttribute("tabindex", active ? "0" : "-1");
@@ -421,9 +424,9 @@
     panel.addEventListener("click", (event) => event.stopPropagation());
     const column = el("div", "flex flex-col gap-1");
     column.append(
-      zoomRow("放大", "zoom-in-action", "Comfy.Canvas.ZoomIn", () => zoomBy(ZOOM_STEP), true),
-      zoomRow("缩小", "zoom-out-action", "Comfy.Canvas.ZoomOut", () => zoomBy(1 / ZOOM_STEP), true),
-      zoomRow("适合画面", "zoom-to-fit-action", "Comfy.Canvas.FitView", fitView, false),
+      zoomRow(t("放大"), "zoom-in-action", "Comfy.Canvas.ZoomIn", () => zoomBy(ZOOM_STEP), true),
+      zoomRow(t("缩小"), "zoom-out-action", "Comfy.Canvas.ZoomOut", () => zoomBy(1 / ZOOM_STEP), true),
+      zoomRow(t("适合画面"), "zoom-to-fit-action", "Comfy.Canvas.FitView", fitView, false),
       zoomField()
     );
     panel.appendChild(column);
@@ -491,7 +494,7 @@
       const button = el("button", FIELD_STEP + " rounded-" + side + "-lg");
       button.type = "button";
       button.tabIndex = -1;
-      button.setAttribute("aria-label", side === "l" ? "减小" : "增加");
+      button.setAttribute("aria-label", side === "l" ? t("减小") : t("增加"));
       button.setAttribute("data-slot", "number-field-" +
         (side === "l" ? "decrement" : "increment"));
       button.appendChild(icon(iconName));
@@ -511,7 +514,7 @@
     input.style.padding = "1px 2px";
     input.value = String(percentage());
     input.setAttribute("role", "spinbutton");
-    input.setAttribute("aria-label", "缩放百分比");
+    input.setAttribute("aria-label", t("缩放百分比"));
     input.setAttribute("aria-valuemin", "1");
     input.setAttribute("aria-valuemax", "1000");
     input.setAttribute("aria-valuenow", String(percentage()));
@@ -605,7 +608,7 @@
     const api = flowApi();
     if (!api) return;
     if (!hasNodes()) {
-      NS.api?.toast?.("info", "画布中没有节点");
+      NS.api?.toast?.("info", t("画布中没有节点"));
       return;
     }
     /* 0.75 is animateToBounds' fill ratio: the bounds occupy 75% of the
@@ -637,7 +640,7 @@
     ui.linksHidden = hidden;
     if (!ui.linksBtn) return;
     ui.linksBtn.classList.toggle(THEME_ON, hidden);
-    const label = hidden ? "显示链接" : "隐藏链接";
+    const label = hidden ? t("显示链接") : t("隐藏链接");
     ui.linksBtn.title = label;
     ui.linksBtn.setAttribute("aria-label", label);
   }
@@ -664,7 +667,7 @@
     if (!ui.mapBtn) return;
     const visible = !!flowApi()?.minimap?.visible?.();
     ui.mapBtn.classList.toggle(THEME_ON, visible);
-    const label = (visible ? "隐藏小地图" : "显示小地图") +
+    const label = (visible ? t("隐藏小地图") : t("显示小地图")) +
       " (" + shortcutText("Comfy.Canvas.ToggleMinimap").toUpperCase() + ")";
     ui.mapBtn.title = label;
     ui.mapBtn.setAttribute("aria-label", label);
@@ -702,7 +705,7 @@
     if (!ui.snapBtn) return;
     const on = snapEnabled();
     ui.snapBtn.classList.toggle(THEME_ON, on);
-    const label = on ? "关闭网格吸附" : "开启网格吸附";
+    const label = on ? t("关闭网格吸附") : t("开启网格吸附");
     ui.snapBtn.title = label;
     ui.snapBtn.setAttribute("aria-label", label);
     ui.snapBtn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -763,6 +766,12 @@
 
   function mount(stage) {
     if (!stage) return null;
+    /* Subscribe on first mount (i18n.js loads after this module alphabetically,
+       so a top-level subscription would be skipped). */
+    if (!NS._i18nControlsSubscribed && NS.i18n?.onChange) {
+      NS.i18n.onChange(() => repaintLocale());
+      NS._i18nControlsSubscribed = true;
+    }
     ui.stage = stage;
     if (!ui.wrap) {
       /* GraphCanvasMenu.vue: outer row is `pointer-events-none absolute
@@ -822,8 +831,17 @@
     syncSnapButton();
   }
 
+  /* Rebuild the toolbar so every title/aria-label picks up the new language.
+     Preferences (minimap/snap/links visibility) are persisted and restored by
+     mount(), so no state is lost. */
+  function repaintLocale() {
+    const stage = ui.stage;
+    if (!stage || !ui.wrap) return;
+    unmount();
+    mount(stage);
+  }
   NS.controls = {
     mount, unmount, tick, fitView, toggleMinimap,
-    snapEnabled, setSnapEnabled, syncSnapButton,
+    snapEnabled, setSnapEnabled, syncSnapButton, repaintLocale,
   };
 })();

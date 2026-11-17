@@ -1,0 +1,15 @@
+{
+  "fields": [
+    {
+      "nodeId": "21",
+      "key": "value",
+      "type": "number",
+      "label": "插入倍数",
+      "advanced": false,
+      "min": 1,
+      "max": 6,
+      "step": 1
+    }
+  ],
+  "category": "视频插帧"
+}

@@ -1,0 +1,56 @@
+{
+  "26": {
+    "inputs": {
+      "model": "VOSR2",
+      "dtype": "default"
+    },
+    "class_type": "VOSR2ModelLoader",
+    "_meta": {
+      "title": "VOSR 2.0 Model Loader"
+    }
+  },
+  "27": {
+    "inputs": {
+      "upscale": 2,
+      "seed": 42,
+      "color_alignment": "wavelet",
+      "tile_size": 512,
+      "tile_overlap": 64,
+      "vae_tile_size": 512,
+      "vae_tile_overlap": 64,
+      "model": [
+        "26",
+        0
+      ],
+      "image": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "VOSR2Upscale",
+    "_meta": {
+      "title": "VOSR 2.0 Upscale"
+    }
+  },
+  "28": {
+    "inputs": {
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "29": {
+    "inputs": {
+      "image": "vintage_yellow_taxi.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  }
+}

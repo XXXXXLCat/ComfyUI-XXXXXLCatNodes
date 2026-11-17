@@ -5,7 +5,7 @@
    xcat-video-edit.js / xcat-audio-edit.js):
 
      image : crop / grid split / mirror / adjust / download / delete
-     video : extract audio / separate / trim / grab frame / download / delete
+     video : split audio / trim / grab frame / download / delete
      audio : clip / speed / download / delete
      text  : download / delete (+ double click to edit)
      gen   : delete
@@ -24,6 +24,9 @@
    dialog/toast portals stay above us. */
 (() => {
   const NS = (window.InfCanvas = window.InfCanvas || {});
+  /* i18n: lazy reference; i18n.js loads after most modules, but every call
+     site runs after app init when NS.i18n is available. */
+  const t = (key, params) => (NS.i18n ? NS.i18n.t(key, params) : key);
   /* Shared, load-order-independent registry. infcanvas-media-tools.js writes
      the video/audio handlers into the same object. */
   const R = (NS.icRegistry = NS.icRegistry || {});
@@ -452,8 +455,8 @@
 
       input.replaceWith(wrap);
       cell.append(input, swipe);
-      wrap.append(makeButton(-1, "减小", STEP_ICONS.minus), cell,
-        makeButton(1, "增大", STEP_ICONS.plus));
+      wrap.append(makeButton(-1, t("减小"), STEP_ICONS.minus), cell,
+        makeButton(1, t("增大"), STEP_ICONS.plus));
     });
   }
   const fmtTime = (seconds) => {
@@ -489,6 +492,7 @@
 
   function closeMenu() {
     if (!menu) return;
+    if (menu.raf) cancelAnimationFrame(menu.raf);
     menu.el.remove();
     document.removeEventListener("pointerdown", onMenuOutside, true);
     document.removeEventListener("keydown", onMenuKey, true);
@@ -520,13 +524,27 @@
       el.appendChild(button);
     }
     host.appendChild(el);
-    const box = anchor.getBoundingClientRect();
-    el.style.left = Math.max(8, Math.min(box.left, window.innerWidth - 190)) + "px";
-    el.style.top = (box.bottom + 6) + "px";
+    /* Keep the menu as a screen-space fixed layer (so it never gets clipped by
+       the scaled pane), but scale its contents to match the canvas zoom so its
+       type size stays in step with the node toolbar it hangs off. Anchoring is
+       still the button's live screen rect, so it tracks pan/zoom while open. */
+    el.style.transformOrigin = "top left";
+    menu = { el, raf: 0 };
+    const place = () => {
+      if (!menu || menu.el !== el) return;
+      const zoom = Number(NS.flow?.getViewport?.().zoom) || 1;
+      const box = anchor.getBoundingClientRect();
+      const gap = 6 * zoom;
+      const width = (el.offsetWidth || 184) * zoom;
+      el.style.transform = "scale(" + zoom + ")";
+      el.style.left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8)) + "px";
+      el.style.top = (box.bottom + gap) + "px";
+      menu.raf = requestAnimationFrame(place);
+    };
+    place();
     for (const type of ["pointerdown", "mousedown", "dblclick", "click", "wheel", "contextmenu"]) {
       el.addEventListener(type, (event) => event.stopPropagation());
     }
-    menu = { el };
     setTimeout(() => {
       if (!menu) return;
       document.addEventListener("pointerdown", onMenuOutside, true);
@@ -560,12 +578,12 @@
     panel.className = "ict-panel";
     panel.style.width = (options.width || 760) + "px";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", options.title || "工具");
+    panel.setAttribute("aria-label", options.title || t("工具"));
 
     const head = document.createElement("div");
     head.className = "ict-head";
-    head.innerHTML = `<h3></h3><span class="ict-sub"></span><button class="ict-x" type="button" title="关闭">×</button>`;
-    head.querySelector("h3").textContent = options.title || "工具";
+    head.innerHTML = `<h3></h3><span class="ict-sub"></span><button class="ict-x" type="button" title="${t("关闭")}">×</button>`;
+    head.querySelector("h3").textContent = options.title || t("工具");
     head.querySelector(".ict-sub").textContent = options.sub || "";
 
     let warnEl = null;
@@ -582,7 +600,7 @@
     if (options.progress) {
       body.innerHTML = `<div class="ict-spinner"></div><div class="ict-progress-text"></div>`;
       progressText = body.querySelector(".ict-progress-text");
-      progressText.textContent = options.progressText || "正在处理，请稍候…";
+      progressText.textContent = options.progressText || t("正在处理，请稍候…");
     }
 
     const foot = document.createElement("div");
@@ -601,8 +619,8 @@
       extraButtons.push(button);
       actions.appendChild(button);
     }
-    const cancelLabel = options.cancelLabel || "取消";
-    const applyLabel = options.applyLabel === null ? null : (options.applyLabel || "应用");
+    const cancelLabel = options.cancelLabel || t("取消");
+    const applyLabel = options.applyLabel === null ? null : (options.applyLabel || t("应用"));
     const cancel = document.createElement("button");
     cancel.className = "ict-btn"; cancel.type = "button"; cancel.textContent = cancelLabel;
     actions.appendChild(cancel);
@@ -643,9 +661,9 @@
         busy = !!value;
         if (apply) {
           apply.disabled = busy || !applyEnabled || !apiReady;
-          apply.textContent = busy ? "处理中…" : applyLabel;
+          apply.textContent = busy ? t("处理中…") : applyLabel;
         }
-        cancel.textContent = busy ? "取消处理" : cancelLabel;
+        cancel.textContent = busy ? t("取消处理") : cancelLabel;
         for (const button of extraButtons) button.disabled = busy;
       },
       setApplyEnabled(enabled) { applyEnabled = !!enabled; refreshApply(); },
@@ -681,7 +699,7 @@
       } catch (error) {
         if (error?.name === "AbortError") { closeModal(); return; }
         console.error("[InfCanvas tools]", error);
-        toast("error", "操作失败", String(error?.message || error));
+        toast("error", t("操作失败"), String(error?.message || error));
         ui.setStatus(String(error?.message || error), true);
         ui.setBusy(false);
       }
@@ -772,6 +790,14 @@
   const API_VIDEO = "/api/infcanvas/video/process";
   const API_HEALTH = "/api/infcanvas/media/health";
   const NOT_READY = "媒体处理接口未就绪：请完全重启 ComfyUI（只刷新浏览器无效）";
+  /* Built at call time so the active language is honoured (module loads before
+     i18n). t() returns a plain string; escape the highlighted phrase as HTML. */
+  function warnHtml() {
+    return t("媒体处理接口未就绪：后端 Python 尚未重启。请{strong}完全重启 ComfyUI{/strong}（只刷新浏览器无效），然后重新操作。")
+      .replace("{strong}", "<strong>").replace("{/strong}", "</strong>");
+  }
+  /* Legacy getter kept for compatibility; prefer warnHtml() so the language
+     is resolved at call time, not module load. */
   const WARN_HTML = "媒体处理接口未就绪：后端 Python 尚未重启。请<strong>完全重启 ComfyUI</strong>" +
     "（只刷新浏览器无效），然后重新操作。";
 
@@ -805,8 +831,7 @@
     let data;
     try { data = JSON.parse(raw); }
     catch (error) {
-      throw new Error("媒体处理接口未就绪（HTTP " + res.status +
-        "）：后端 Python 尚未重启，请完全重启 ComfyUI 后重试（只刷新浏览器无效）");
+      throw new Error(t("媒体处理接口未就绪（HTTP {status}）：后端 Python 尚未重启，请完全重启 ComfyUI 后重试（只刷新浏览器无效）", { status: res.status }));
     }
     if (!res.ok) {
       const detail = data?.detail;
@@ -843,17 +868,17 @@
      Float32Array and encoded back; 8-bit in-place maths loses dark detail. */
 
   const ADJUST_FIELDS = [
-    { key: "brightness", label: "亮度", min: -1, max: 1 },
-    { key: "exposure", label: "曝光", min: -1, max: 1 },
-    { key: "contrast", label: "对比度", min: -1, max: 1 },
-    { key: "highlights", label: "高光", min: -1, max: 1 },
-    { key: "shadows", label: "阴影", min: -1, max: 1 },
-    { key: "saturation", label: "饱和度", min: -1, max: 1 },
-    { key: "vibrance", label: "自然饱和度", min: -1, max: 1 },
-    { key: "temperature", label: "暖色", min: -1, max: 1 },
-    { key: "tint", label: "淡色", min: -1, max: 1 },
-    { key: "clarity", label: "清晰度", min: -1, max: 1 },
-    { key: "vignette", label: "晕影", min: 0, max: 1 },
+    { key: "brightness", label: t("亮度"), min: -1, max: 1 },
+    { key: "exposure", label: t("曝光"), min: -1, max: 1 },
+    { key: "contrast", label: t("对比度"), min: -1, max: 1 },
+    { key: "highlights", label: t("高光"), min: -1, max: 1 },
+    { key: "shadows", label: t("阴影"), min: -1, max: 1 },
+    { key: "saturation", label: t("饱和度"), min: -1, max: 1 },
+    { key: "vibrance", label: t("自然饱和度"), min: -1, max: 1 },
+    { key: "temperature", label: t("暖色"), min: -1, max: 1 },
+    { key: "tint", label: t("淡色"), min: -1, max: 1 },
+    { key: "clarity", label: t("清晰度"), min: -1, max: 1 },
+    { key: "vignette", label: t("晕影"), min: 0, max: 1 },
   ];
   const defaultParams = () => Object.fromEntries(ADJUST_FIELDS.map((f) => [f.key, 0]));
   const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
@@ -1029,7 +1054,7 @@
     }
     const need = (dim === 3 ? size * size * size : size) * 3;
     if (!dim || !Number.isInteger(size) || size < 2 || size > 256 || data.length !== need) {
-      throw new Error("LUT 文件无效：尺寸或数据点数量不符（需 " + need + " 个通道值）");
+      throw new Error(t("LUT 文件无效：尺寸或数据点数量不符（需 {n} 个通道值）", { n: need }));
     }
     return { dim, size, domainMin: dmin, domainMax: dmax, title, data: new Float32Array(data) };
   }
@@ -1083,7 +1108,7 @@
   /* ------------------------------ image tools ---------------------------- */
 
   const RATIOS = [
-    { key: "origin", label: "原图", value: 0 },
+    { key: "origin", label: t("原图"), value: 0 },
     { key: "1:1", label: "1:1", value: 1 },
     { key: "2:3", label: "2:3", value: 2 / 3 },
     { key: "3:2", label: "3:2", value: 3 / 2 },
@@ -1092,7 +1117,7 @@
     { key: "9:16", label: "9:16", value: 9 / 16 },
     { key: "16:9", label: "16:9", value: 16 / 9 },
     { key: "21:9", label: "21:9", value: 21 / 9 },
-    { key: "free", label: "自由", value: null },
+    { key: "free", label: t("自由"), value: null },
   ];
 
   /* ---------------------------------------------------------------- crop ----
@@ -1157,7 +1182,7 @@
       /* Only the source size here: the crop size already sits in the 宽 / 高
          fields right above, so repeating it just made the line read twice. */
       const summary = document.querySelector(".ict-crop-size");
-      if (summary) summary.textContent = S.ready ? `原图 ${W} × ${H}` : "读取图片中…";
+      if (summary) summary.textContent = S.ready ? t("原图") + ` ${W} × ${H}` : t("读取图片中…");
       uiRef?.setApplyEnabled?.(isValid());
     }
 
@@ -1230,9 +1255,9 @@
     }
 
     openModal({
-      title: "裁剪", width: 860,
-      applyLabel: "裁剪并生成节点", applyDisabled: true,
-      extraFoot: [{ label: "全选", onClick: () => {
+      title: t("裁剪"), width: 860,
+      applyLabel: t("裁剪并生成节点"), applyDisabled: true,
+      extraFoot: [{ label: t("全选"), onClick: () => {
         const r = ratioValue();
         if (!r) S.rect = { x: 0, y: 0, w: W, h: H };
         else { const w = Math.min(W, H * r), h = w / r;
@@ -1245,19 +1270,19 @@
           <div class="ict-split">
             <div class="ict-preview">
               <div class="ict-crop-stage">
-                <img alt="原图" />
+                <img alt="${t('原图')}" />
                 <div class="ict-crop-frame">
                   ${["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((d) => `<i class="ict-handle ict-h-${d}" data-d="${d}"></i>`).join("")}
                 </div>
               </div>
             </div>
             <aside class="ict-side">
-              <div><p class="ict-label">比例</p><div class="ict-chips ict-ratios"></div></div>
+              <div><p class="ict-label">${t('比例')}</p><div class="ict-chips ict-ratios"></div></div>
               <div class="ict-4">
-                <label>宽 <input class="ict-input" type="number" data-f="w" /></label>
-                <label>高 <input class="ict-input" type="number" data-f="h" /></label>
+                <label>${t('宽')} <input class="ict-input" type="number" data-f="w" /></label>
+                <label>${t('高')} <input class="ict-input" type="number" data-f="h" /></label>
               </div>
-              <p class="ict-summary ict-crop-size">读取图片中…</p>
+              <p class="ict-summary ict-crop-size">${t('读取图片中…')}</p>
             </aside>
           </div>`;
         preview = body.querySelector(".ict-preview");
@@ -1362,17 +1387,17 @@
       },
       onApply: async (ui) => {
         normalise();
-        if (!isValid()) throw new Error("请选择有效的裁剪区域");
+        if (!isValid()) throw new Error(t("请选择有效的裁剪区域"));
         const c = S.rect;
         const sx = clamp(Math.round(c.x), 0, W - 1), sy = clamp(Math.round(c.y), 0, H - 1);
         const sw = clamp(Math.round(c.w), 1, W - sx), sh = clamp(Math.round(c.h), 1, H - sy);
         const canvas = document.createElement("canvas");
         canvas.width = sw; canvas.height = sh;
         canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-        ui.setStatus("正在按原图分辨率裁切…");
+        ui.setStatus(t("正在按原图分辨率裁切…"));
         await spawn(await canvasBlob(canvas),
           `${stemOf(ctx.data.asset?.name)}_crop_${sw}x${sh}.png`, ctx);
-        toast("success", "裁剪完成", `${sw} × ${sh}`);
+        toast("success", t("裁剪完成"), `${sw} × ${sh}`);
       },
     });
   };
@@ -1405,7 +1430,7 @@
         cell.textContent = String(i + 1);
         overlay.appendChild(cell);
       }
-      summary.textContent = valid() ? `共 ${total} 张图片` : "请设置有效行列数";
+      summary.textContent = valid() ? t("共 {n} 张图片", { n: total }) : t("请设置有效行列数");
       document.querySelectorAll(".ict-grid-preset").forEach((chip) => {
         const n = Number(chip.dataset.grid);
         chip.classList.toggle("is-active", !custom && n === rows && n === cols);
@@ -1416,23 +1441,23 @@
     };
     let uiRef = null;
     openModal({
-      title: "宫格", width: 860,
-      applyLabel: "切分为图片节点", applyDisabled: true,
+      title: t("宫格裁剪"), width: 860,
+      applyLabel: t("切分为图片节点"), applyDisabled: true,
       build(body, ui) {
         uiRef = ui;
         body.innerHTML = `
           <div class="ict-split">
             <div class="ict-preview"><div class="ict-crop-stage">
-              <img alt="原图" /><div class="ict-grid-overlay"></div>
+              <img alt="${t('原图')}" /><div class="ict-grid-overlay"></div>
             </div></div>
             <aside class="ict-side">
-              <div><p class="ict-label">预设</p><div class="ict-grid-presets"></div></div>
-              <button class="ict-grid-custom-btn" type="button">自定义</button>
+              <div><p class="ict-label">${t('预设')}</p><div class="ict-grid-presets"></div></div>
+              <button class="ict-grid-custom-btn" type="button">${t('自定义')}</button>
               <div class="ict-grid-custom" hidden>
-                <label class="ict-grid-slider-row"><span>行数</span>
+                <label class="ict-grid-slider-row"><span>${t('行数')}</span>
                   <input type="range" data-f="rows" min="1" max="10" step="1" value="3" />
                   <output data-o="rows">3</output></label>
-                <label class="ict-grid-slider-row"><span>列数</span>
+                <label class="ict-grid-slider-row"><span>${t('列数')}</span>
                   <input type="range" data-f="cols" min="1" max="10" step="1" value="3" />
                   <output data-o="cols">3</output></label>
               </div>
@@ -1463,7 +1488,7 @@
           icon.style.gridTemplateColumns = `repeat(${n},1fr)`;
           for (let i = 0; i < n * n; i += 1) icon.appendChild(document.createElement("b"));
           const label = document.createElement("span");
-          label.textContent = `${n * n} 宫格`;
+          label.textContent = t("{n} 宫格", { n: n * n });
           chip.append(icon, label);
           chip.addEventListener("click", () => { rows = n; cols = n; custom = false; render(); });
           presets.appendChild(chip);
@@ -1494,9 +1519,9 @@
         render();
       },
       onApply: async (ui) => {
-        if (!valid()) throw new Error("请设置有效的行列数");
+        if (!valid()) throw new Error(t("请设置有效的行列数"));
         const W = img.naturalWidth, H = img.naturalHeight;
-        if (W < cols || H < rows) throw new Error("图片尺寸小于切分行列数");
+        if (W < cols || H < rows) throw new Error(t("图片尺寸小于切分行列数"));
         const base = stemOf(ctx.data.asset?.name);
         for (let r = 0, i = 0; r < rows; r += 1) {
           for (let c = 0; c < cols; c += 1, i += 1) {
@@ -1506,20 +1531,20 @@
             canvas.width = x1 - x0; canvas.height = y1 - y0;
             canvas.getContext("2d").drawImage(img, x0, y0, canvas.width, canvas.height,
               0, 0, canvas.width, canvas.height);
-            ui.setStatus(`正在生成产物 ${i + 1} / ${rows * cols}…`);
+            ui.setStatus(t("正在生成产物 {i} / {n}…", { i: i + 1, n: rows * cols }));
             await spawn(await canvasBlob(canvas), `${base}_grid_${r + 1}-${c + 1}.png`, ctx, i);
           }
         }
-        toast("success", "宫格完成", `${rows * cols} 张切片`);
+        toast("success", t("宫格完成"), t("{n} 张切片", { n: rows * cols }));
       },
     });
   };
 
   const MIRRORS = [
-    { key: "flipX", label: "左右翻转", css: "scaleX(-1)", swap: false },
-    { key: "flipY", label: "上下翻转", css: "scaleY(-1)", swap: false },
-    { key: "rotate90", label: "顺时针 90°", css: "rotate(90deg)", swap: true },
-    { key: "rotate270", label: "逆时针 90°", css: "rotate(-90deg)", swap: true },
+    { key: "flipX", label: t("左右翻转"), css: "scaleX(-1)", swap: false },
+    { key: "flipY", label: t("上下翻转"), css: "scaleY(-1)", swap: false },
+    { key: "rotate90", label: t("顺时针 90°"), css: "rotate(90deg)", swap: true },
+    { key: "rotate270", label: t("逆时针 90°"), css: "rotate(-90deg)", swap: true },
     { key: "rotate180", label: "180°", css: "rotate(180deg)", swap: false },
   ];
   /* rotate-*-square glyphs (lucide): a framed square whose top corner opens
@@ -1543,14 +1568,14 @@
     const img = await loadImage(ctx.url);
     let current = MIRRORS[0];
     openModal({
-      title: "镜像 / 旋转", width: 860,
-      applyLabel: null, cancelLabel: "关闭",
+      title: t("镜像 / 旋转"), width: 860,
+      applyLabel: null, cancelLabel: t("关闭"),
       build(body, ui) {
         body.innerHTML = `
           <div class="ict-split">
-            <div class="ict-preview ict-mirror-preview"><img alt="镜像效果预览" /></div>
+            <div class="ict-preview ict-mirror-preview"><img alt="${t('镜像效果预览')}" /></div>
             <aside class="ict-side">
-              <p class="ict-label">变换</p>
+              <p class="ict-label">${t('变换')}</p>
               <div class="ict-mirror-grid"></div>
             </aside>
           </div>`;
@@ -1588,10 +1613,10 @@
           default: break;
         }
         c.drawImage(img, 0, 0);
-        ui.setStatus("正在处理…");
+        ui.setStatus(t("正在处理…"));
         await spawn(await canvasBlob(canvas),
           `${stemOf(ctx.data.asset?.name)}_mirror_${current.key}.png`, ctx);
-        toast("success", "镜像完成", `已生成「${current.label}」图片节点`);
+        toast("success", t("镜像完成"), t("已生成「{label}」图片节点", { label: current.label }));
       },
     });
   };
@@ -1612,7 +1637,7 @@
     const refreshApply = (ui) => (ui || uiRef)?.setApplyEnabled?.(hasChange());
     const renderLutMeta = () => {
       if (lutNameEl) {
-        lutNameEl.textContent = lut ? (lutName || lut.title || "已加载 LUT 滤镜") : "未加载滤镜 · 支持 .cube / .3dl 文本 LUT";
+        lutNameEl.textContent = lut ? (lutName || lut.title || t("已加载 LUT 滤镜")) : t("未加载滤镜 · 支持 .cube / .3dl 文本 LUT");
         lutNameEl.classList.toggle("is-empty", !lut);
       }
       if (lutDetailEl) lutDetailEl.hidden = !lut;
@@ -1629,7 +1654,7 @@
           const image = new ImageData(new Uint8ClampedArray(base.data), pw, ph);
           const adjusted = applyImageAdjust(image, { ...params });
           c.putImageData(applyLUT(adjusted, lut, lutStrength), 0, 0);
-        }).catch((error) => ui?.setStatus(error?.message || "预览失败", true));
+        }).catch((error) => ui?.setStatus(error?.message || t("预览失败"), true));
       });
     };
     function loadPreview() {
@@ -1660,19 +1685,19 @@
         renderLutMeta();
         refreshApply(ui);
         schedule(ui);
-        toast("success", "LUT 已加载", `${lutName} · ${parsed.dim === 3 ? parsed.size + "³" : parsed.size + " 级"} 3D/1D 色彩表`);
+        toast("success", t("LUT 已加载"), `${lutName} · ${parsed.dim === 3 ? parsed.size + "³" : parsed.size + " " + t("级")} 3D/1D ${t("色彩表")}`);
       } catch (error) {
         lut = null;
         renderLutMeta();
         refreshApply(ui);
         schedule(ui);
-        toast("error", "LUT 加载失败", String(error?.message || error));
+        toast("error", t("LUT 加载失败"), String(error?.message || error));
       }
     };
     openModal({
-      title: "调整", sub: "参数 + 自定义 LUT 滤镜", width: 860,
-      applyLabel: "应用", applyDisabled: true,
-      extraFoot: [{ label: "重置", onClick: (ui) => {
+      title: t("调色"), sub: t("参数 + 自定义 LUT 滤镜"), width: 860,
+      applyLabel: t("应用"), applyDisabled: true,
+      extraFoot: [{ label: t("重置"), onClick: (ui) => {
         Object.assign(params, defaultParams());
         ui.body.querySelectorAll(".ict-slider input").forEach((input) => { input.value = "0"; });
         ui.body.querySelectorAll(".ict-slider output").forEach((out) => {
@@ -1695,17 +1720,17 @@
             <aside class="ict-side">
               <div class="ict-sliders"></div>
               <div class="ict-lut-block">
-                <p class="ict-label">滤镜 LUT</p>
+                <p class="ict-label">${t('滤镜 LUT')}</p>
                 <div class="ict-lut-file">
-                  <button type="button" class="ict-btn ict-lut-pick">加载 LUT 文件</button>
+                  <button type="button" class="ict-btn ict-lut-pick">${t('加载 LUT 文件')}</button>
                   <input type="file" accept=".cube,.3dl,.txt,text/plain" />
                 </div>
-                <p class="ict-lut-name is-empty">未加载滤镜 · 支持 .cube / .3dl 文本 LUT</p>
+                <p class="ict-lut-name is-empty">${t('未加载滤镜 · 支持 .cube / .3dl 文本 LUT')}</p>
                 <div class="ict-lut-detail" hidden>
-                  <label class="ict-lut-strength"><span>强度</span>
+                  <label class="ict-lut-strength"><span>${t('强度')}</span>
                     <input type="range" min="0" max="100" step="1" value="100" />
                     <output>100%</output></label>
-                  <button type="button" class="ict-btn ict-lut-remove">移除滤镜</button>
+                  <button type="button" class="ict-btn ict-lut-remove">${t('移除滤镜')}</button>
                 </div>
               </div>
             </aside>
@@ -1753,8 +1778,8 @@
         schedule(ui);
       },
       onApply: async (ui) => {
-        if (!hasChange()) throw new Error("请先调整参数或加载 LUT 滤镜");
-        ui.setStatus("正在按原图分辨率导出…");
+        if (!hasChange()) throw new Error(t("请先调整参数或加载 LUT 滤镜"));
+        ui.setStatus(t("正在按原图分辨率导出…"));
         const canvas = drawToCanvas(img);
         const c = canvas.getContext("2d");
         const image = c.getImageData(0, 0, canvas.width, canvas.height);
@@ -1766,9 +1791,9 @@
           .map((f) => f.label).join("·");
         const parts = ["adjust", active];
         if (lut) parts.push("lut_" + stemOf(lutName));
-        const label = [summary || "默认", lut ? ("LUT " + lutName) : ""].filter(Boolean).join(" + ");
+        const label = [summary || t("默认"), lut ? ("LUT " + lutName) : ""].filter(Boolean).join(" + ");
         await spawn(await canvasBlob(canvas), `${stemOf(ctx.data.asset?.name)}_${parts.join("_")}.png`, ctx);
-        toast("success", "调整完成", `已生成「调整 ${label}」图片节点`);
+        toast("success", t("调整完成"), t("已生成「调整 {label}」图片节点", { label }));
       },
     });
   };
@@ -1781,15 +1806,30 @@
     const url = ctx.url || asset?.url || (asset && NS.api?.viewUrl?.(asset));
     if (!url) return;
     const response = await fetch(url);
-    if (!response.ok) throw new Error("下载失败：HTTP " + response.status);
+    if (!response.ok) throw new Error(t("下载失败：HTTP") + " " + response.status);
     saveBlob(await response.blob(), asset?.name || ctx.data?.title || "asset");
   };
   R.delete = (ctx) => NS.api?.removeNode?.(ctx.id);
+  /* Feed a material file straight into the node from the disk. Only offered on
+     an empty generator whose input is free (see ICanvasNode's canUpload): the
+     node flips to its material state, exactly like a file dropped on it. */
+  R.upload = (ctx) => ctx.pickFile?.();
 
   const TOOL_SETS = {
-    image: [["crop", "裁剪"], ["grid", "宫格"], ["mirror", "镜像"], ["adjust", "调整"]],
-    video: [["extractAudio", "提取"], ["separate", "分离"], ["trim", "截取"], ["frame", "抽帧"]],
+    image: [["crop", "裁剪"], ["grid", "宫格裁剪"], ["mirror", "旋转"], ["adjust", "调色"]],
+    video: [["videoCrop", "裁剪"], ["videoSpeed", "变速"], ["reverse", "倒放"], ["rotate", "旋转"],
+            ["extractAudio", "音频分离"], ["trim", "截取"], ["frame", "捕捉帧"]],
     audio: [["clip", "截取"], ["speed", "变速"]],
+  };
+
+  /* Lucide glyph name per tool key, rendered by IcIcon in the node toolbar.
+     These are stable internal names; only the visible label is localised. */
+  const TOOL_ICONS = {
+    crop: "crop", grid: "grid-3x3", mirror: "rotate-3d", adjust: "aperture",
+    extractAudio: "audio-lines-off", trim: "scissors",
+    videoCrop: "crop", videoSpeed: "gauge", reverse: "rewind", rotate: "rotate-3d",
+    frame: "camera", clip: "scissors", speed: "gauge", download: "download",
+    upload: "upload", delete: "trash-2",
   };
 
   // Hover tooltips for the node action buttons. Each describes what the tool
@@ -1797,48 +1837,49 @@
   // bare button label, this tells the user what to expect before clicking.
   const TOOL_TIPS = {
     crop:         "裁剪：拖拽框选区域、可锁定比例，生成新的图片节点，原图保留",
-    grid:         "宫格：把图片切成多行多列的小图，逐块生成图片节点，原图保留",
-    mirror:       "镜像：左右翻转、上下翻转或旋转 90°/180°，点击即生成新图片节点，原图保留",
-    adjust:       "调整：调节亮度、对比度、饱和度等参数，可叠加 LUT 滤镜，生成新图片节点，原图保留",
-    extractAudio: "提取：抽取视频中的音轨，生成一个音频节点，原视频保留",
-    separate:     "分离：拆分为静音视频和音轨两个节点，原视频保留",
+    grid:         "宫格裁剪：把图片切成多行多列的小图，逐块生成图片节点，原图保留",
+    mirror:       "旋转：左右翻转、上下翻转或旋转 90°/180°，点击即生成新图片节点，原图保留",
+    adjust:       "调色：调节亮度、对比度、饱和度等参数，可叠加 LUT 滤镜，生成新图片节点，原图保留",
+    videoCrop:    "裁剪：在首帧上框选画面区域，生成新的视频节点，原视频保留",
+    videoSpeed:   "变速：调整播放速度 0.1×–4×，音轨保持音调，生成新的视频节点，原视频保留",
+    reverse:      "倒放：将画面与音轨倒序播放，生成新的视频节点，原视频保留",
+    rotate:       "旋转：顺时针 90°、180° 或逆时针 90°，生成新的视频节点，原视频保留",
+    extractAudio: "音频分离：抽取视频中的音轨，生成一个音频节点，原视频保留",
     trim:         "截取：按起止时间截取一段视频，生成新的视频节点，原视频保留",
-    frame:        "抽帧：在指定时间点抽取一帧画面，生成一张图片节点，原视频保留",
+    frame:        "捕捉帧：在指定时间点抽取一帧画面，生成一张图片节点，原视频保留",
     clip:         "截取：截取片段、可删除片段并拼接，生成新的音频节点，原音频保留",
     speed:        "变速：调整播放速度 0.1×–4×，保持音调，可试听，生成新的音频节点，原音频保留",
     download:     "下载：把原始素材文件保存到本地",
+    upload:       "上传：从本地选择素材文件，直接填充当前节点（仅输入端未接入时可用）",
     delete:       "删除：从画布中移除这个节点（磁盘上的原素材文件不会被删除）",
   };
 
-  function actionsFor(data) {
+  function actionsFor(data, options) {
+    /* One rule for both states: whatever the node is holding (a dropped file
+       on a material node, or the result of a generator) gets the same per-kind
+       tools plus download. Text nodes have no tool set, so they only get
+       download + delete. */
+    const media = data.asset || data.result || null;
+    const kind = media?.kind || data.kind;
     const pairs = [];
-    if (data.role === "gen") {
-      const result = data.result;
-      const kind = result?.kind || data.kind;
-      /* A generated node behaves like an asset node once it has a result:
-         same per-kind tools + download, plus delete. Params are edited in the
-         panel below the node; there is no top-bar run / params button. */
-      if (result && TOOL_SETS[kind]) pairs.push(...TOOL_SETS[kind]);
-      if (result) pairs.push(["download", "下载"]);
-      pairs.push(["delete", "删除"]);
-    }
-    else {
-      const has = !!data.asset;
-      const kind = data.asset?.kind || data.kind;
-      if (has && TOOL_SETS[kind]) pairs.push(...TOOL_SETS[kind]);
-      if (has) pairs.push(["download", "下载"]);
-      pairs.push(["delete", "删除"]);
-    }
-    return pairs.map(([key, label]) => ({ key, label, tip: TOOL_TIPS[key] || label }));
+    if (media && TOOL_SETS[kind]) pairs.push(...TOOL_SETS[kind]);
+    if (media) pairs.push(["download", t("下载")]);
+    /* Upload sits just left of delete — the last slot before the destructive
+       one, so the row reads "do things … fill … destroy". */
+    if (options?.canUpload) pairs.push(["upload", t("上传")]);
+    pairs.push(["delete", t("删除")]);
+    return pairs.map(([key, label]) => ({
+      key, label: t(label), tip: t(TOOL_TIPS[key] || label), icon: TOOL_ICONS[key] || "",
+    }));
   }
 
   async function run(key, ctx) {
     const handler = R[key];
-    if (!handler) { toast("warning", "功能尚未就绪", key); return; }
+    if (!handler) { toast("warning", t("功能尚未就绪"), key); return; }
     try { await handler(ctx); }
     catch (error) {
       console.error("[InfCanvas tools]", key, error);
-      toast("error", "操作失败", String(error?.message || error));
+      toast("error", t("操作失败"), String(error?.message || error));
     }
   }
 
@@ -1856,9 +1897,10 @@
   NS.tools = {
     actionsFor, run, renderText, spawn, spawnRefs, refOf, resultPosition,
     openModal, closeModal, openMenu, closeMenu, paintRanges,
-    createProbe, request, API_AUDIO, API_VIDEO, API_HEALTH, NOT_READY, WARN_HTML, fmtPrecise,
+    MIRROR_PATHS, mirrorIcon,
+    createProbe, request, API_AUDIO, API_VIDEO, API_HEALTH, NOT_READY, WARN_HTML, warnHtml, fmtPrecise,
     isOpen: () => !!modal?.mask?.isConnected || !!menu,
-    helpers: { loadImage, canvasBlob, drawToCanvas, clamp, clamp01, fmtTime, fmtPrecise,
+    helpers: { loadImage, canvasBlob, drawToCanvas, saveBlob, clamp, clamp01, fmtTime, fmtPrecise,
                stemOf, toast, applyImageAdjust, parseCubeLUT, applyLUT },
     registry: R,
   };

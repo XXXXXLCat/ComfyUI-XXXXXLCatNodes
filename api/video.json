@@ -1,6 +1,0 @@
-{
-  "_requires_config": true,
-  "kind": "video",
-  "name": "生成视频",
-  "hint": "把你的文生视频/图生视频工作流导出为 API 格式 JSON 覆盖本文件。可用占位符：{{prompt}} {{negative}} {{seed}} {{steps}} {{width}} {{height}} {{image}} {{audio}}。连线到「图像素材/视频素材/音频素材」输入后，会自动注入对应素材文件名。"
-}
