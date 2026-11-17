@@ -21,11 +21,15 @@ subprocess. Nothing like psutil is pulled in.
   Group Control 🐈‍⬛, Node Control 🐈‍⬛, Resolution Selector 🐈‍⬛ (the
   official resolution node, with a 2-decimal megapixel step), and
   Fit Image to Size 🐈‍⬛ (crop/pad an image onto an exact target canvas).
+- An embedded infinite-canvas mode (Vue Flow) under ``/api/infcanvas/*`` with
+  its own asset-loader node (InfCanvas.AssetLoader), bundled front end in
+  ``web/infcanvas*`` and an offline Vue Flow runtime in ``web/vendor``.
 
 Implementation is split across submodules: sensors (ctypes readers), telemetry
-(sampler + route), reclamation (VRAM/RAM engine), and nodes (one class per file).
-This file is only the entry point: it prints the banner, imports those modules,
-and exposes the ComfyUI extension via ``comfy_entrypoint`` (the 8 V3 nodes).
+(sampler + route), reclamation (VRAM/RAM engine), nodes (one class per file),
+and server_routes (the infinite-canvas HTTP API). This file is only the entry
+point: it prints the banner, imports those modules, and exposes the ComfyUI
+extension via ``comfy_entrypoint``.
 """
 
 import os
@@ -48,7 +52,7 @@ print(f"\n{_SEP}\n{_BANNER}\n{_SEP}\n")
 
 # ============================================================ 子模块导入（触发路由注册 / 采样线程）
 
-from . import sensors, telemetry, reclamation, infra  # noqa: E402,F401
+from . import sensors, telemetry, reclamation, infra, server_routes  # noqa: E402,F401
 from .nodes import (  # noqa: E402
     XXXXXLCatVRAMSweep,
     XXXXXLCatRAMReclaim,
@@ -58,6 +62,7 @@ from .nodes import (  # noqa: E402
     XXXXXLCatNodeControl,
     XXXXXLCatResolutionSelector,
     XXXXXLCatFitImageToSize,
+    InfCanvasAssetLoader,
 )
 
 
@@ -110,6 +115,13 @@ class XXXXXLCatExtension(ComfyExtension):
         except Exception as exc:  # pragma: no cover - defensive
             print(f"[XXXXXLCat] history gallery skipped: {exc}")
 
+        # Infinite-canvas HTTP API (/api/infcanvas/*). register_routes() is
+        # idempotent and needs a live PromptServer, so it belongs in on_load.
+        try:
+            server_routes.register_routes()
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[InfCanvas] HTTP route registration skipped: {exc}")
+
 
 # Kept in one place so the load log can never drift from the real registration.
 _NODE_CLASSES = [
@@ -121,6 +133,7 @@ _NODE_CLASSES = [
     XXXXXLCatNodeControl,
     XXXXXLCatResolutionSelector,
     XXXXXLCatFitImageToSize,
+    InfCanvasAssetLoader,
 ]
 
 
@@ -146,3 +159,4 @@ print(
     f"[XXXXXLCat] {len(_NODE_CLASSES)} nodes registered via comfy_entrypoint (new V3 node API)"
 )
 print("[XXXXXLCat] Menu-bar telemetry ready at /xxxxxlcat-monitor")
+print("[InfCanvas] Embedded canvas UI in web/infcanvas*, API at /api/infcanvas/*")

@@ -2,12 +2,19 @@
 
 <p align="center"><strong>🇨🇳 中文</strong> ·<a href="README.md">🇺🇸 English</a></p>
 
-ComfyUI 扩展，包含八个自定义节点与三项界面功能。
+ComfyUI 扩展，包含九个自定义节点与四项界面功能。
 
-- 节点：清理显存、回收内存、H3 图生视频、任意切换、组控制、节点控制、分辨率选择器、适配尺寸。
-- 界面功能：菜单栏系统状态、历史画廊侧边栏、多用户文件隔离。
+- 节点：清理显存、回收内存、H3 图生视频、任意切换、组控制、节点控制、分辨率选择器、适配尺寸、无限画布素材载入。
+- 界面功能：菜单栏系统状态、历史画廊侧边栏、多用户文件隔离、嵌入式无限画布。
 
 无第三方依赖，不依赖外部服务。界面文案随 ComfyUI 语言设置切换，提供中文与英文。
+
+
+## 嵌入式无限画布
+
+基于 Vue Flow 的画布，作为与工作流平级的模式运行在 ComfyUI 内部——从顶部菜单（View → 打开 / 退出无限画布，或 Ctrl+Shift+I）进入。它使用真正的 Vue 组件与原生 `<img>/<video>/<audio>` 元素，不触碰 LiteGraph，内置离线 Vue Flow 运行时，无需 CDN。前端文件在 `web/infcanvas*.js`，打包运行时在 `web/vendor/`；后端 API 在 `/api/infcanvas/*`，画布与工作流数据按用户存放在 ComfyUI 用户目录。`infcanvas/asset-loader` 节点（InfCanvas.AssetLoader）可把画布素材带入工作流。
+
+完整说明见 [docs/infinite-canvas.md](docs/infinite-canvas.md)（布局、标签、工具、i18n 与验证记录）。
 
 
 ## 菜单栏系统状态
@@ -225,7 +232,7 @@ ComfyUI 启动后于菜单栏显示状态区，包含五项指标，刷新间隔
 
 将 `ComfyUI-XXXXXLCatNodes` 文件夹放入 `ComfyUI/custom_nodes/`，重启 ComfyUI。
 
-菜单栏系统状态、历史画廊、多用户文件隔离自动生效，无需在画布中添加节点。
+菜单栏系统状态、历史画廊、多用户文件隔离、嵌入式无限画布自动生效，无需在画布中添加节点。按 Ctrl+Shift+I（或 View → 打开 / 退出无限画布）进入画布。
 
 ## 环境要求
 

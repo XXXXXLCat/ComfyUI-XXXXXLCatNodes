@@ -1,0 +1,55 @@
+{
+ "fields": [
+  {
+   "nodeId": "37_38",
+   "key": "seed",
+   "type": "number",
+   "label": "种子",
+   "min": 0,
+   "max": 99999999999999,
+   "step": 1
+  },
+  {
+   "nodeId": "37_13",
+   "key": "max_duration",
+   "type": "slider",
+   "label": "时长",
+   "min": 1,
+   "max": 300,
+   "step": 1
+  },
+  {
+   "nodeId": "37_13",
+   "key": "cfg_scale",
+   "type": "random",
+   "label": "CFG",
+   "min": 1.0,
+   "max": 10.0,
+   "step": 0.1
+  },
+  {
+   "nodeId": "37_9",
+   "key": "scheduler",
+   "type": "select",
+   "label": "调度器",
+   "options": [
+    "simple",
+    "normal",
+    "karras",
+    "exponential"
+   ]
+  },
+  {
+   "nodeId": "37_15",
+   "key": "batch_size",
+   "type": "switch",
+   "label": "批量"
+  },
+  {
+   "nodeId": "37_13",
+   "key": "caption",
+   "type": "text",
+   "label": "风格"
+  }
+ ]
+}

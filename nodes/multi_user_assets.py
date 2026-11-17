@@ -79,6 +79,21 @@ def _current_user() -> Optional[str]:
     return user
 
 
+def current_user_id() -> Optional[str]:
+    """当前用户 id（多用户模式），供画布等模块按用户分类存储。
+
+    * 未开启 ``--multi-user``：返回 ``None``（调用方应落到 ``default``）。
+    * 开启了但当前上下文没有用户（如后台启动任务）：同样返回 ``None``。
+    * 系统用户（队列/agent 账号）：返回 ``None``，绝不获得私有目录。
+
+    与 input/output 隔离使用同一个 contextvar，保证画布、素材、生成物按同一
+    个身份归类。公开函数刻意只读，不改变任何隔离状态。
+    """
+    if not _enabled():
+        return None
+    return _current_user()
+
+
 def _global_input_dir() -> str:
     import folder_paths
     return folder_paths.input_directory
