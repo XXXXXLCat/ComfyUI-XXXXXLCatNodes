@@ -1,6 +1,6 @@
 [project]
 name = "ComfyUI-XXXXXLCatNodes"
-description = "ComfyUI menu-bar system monitor, eight custom nodes, infinite canvas board and multi-user file isolation"
+description = "ComfyUI menu-bar system monitor, eight custom nodes and multi-user file isolation"
 version = "1.0.0"
 dependencies = []
 requires-python = ">=3.10"

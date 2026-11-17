@@ -1,4 +1,0 @@
-# vendored 的 Infinite-Canvas dist 是编译产物，必须保持原字节：
-# 本机 core.autocrlf=true，检出时会把 LF 改成 CRLF，导致
-# (1) 补丁脚本 patch_*.py 里的字符串匹配失效、(2) README 里记录的 MD5 指纹对不上。
-infinite_canvas/frontend/dist/** -text

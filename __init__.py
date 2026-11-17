@@ -49,9 +49,6 @@ print(f"\n{_SEP}\n{_BANNER}\n{_SEP}\n")
 # ============================================================ 子模块导入（触发路由注册 / 采样线程）
 
 from . import sensors, telemetry, reclamation, infra  # noqa: E402,F401
-# Vendored Infinite Canvas: registers /infinite_canvas/api/* and serves
-# /infinite_canvas/app from infinite_canvas/frontend/dist at import time.
-from . import infinite_canvas  # noqa: E402,F401
 from .nodes import (  # noqa: E402
     XXXXXLCatVRAMSweep,
     XXXXXLCatRAMReclaim,
