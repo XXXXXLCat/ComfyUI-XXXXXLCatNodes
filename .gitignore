@@ -1,8 +1,26 @@
+# ---- 主项目：缓存 / 会话临时产物 ----
 __pycache__/
 *.pyc
 batch/*.db
 .workbuddy/memory/
 .workbuddy/tmp/
+
+# ---- 嵌入画布：本地备份 / 浏览器调试 / 前端源码参考（不随项目分发）----
+.backup/
+.cache/
+.chrome-profile/
+.tmp-chrome*/
+.tmp-src/
+docs/reference/
+_src/
+_src2/
+_src3/
+_src4/
+node_modules/
+Thumbs.db
+.DS_Store
+tools/checks/oneoff/
+
 # 中间备份文件留在磁盘上，不进库
 *.bak.js
 *.bak

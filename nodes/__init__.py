@@ -9,6 +9,7 @@ from .group_control import XXXXXLCatGroupControl
 from .node_control import XXXXXLCatNodeControl
 from .resolution_selector import XXXXXLCatResolutionSelector
 from .fit_image_to_size import XXXXXLCatFitImageToSize
+from .infcanvas_asset_loader import InfCanvasAssetLoader
 
 __all__ = [
     "XXXXXLCatVRAMSweep",
@@ -19,4 +20,5 @@ __all__ = [
     "XXXXXLCatNodeControl",
     "XXXXXLCatResolutionSelector",
     "XXXXXLCatFitImageToSize",
+    "InfCanvasAssetLoader",
 ]

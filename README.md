@@ -2,12 +2,19 @@
 
 <p align="center"><a href="README_CN.md">🇨🇳 中文</a> ·<strong>🇺🇸 English</strong></p>
 
-ComfyUI extension providing eight custom nodes and three interface features.
+ComfyUI extension providing nine custom nodes and four interface features.
 
-- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size.
-- Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation.
+- Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size, Infinite Canvas Asset Loader.
+- Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation, embedded infinite canvas.
 
 No third-party dependencies and no external service. Labels follow ComfyUI's language setting; Chinese and English are provided.
+
+
+## Embedded infinite canvas
+
+A Vue Flow based canvas that runs *inside* ComfyUI as a mode parallel to workflows — entered from the top menu (View → 打开 / 退出无限画布, or Ctrl+Shift+I). It uses real Vue components and native `<img>/<video>/<audio>` elements, does not touch LiteGraph, and ships an offline Vue Flow runtime, so no CDN is needed. Front-end files live in `web/infcanvas*.js` with the bundled runtime in `web/vendor/`; the backend API is under `/api/infcanvas/*` and canvas/workflow data is stored per-user under the ComfyUI user directory. The `infcanvas/asset-loader` node (InfCanvas.AssetLoader) brings a canvas asset into a workflow.
+
+See [docs/infinite-canvas.md](docs/infinite-canvas.md) for the full guide (layout, tabs, tools, i18n and verification notes).
 
 
 ## Menu-bar system status
@@ -225,7 +232,7 @@ Active when ComfyUI is started with `--multi-user`; a single-user launch is unaf
 
 Place the `ComfyUI-XXXXXLCatNodes` folder in `ComfyUI/custom_nodes/` and restart ComfyUI.
 
-The menu-bar status, the history gallery and multi-user isolation activate automatically; no node has to be added to a graph.
+The menu-bar status, the history gallery, multi-user isolation and the embedded infinite canvas activate automatically; no node has to be added to a graph. Press Ctrl+Shift+I (or View → 打开 / 退出无限画布) to enter the canvas.
 
 ## Requirements
 

@@ -1,0 +1,185 @@
+{
+  "35": {
+    "inputs": {
+      "filename_prefix": "audio/audio_minimax_music3",
+      "format": "flac",
+      "audio": [
+        "37_43",
+        0
+      ]
+    },
+    "class_type": "SaveAudioAdvanced",
+    "_meta": {
+      "title": "保存音频（高级）"
+    }
+  },
+  "37_6": {
+    "inputs": {
+      "unet_name": "minimax_music3_dit_fp16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "37_3": {
+    "inputs": {
+      "clip_name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "37_7": {
+    "inputs": {
+      "vae_name": "minimax_music3_dav.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "37_38": {
+    "inputs": {
+      "seed": 42
+    },
+    "class_type": "SeedNode",
+    "_meta": {
+      "title": "种子"
+    }
+  },
+  "37_13": {
+    "inputs": {
+      "caption": "",
+      "lyrics": "",
+      "seed": [
+        "37_38",
+        0
+      ],
+      "max_duration": 300,
+      "cfg_scale": 1.7,
+      "top_k": 50,
+      "clip": [
+        "37_3",
+        0
+      ]
+    },
+    "class_type": "MiniMaxMusic3TextEncode",
+    "_meta": {
+      "title": "MiniMax Music3 文本编码"
+    }
+  },
+  "37_10": {
+    "inputs": {
+      "conditioning": [
+        "37_13",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "37_15": {
+    "inputs": {
+      "seconds": [
+        "37_13",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyMiniMaxMusic3LatentAudio",
+    "_meta": {
+      "title": "空 MiniMax Music3 潜空间音频"
+    }
+  },
+  "37_9": {
+    "inputs": {
+      "seed": [
+        "37_38",
+        0
+      ],
+      "steps": 30,
+      "cfg": 1.7,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "37_6",
+        0
+      ],
+      "positive": [
+        "37_13",
+        0
+      ],
+      "negative": [
+        "37_10",
+        0
+      ],
+      "latent_image": [
+        "37_15",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "37_12": {
+    "inputs": {
+      "samples": [
+        "37_9",
+        0
+      ],
+      "vae": [
+        "37_7",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "37_42": {
+    "inputs": {
+      "tile_size": 1536,
+      "overlap": 64,
+      "samples": [
+        "37_9",
+        0
+      ],
+      "vae": [
+        "37_7",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudioTiled",
+    "_meta": {
+      "title": "VAE解码音频（分块）"
+    }
+  },
+  "37_43": {
+    "inputs": {
+      "switch": true,
+      "on_false": [
+        "37_12",
+        0
+      ],
+      "on_true": [
+        "37_42",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "切换"
+    }
+  }
+}

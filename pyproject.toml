@@ -1,9 +1,10 @@
 [project]
 name = "ComfyUI-XXXXXLCatNodes"
-description = "ComfyUI menu-bar system monitor, eight custom nodes and multi-user file isolation"
-version = "1.0.0"
+description = "ComfyUI menu-bar system monitor, eight custom nodes, multi-user file isolation and an embedded infinite canvas"
+version = "1.1.0"
 dependencies = []
 requires-python = ">=3.10"
 
 [project.urls]
 Repository = "https://github.com/XXXXXLCat/ComfyUI-XXXXXLCatNodes"
+InfiniteCanvas = "https://github.com/XXXXXLCat/ComfyUI_InfiniteCanvas"
