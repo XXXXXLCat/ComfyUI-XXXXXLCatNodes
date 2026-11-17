@@ -21,11 +21,6 @@ const TEMP_HOT = "#B33A3A";
 const BOX_BG = "#262729"; // 段/按钮底色
 const TEXT_COLOR = "#FFFFFF"; // 数值文字颜色
 const LABEL_COLOR = "rgba(255,255,255,.55)"; // 标签文字颜色
-// 画布入口用醒目的黄绿底色，文字随之换成深色（否则白字压不住亮底）
-const CANVAS_BG = "#F2FF59";
-const CANVAS_BG_HOVER = "#E1EF3F";
-const CANVAS_INK = "#15170A";
-
 let root = null;
 let segs = {};
 let maxVRAM = 0; // 记录本次会话 VRAM 历史峰值（tooltip 显示）
@@ -223,42 +218,12 @@ function mkSeparator() {
   return sep;
 }
 
-/**
- * 无限画布入口：位于清理按钮左侧。
- * 页面本体与路由来自 infinite_canvas/（vendored 子包），弹窗由
- * web/infinite_canvas.js 提供，这里只负责菜单栏按钮与桥接。
- */
-function mkCanvasButton() {
-  const btn = mkBarButton("Infinite", "Canvas", "Infinite Canvas", {
-    bg: CANVAS_BG,
-    bgHover: CANVAS_BG_HOVER,
-    inkStrong: CANVAS_INK,
-    border: "rgba(0,0,0,.22)",
-    strongBottom: true,
-  });
-  btn.id = "xcat-infinite-canvas-entry";
-  btn.addEventListener("click", () => {
-    const bridge = window.__XXXXXLCatInfiniteCanvas;
-    if (bridge && typeof bridge.toggle === "function") {
-      bridge.toggle();
-      return;
-    }
-    // 入口脚本可能尚未 setup，把动作排队，桥接装好后补放一次
-    if (!window.__XXXXXLCatInfiniteCanvasPending) window.__XXXXXLCatInfiniteCanvasPending = [];
-    window.__XXXXXLCatInfiniteCanvasPending.push("toggle");
-  });
-  return btn;
-}
-
 function build() {
   root = mk("div");
   root.id = "xxxxxlcat-monitor";
   root.style.cssText =
     "display:flex;flex-direction:row;gap:5px;flex-wrap:wrap;align-items:center;" +
     "user-select:none;cursor:default;";
-  // 画布入口固定在清理按钮左侧，与清理按钮之间用竖分隔符隔开
-  root.append(mkCanvasButton());
-  root.append(mkSeparator());
   // 清理按钮放在状态行左侧：RAM Cleanup 在左、VRAM Cleanup 在右（与状态段同高 30px）
   root.append(
     mkCleanupButton("ram", "RAM", "Cleanup", {

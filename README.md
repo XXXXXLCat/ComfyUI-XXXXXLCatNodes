@@ -2,25 +2,13 @@
 
 <p align="center"><a href="README_CN.md">🇨🇳 中文</a> ·<strong>🇺🇸 English</strong></p>
 
-ComfyUI extension providing eight custom nodes and four interface features.
+ComfyUI extension providing eight custom nodes and three interface features.
 
 - Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size.
-- Interface: menu-bar system status, infinite canvas board, history gallery sidebar tab, multi-user file isolation.
+- Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation.
 
 No third-party dependencies and no external service. Labels follow ComfyUI's language setting; Chinese and English are provided.
 
-## Infinite canvas 🐈‍⬛
-
-The leftmost `Infinite / Canvas` button in the menu bar opens a full-screen board. A thin vertical divider separates it from the cleanup buttons on its right.
-
-The board itself comes from [ComfyUI-Infinite-Canvas](https://github.com/YangShu2103/ComfyUI-Infinite-Canvas) (MIT © 2026 YangShu2103), vendored as the `infinite_canvas/` sub-package so it ships with this package instead of being installed as a second custom node:
-
-- Entry: the menu-bar button opens the board; `Esc`, a click on the surrounding overlay, or "exit" at the bottom of the left sidebar closes it. Upstream's floating round button and its drag/position memory are removed.
-- Inside the board: the top carries a canvas tab strip modelled on ComfyUI's workflow tabs (38px tall). It shows **only the canvases you have opened** — every tab (including the active "Unsaved Canvas") carries an × to close it: the active tab shows it, the others reveal it on hover, and closing the last real canvas leaves just "Unsaved Canvas". Tabs switch canvases, "+" creates one, unsaved canvases show a dot, and switching auto-saves first; `Ctrl`/`Cmd+S` saves (auto-creating a new canvas when none is current). The left side follows ComfyUI's own sidebar layout — a 56px full-height rail, each item a 16px icon above a 10px label: prompts / assets / logs, then a thin divider, then canvas manager / asset manager / workflow (these three open as centered dialogs behind a 50% dimming overlay, with the rest of the board inert, rather than docked panels), then another divider and the light/dark toggle, with "exit" pinned at the rail's bottom. The panel opens beside the rail at full height. The floating toolbar at the bottom-right mirrors ComfyUI's canvas toolbar: select/hand mode, fit view, zoom controls, grid snap and hide links. Upstream's "free VRAM" and "focus node" buttons are gone.
-- Canvas manager: the dialog is a **card grid** (upstream `grid; minmax(214px,1fr)`, with inline open/delete buttons kept). Right-clicking a card opens a menu to **rename / delete / duplicate** it; bulk delete still uses the header's multi-select + "delete selected".
-- Page and API: the Vue 3 + Vue Flow build in `infinite_canvas/frontend/dist` is mounted at `/infinite_canvas/app`, with the backend under `/infinite_canvas/api/*`.
-- Data: still `<ComfyUI user dir>/ComfyUI-Infinite-Canvas` (canvases, workflows, prompts, thumbnails), so boards made before or after the merge both load.
-- `--multi-user`: upstream reads the global user directory, so every account shares one set of boards. That differs from the per-account isolation used by the rest of this package.
 
 ## Menu-bar system status
 
