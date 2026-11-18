@@ -46,15 +46,9 @@ app.registerExtension({
     { commandId: "InfCanvas.Open", combo: { key: "i", ctrl: true, shift: true } },
   ],
 
-  settings: [
-    {
-      id: "InfCanvas.AutoSave",
-      name: "自动保存画布",
-      type: "boolean",
-      defaultValue: true,
-      tooltip: "画布变更后约 3 秒自动保存",
-    },
-  ],
+  /* 自动保存/预览文本等设置已统一移到画布自己的设置面板
+     （侧栏「设置」→ infcanvas-settings.js），不再占用 ComfyUI 原生设置项。 */
+  settings: [],
 
   async setup() {
     // ComfyUI imports all extension JS files in parallel / with a late-loading

@@ -93,6 +93,53 @@
 /* Drag feedback only: the resting look of a row is NavItem's own class string. */
 .ac-item.is-dragging { opacity:.45; }
 .ac-item.is-drop { box-shadow:inset 0 0 0 1px var(--primary, #0b8ce9); }
+
+/* ---------------- exposed-parameter order panel ---------------- */
+/* Sits to the right of the graph preview inside content. Fixed width; the
+   preview keeps flex-1. Rows reuse the node settings popover's OWN class
+   strings (WidgetGrid) so every control looks exactly like the screenshot. */
+/* Right-hand API 参数 panel. The card itself REUSES the node settings popover's
+   own class strings (.icn__gpa-pop / pophead / popt / popcnt / body / more), so
+   its look is 1:1 with the node — same host utility classes, same CSS. We only
+   override the popover's absolute anchoring into an in-flow card, and lay the
+   two footer buttons out side by side. */
+.ac-params { display:flex; flex-direction:column; flex:0 0 348px; min-height:0; gap:10px;
+  overflow-y:auto; }
+.ac-params .icn__gpa-inputs { margin-bottom:0; flex:0 0 auto; }
+/* Prompt grows with its text; no fixed 76px band stealing the column height. */
+.ac-params .icn__gpa-area--a { height:auto; min-height:56px; field-sizing:content; }
+/* Card takes only its content height — no flex:1 stretching. Otherwise the
+   leftover column space piles up under the 隐藏高级输入 band and makes it huge. */
+.ac-params .icn__gpa-pop { position:static; bottom:auto; left:auto; width:100%;
+  max-height:none; flex:0 0 auto; overflow:visible; }
+.ac-params .icn__gpa-more { flex:0 0 auto; }
+.ac-params-list { position:relative; min-height:0; }
+/* Drag feedback + grip. The grip keeps its 12px column even when hidden so the
+   rows line up with the native WidgetGrid (which has an empty w-3 first cell). */
+.ac-prow-grip { display:flex; visibility:hidden; align-items:center; justify-content:center;
+  width:12px; color:var(--muted-foreground, #8a8a8a); cursor:grab; }
+.ac-params.is-sorting .ac-prow-grip { visibility:visible; }
+.ac-params.is-sorting .ac-prow { cursor:grab; }
+.ac-prow.is-dragging { opacity:.45; }
+.ac-prow.is-drop { box-shadow:inset 0 0 0 1px var(--primary, #0b8ce9); }
+/* Widget popups (field dropdown / value-control chooser). Skin is the node's
+   OWN listbox / chooser (icn__gpa-fsel / icn__gpa-modes, see infcanvas-flow.js)
+   so the menus are pixel-identical. Only re-anchored to the viewport because
+   the API 参数 card scrolls and would clip an in-flow menu. */
+.ac-widget-menu { position:fixed !important; z-index:10006 !important; }
+.icn__gpa-fsel.ac-widget-menu { display:flex; flex-direction:column; overflow:hidden;
+  text-align:left; border-radius:8px; background:var(--card, #262729);
+  border:1px solid var(--ic-line, #494a50); box-shadow:0 10px 30px rgba(0,0,0,.55); }
+.icn__gpa-fsel.ac-widget-menu > .icn__sel-search { margin:5px 5px 4px; }
+.icn__sel-search { position:sticky; top:0; z-index:1; display:flex; align-items:center; gap:6px;
+  flex:0 0 auto; height:28px; padding:0 8px; border-radius:6px;
+  background:var(--muted, #3c3d42); color:var(--ic-soft, #8a8a8a); }
+.icn__sel-searchinput { flex:1 1 auto; min-width:0; height:100%; padding:0; border:0; outline:none;
+  background:transparent; color:var(--ic-text, #ffffff); font:inherit; font-size:12px; }
+.icn__sel-searchinput::placeholder { color:var(--ic-soft, #8a8a8a); }
+.icn__gpa-modes.ac-widget-menu { overflow:hidden; text-align:left; border-radius:10px;
+  background:var(--card, #262729); border:1px solid var(--ic-line, #494a50);
+  box-shadow:0 10px 30px rgba(0,0,0,.55); }
 `;
 
   /* --------------------------- constants --------------------------- */
@@ -137,6 +184,46 @@
     if (cls) node.className = cls;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+  };
+
+  /* lucide icons inlined as SVG markup (the host sheet only ships icons the
+     host itself uses, so icon-[lucide--*] classes would resolve to nothing).
+     These reproduce the node settings popover's controls 1:1. */
+  const ICO = {
+    minus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg>',
+    plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+    chevron: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+    shuffle: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M18 14 L22 18 L18 22"/>'
+      + '<path d="M18 2 L22 6 L18 10"/>'
+      + '<path d="M2 18 H3.97 A4 4 0 0 0 7.27 16.3 L12.72 7.7 A4 4 0 0 1 16.02 6 H22"/>'
+      + '<path d="M2 6 H3.97 A4 4 0 0 1 7.57 8.2"/>'
+      + '<path d="M22 18 H15.96 A4 4 0 0 1 12.66 16.2 L12.3 15.75"/></svg>',
+    grip: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+      + '<circle cx="9" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/>'
+      + '<circle cx="15" cy="6" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>',
+    chevronUp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>',
+    settings2: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M20 7h-4M4 7h4M10 7h10M14 17H4M20 17h-4M8 17H6"/>'
+      + '<circle cx="12" cy="7" r="2"/><circle cx="12" cy="17" r="2"/></svg>',
+    search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
+    check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M20 6 9 17l-5-5"/></svg>',
+    pencilOff: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M10 10 L3.843 16.162 A2 2 0 0 0 3.343 16.995 L2.021 21.355 A0.5 0.5 0 0 0 2.643 21.979 L7.001 20.656 A2 2 0 0 0 7.831 20.156 L14 13.982"/>'
+      + '<path d="M12.829 7.172 L17.188 2.826 A1 1 0 1 1 21.174 6.812 L16.821 11.165"/>'
+      + '<path d="M15 5 L19 9"/>'
+      + '<path d="M2 2 L22 22"/></svg>',
   };
 
   /* lucide `tag`, inlined: the host's Tailwind sheet only ships the icons the
@@ -429,6 +516,11 @@
     workflows: [], currentName: "", currentWorkflow: null,
     dragIndex: -1, dropIndex: -1,
     fields: [], fieldsDirty: false, inspecting: "",
+    /* Exposed-parameter order editing (right panel). */
+    orderEditing: false, orderSnapshot: null, orderDrag: -1, orderDrop: -1,
+    /* The 1:1 screenshot shows all 11 fields expanded ("隐藏高级输入" footer
+       with the ⌄ dropdowns visible), so the right panel starts expanded too. */
+    paramsShowAdvanced: true,
     autoAdded: 0, autoKeys: new Set(),
     category: "", categories: [],
     zoom: 1, panX: 0, panY: 0,
@@ -663,7 +755,11 @@
     closeBtn.addEventListener("click", () => close());
     head.append(headInfo, closeBtn);
     right.appendChild(head);
-    actions.append(D.catBtn, D.rename, D.favorite, D.danger);
+    /* Two groups on one toolbar row: the workflow actions (重命名/设为默认/删除)
+       hug the LEFT; the param actions (保存为默认参数/调整顺序) hug the RIGHT.
+       A flex-1 spacer between the two groups creates the gap. */
+    const actionsSpacer = el("div", "min-w-4 flex-1");
+    actions.append(D.catBtn, D.rename, D.favorite, D.danger, actionsSpacer);
     right.appendChild(actions);
 
     /* ---- right: content (BaseModalLayout #content, px-6 pb-10) ----
@@ -671,6 +767,10 @@
        sits with equal right/bottom breathing room instead of floating high. */
     const content = el("main", "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 pb-6");
     right.appendChild(content);
+
+    /* Graph preview on the left, exposed-parameter order panel on the right. */
+    const contentRow = el("div", "flex min-h-0 flex-1 flex-row gap-3");
+    content.appendChild(contentRow);
 
     const preview = el("div", "ac-preview flex-1 rounded-lg border border-border/50 bg-card");
     preview.style.minHeight = "320px";
@@ -697,7 +797,68 @@
     D.tip = el("div", "ac-empty is-tip", t("点击节点配置可暴露给画布的参数"));
     D.tip.hidden = true;
     preview.append(D.empty, D.tip);
-    content.appendChild(preview);
+    contentRow.appendChild(preview);
+
+    /* ---- API 参数 panel (right of the preview) ----
+       1:1 port of the node settings popover card: same .icn__gpa-pop / pophead /
+       popt / popcnt / body / more class strings, so the header, badge, widget
+       grid and the 隐藏/显示高级输入 footer are pixel-identical to the node.
+       Only the popover's absolute anchoring is replaced by an in-flow card.
+       Below the card sit two buttons: 保存为默认参数 (left) / 调整顺序 (right). */
+    D.params = el("div", "ac-params");
+    D.paramsCard = el("div", "icn__gpa-pop");
+    const paramsHead = el("div", "icn__gpa-pophead");
+    paramsHead.append(
+      el("span", "icn__gpa-popt", t("API 参数")),
+      D.paramsCount = el("span", "icn__gpa-popcnt", ""),
+    );
+    D.paramsList = el("div", "ac-params-list");
+    D.paramsEmpty = el("div", "icn__gpa-popempty",
+      t("当前 API 未暴露参数，可在 API 配置里勾选要显示的输入项"));
+    D.paramsList.appendChild(D.paramsEmpty);
+    /* NodeFooter footer band, class for class (h-11 / bg-node-header /
+       rounded-b-xl / pt-8 pb-3 / text-xs font-normal). -mt-5 is dropped: with
+       no popover body to tuck under, the full band would be too tall. */
+    D.paramsMore = el("div", "icn__gpa-more box-border flex w-full");
+    D.paramsMoreBtn = el("button", "pointer-events-auto relative inline-flex box-border h-6 w-full "
+      + "cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 "
+      + "rounded-none rounded-b-xl border-none bg-node-header p-2 font-inter text-xs font-normal "
+      + "whitespace-nowrap text-node-foreground transition-colors hover:bg-accent "
+      + "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none "
+      + "disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0");
+    D.paramsMoreBtn.type = "button";
+    D.paramsMoreBtn.addEventListener("click", toggleParamsAdvanced);
+    D.paramsMoreLabel = el("span", "truncate", "");
+    D.paramsMoreIcon = el("span", "icn__gpa-more-icon shrink-0");
+    const moreInner = el("div", "flex size-full items-center justify-center gap-2");
+    moreInner.append(D.paramsMoreLabel, D.paramsMoreIcon);
+    D.paramsMoreBtn.appendChild(moreInner);
+    D.paramsMore.appendChild(D.paramsMoreBtn);
+    D.paramsCard.append(paramsHead, D.paramsList, D.paramsMore);
+
+    /* The prompt is the node's OWN main text area, not a row inside the API
+       参数 card — the node's apiBarFields explicitly skips it. Mirror that:
+       a standalone textarea BELOW the card, with the node's exact box classes. */
+    D.promptBox = el("div", "icn__gpa-inputs");
+    D.promptBox.hidden = true;
+
+    /* Right-hand group of the toolbar: 保存为默认参数 + 调整顺序. In sort mode
+       these swap to 确定顺序 + 取消 (visibility driven by renderParamOrder()). */
+    D.paramsSave = el("button", BTN_SECONDARY, t("保存为默认参数"));
+    D.paramsSave.type = "button";
+    D.paramsSave.addEventListener("click", saveDefaultParams);
+    D.paramsEdit = el("button", BTN_SECONDARY, t("调整顺序"));
+    D.paramsEdit.type = "button";
+    D.paramsEdit.addEventListener("click", toggleParamOrder);
+    D.paramsConfirm = el("button", BTN_PRIMARY, t("确定顺序"));
+    D.paramsConfirm.type = "button";
+    D.paramsConfirm.addEventListener("click", confirmParamOrder);
+    D.paramsCancel = el("button", BTN_SECONDARY, t("取消"));
+    D.paramsCancel.type = "button";
+    D.paramsCancel.addEventListener("click", cancelParamOrder);
+    actions.append(D.paramsSave, D.paramsEdit, D.paramsConfirm, D.paramsCancel);
+    D.params.append(D.paramsCard, D.promptBox);
+    contentRow.appendChild(D.params);
 
     /* wheel zoom + background pan, matching Vue Flow's default preview gestures */
     D.viewport.addEventListener("wheel", (event) => {
@@ -1082,6 +1243,7 @@
       D.catLabel.textContent = cat(S.category);
       if (D.catMenu && !D.catMenu.hidden) openCatMenu();
     }
+    renderParamOrder();
   }
 
   /* ------------------------- category dropdown ------------------------- */
@@ -1418,6 +1580,502 @@
     return { nodes, edges };
   }
 
+  /* ---------------- exposed-parameter order panel ---------------- */
+
+  /* One row per exposed field, in S.fields order (= fields.json = the node's
+     settings popover order). Each row is a verbatim port of the node popover's
+     WidgetGrid row, so the controls here look EXACTLY like the node's
+     「API 参数」panel (number steppers / combobox / switch / text input). The
+     only extra is the grip column, revealed while reordering. */
+  const FIELD_VALUE = (field) => (field && field.default !== undefined && field.default !== null
+    ? field.default : (field?.options?.[0] ?? ""));
+  /* Mutating a field object in place would also mutate orderSnapshot's shallow
+     copy (see toggleParamOrder) and lose the ability to cancel. So every edit
+     REPLACES the array slot with a new object carrying the new default. */
+  const setFieldDefault = (index, value, silent) => {
+    const field = S.fields[index];
+    if (!field) return;
+    const next = S.fields.slice();
+    next[index] = { ...field, default: value };
+    S.fields = next;
+    S.fieldsDirty = true;
+    /* The prompt textarea edits while typing — rebuilding the list here would
+       steal focus on every keystroke. Its value is already in the DOM. */
+    if (!silent) renderParamOrder();
+    else D.paramsSave && (D.paramsSave.disabled = false);
+  };
+  /* Numeric controls step by the field's own step, clamped to min/max. */
+  const stepFieldNum = (field, dir) => {
+    const cur = Number(FIELD_VALUE(field));
+    const step = Number(field?.step) > 0 ? Number(field.step) : 1;
+    let value = (Number.isFinite(cur) ? cur : 0) + dir * step;
+    const min = Number(field?.min), max = Number(field?.max);
+    if (Number.isFinite(min)) value = Math.max(min, value);
+    if (Number.isFinite(max)) value = Math.min(max, value);
+    /* Match the current value's integer/float nature (seed is an int). */
+    const base = FIELD_VALUE(field);
+    if (typeof base === "number" && Number.isInteger(base)) value = Math.round(value);
+    return value;
+  };
+
+  function fieldTextLocal(field) {
+    const value = FIELD_VALUE(field);
+    if (typeof value === "boolean") return value ? t("开") : t("关");
+    if (value === "" || value === null || value === undefined) return "";
+    const num = Number(value);
+    if (!Number.isFinite(num)) return String(value);
+    const step = String(field?.step ?? "");
+    const dot = step.indexOf(".");
+    const digits = dot < 0 ? 0 : step.length - dot - 1;
+    return digits > 0 ? num.toFixed(Math.min(digits, 6)) : String(num);
+  }
+  function fieldFillLocal(field) {
+    const min = Number(field?.min), max = Number(field?.max), step = Number(field?.step);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step <= 0) return 0;
+    if (max <= min || (max - min) / step >= 100) return 0;
+    return Math.max(0, Math.min(1, (Number(FIELD_VALUE(field)) - min) / (max - min))) * 100;
+  }
+
+  /* ---------------- widget popups (field dropdown / control chooser) ------
+     The node's combobox and the 随机 button both OPEN a menu hosted on the
+     node root (the settings card scrolls, so an in-menu child would be
+     clipped). Do the same here: one menu at a time, mounted on the dialog's
+     panel, positioned from the trigger rect, closed by outside press / Escape.
+     Skins are the node's own class strings — 1:1 with the node. */
+  let widgetMenu = null, widgetAnchor = null, widgetDocDown = null, widgetDocKey = null;
+  function closeWidgetMenu() {
+    if (widgetMenu) { widgetMenu.remove(); widgetMenu = null; }
+    if (widgetAnchor) { delete widgetAnchor.dataset.acOpen; widgetAnchor = null; }
+    if (widgetDocDown) {
+      document.removeEventListener("pointerdown", widgetDocDown, true);
+      widgetDocDown = null;
+    }
+    if (widgetDocKey) {
+      window.removeEventListener("keydown", widgetDocKey, true);
+      widgetDocKey = null;
+    }
+  }
+  function openWidgetMenu(anchor, menu) {
+    const reopening = widgetAnchor === anchor && widgetMenu && widgetMenu.className === menu.className;
+    closeWidgetMenu();
+    if (reopening) return null;
+    (ui?.panel || document.body).appendChild(menu);
+    widgetMenu = menu; widgetAnchor = anchor; anchor.dataset.acOpen = "1";
+    /* Keep gestures inside the menu off the dialog (mask / Escape / close). */
+    ["pointerdown", "mousedown", "dblclick", "wheel"].forEach((kind) =>
+      menu.addEventListener(kind, (event) => event.stopPropagation()));
+    widgetDocDown = (event) => {
+      if (menu.contains(event.target) || anchor.contains(event.target)) return;
+      closeWidgetMenu();
+    };
+    widgetDocKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.stopImmediatePropagation(); event.preventDefault();
+      closeWidgetMenu();
+    };
+    document.addEventListener("pointerdown", widgetDocDown, true);
+    window.addEventListener("keydown", widgetDocKey, true);
+    /* Flush into layout before measuring so the menu has its real size. */
+    const r = anchor.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.round(Math.min(Math.max(8, r.left), innerWidth - mw - 8)) + "px";
+    menu.style.top = (r.bottom + mh > innerHeight - 8
+      ? Math.max(8, Math.round(r.top - mh - 4))
+      : Math.round(r.bottom + 4)) + "px";
+    return menu;
+  }
+  /* The node's searchable combobox listbox, verbatim classes. */
+  function openSelectMenu(anchor, field, index) {
+    const menu = el("div", "icn__gpa-fsel ac-widget-menu");
+    const searchRow = el("div", "icn__sel-search");
+    const searchIcon = el("span", "shrink-0"); searchIcon.innerHTML = ICO.search;
+    const search = el("input", "icn__sel-searchinput");
+    search.type = "text"; search.placeholder = t("搜索选项…"); search.spellcheck = false;
+    searchRow.append(searchIcon, search);
+    const list = el("div", "max-h-56 overflow-y-auto p-1 text-xs");
+    menu.append(searchRow, list);
+    if (!openWidgetMenu(anchor, menu)) return;
+    const opts = (S.fields[index]?.options || []).map(String);
+    const paint = () => {
+      list.replaceChildren();
+      const q = String(search.value || "").trim().toLowerCase();
+      const hits = q ? opts.filter((o) => o.toLowerCase().includes(q)) : opts;
+      hits.forEach((opt) => {
+        const current = String(FIELD_VALUE(S.fields[index]) ?? "") === opt;
+        const item = el("button", "flex h-8 w-full cursor-pointer items-center justify-between gap-3 "
+          + "rounded-sm border-0 bg-transparent p-2 text-left outline-none select-none hover:bg-secondary "
+          + (current ? "bg-primary/20 hover:bg-primary/20" : ""));
+        item.type = "button";
+        item.appendChild(el("span", "truncate", opt));
+        if (current) { const tick = el("span", "size-3.5 shrink-0"); tick.innerHTML = ICO.check; item.appendChild(tick); }
+        item.addEventListener("click", (event) => {
+          event.stopPropagation(); closeWidgetMenu();
+          setFieldDefault(index, opt);
+        });
+        list.appendChild(item);
+      });
+      if (!hits.length) list.appendChild(el("div", "p-2 text-xs text-muted-foreground", t("未找到匹配的选项")));
+    };
+    search.addEventListener("input", paint);
+    paint();
+    search.focus();
+  }
+  /* The node's ValueControlPopover: what happens to this 随机数 each run.
+     The chosen mode is stored on the exposed field and saved with fields.json. */
+  const CONTROL_MODES = [
+    { mode: "fixed", icon: "pencilOff", title: "固定值", desc: "数值不变" },
+    { mode: "increment", text: "+1", title: "递增值", desc: "数值+1或切换到下一个选项" },
+    { mode: "decrement", text: "-1", title: "递减值", desc: "数值-1或切换到上一个选项" },
+    { mode: "randomize", icon: "shuffle", title: "随机值", desc: "每次运行后随机化该值" },
+  ];
+  const fieldMode = (field) => field?.controlMode || "randomize";
+  function openControlMenu(anchor, field, index) {
+    const menu = el("div", "icn__gpa-modes ac-widget-menu");
+    const inner = el("div", "w-full space-y-2 p-2");
+    const intro = el("div", "px-1 pb-0.5 text-xs/tight text-muted-foreground");
+    intro.append(document.createTextNode(t("自动更新该值") + " "),
+      el("span", "font-medium text-foreground", t("之后")),
+      document.createTextNode(" " + t("正在运行工作流：")));
+    const group = el("div", "flex flex-col gap-0.5");
+    inner.append(intro, group); menu.appendChild(inner);
+    if (!openWidgetMenu(anchor, menu)) return;
+    CONTROL_MODES.forEach((entry) => {
+      const active = fieldMode(S.fields[index]) === entry.mode;
+      const row = el("div", "flex w-full items-center justify-between gap-2 rounded-md px-1 py-1.5 text-left");
+      const main = el("button", "flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 "
+        + "bg-transparent p-0 text-left text-wrap");
+      const tile = el("span", "flex size-6 shrink-0 items-center justify-center rounded-md border "
+        + "border-solid border-border/50 bg-secondary");
+      if (entry.icon) tile.innerHTML = ICO[entry.icon];
+      else tile.appendChild(el("span", "text-xs font-normal text-foreground", entry.text));
+      const copy = el("span", "flex min-w-0 flex-1 flex-col text-xs/tight font-normal");
+      copy.append(el("span", "text-foreground", t(entry.title)), el("span", "text-muted-foreground", t(entry.desc)));
+      main.append(tile, copy);
+      const radio = el("button", "inline-flex size-3.5 shrink-0 cursor-pointer items-center justify-center "
+        + "rounded-full border border-solid bg-transparent outline-none "
+        + (active ? "border-primary" : "border-border"));
+      if (active) radio.appendChild(el("span", "block size-1.5 rounded-full bg-primary"));
+      const pick = (event) => {
+        event.stopPropagation(); closeWidgetMenu();
+        const next = S.fields.slice();
+        next[index] = { ...next[index], controlMode: entry.mode };
+        S.fields = next; S.fieldsDirty = true;
+        renderParamOrder();
+      };
+      main.addEventListener("click", pick); radio.addEventListener("click", pick);
+      row.append(main, radio); group.appendChild(row);
+    });
+  }
+
+  /* Build the control cell exactly as the node popover does — but LIVE: every
+     control writes its edited value back to field.default via setFieldDefault.
+     The index is needed because that helper replaces the array slot. */
+  function buildFieldControl(field, index) {
+    const iconBtn = (glyph, title, onClick) => {
+      const b = el("button", "relative flex shrink-0 cursor-pointer items-center justify-center "
+        + "border-none aspect-square h-full rounded-none bg-transparent p-0 text-muted-foreground "
+        + "hover:bg-accent disabled:pointer-events-none disabled:opacity-30");
+      b.type = "button"; b.title = t(title); b.innerHTML = glyph;
+      b.tabIndex = -1;
+      if (onClick) b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); });
+      return b;
+    };
+    const type = field?.type;
+    if (type === "number" || type === "slider" || type === "random") {
+      const box = el("div", "relative flex w-full items-stretch overflow-hidden rounded-md "
+        + "bg-input text-xs text-foreground h-6");
+      const clip = el("span", "pointer-events-none absolute inset-0 overflow-clip rounded-md");
+      const fill = el("span", "block size-full bg-primary/15");
+      fill.style.width = fieldFillLocal(field) + "%";
+      clip.appendChild(fill);
+      const numWrap = el("div", "relative my-0.25 min-w-[4ch] flex-1 py-1.5");
+      const input = el("input", "absolute inset-0 truncate border-0 bg-transparent p-1 text-left text-xs focus:outline-0");
+      input.type = "text"; input.inputMode = "decimal";
+      input.value = fieldTextLocal(field);
+      input.spellcheck = false;
+      const commit = () => {
+        const parsed = Number(input.value);
+        if (!Number.isFinite(parsed)) { input.value = fieldTextLocal(S.fields[index]); return; }
+        setFieldDefault(index, parsed);
+      };
+      input.addEventListener("change", commit);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); commit(); }
+        if (event.key === "ArrowUp") { event.preventDefault(); setFieldDefault(index, stepFieldNum(S.fields[index], 1)); }
+        if (event.key === "ArrowDown") { event.preventDefault(); setFieldDefault(index, stepFieldNum(S.fields[index], -1)); }
+      });
+      numWrap.appendChild(input);
+      box.append(clip,
+        iconBtn(ICO.minus, "减少", () => setFieldDefault(index, stepFieldNum(S.fields[index], -1))),
+        numWrap);
+      if (type === "random") {
+        const modeEntry = CONTROL_MODES.find((m) => m.mode === fieldMode(field)) || CONTROL_MODES[3];
+        /* Match the node's ValueControlButton: 固定值 = transparent/grey glyph,
+           every other mode = blue capsule. Glyph size-3 (12px), not 16px. */
+        const badge = el("button", "mr-1 flex h-4.5 w-8 shrink-0 cursor-pointer items-center "
+          + "justify-center self-center rounded-full border-none "
+          + (modeEntry.mode === "fixed"
+            ? "bg-transparent text-muted-foreground hover:bg-accent"
+            : "bg-primary/30 text-primary hover:bg-primary/27"));
+        badge.type = "button"; badge.tabIndex = -1;
+        badge.title = t(modeEntry.title) + t("：点击切换控制方式");
+        if (modeEntry.icon) {
+          badge.innerHTML = ICO[modeEntry.icon].replace('width="16" height="16"', 'width="12" height="12"');
+        } else badge.appendChild(el("span", "text-xs font-normal", modeEntry.text));
+        /* The badge is NOT "randomize now" — it OPENS the value-control chooser,
+           exactly like the host's ValueControlButton. */
+        badge.addEventListener("click", (event) => {
+          event.stopPropagation(); openControlMenu(badge, field, index);
+        });
+        box.appendChild(badge);
+      }
+      box.appendChild(iconBtn(ICO.plus, "增加", () => setFieldDefault(index, stepFieldNum(S.fields[index], 1))));
+      return box;
+    }
+    if (type === "select") {
+      const box = el("div", "flex w-full min-w-0 items-center overflow-hidden rounded-md "
+        + "bg-input text-foreground h-6 hover:bg-accent");
+      const btn = el("button", "flex min-w-0 flex-1 cursor-pointer items-center overflow-hidden "
+        + "border-none bg-transparent p-0 outline-none");
+      btn.type = "button";
+      const label = el("span", "min-w-[4ch] flex-1 truncate pr-1 pl-2 text-left text-xs",
+        String(FIELD_VALUE(field) ?? ""));
+      btn.appendChild(label);
+      const chev = el("button", "flex h-full w-6 shrink-0 cursor-pointer items-center justify-center "
+        + "border-none bg-transparent outline-none");
+      chev.type = "button"; chev.innerHTML = ICO.chevron;
+      /* Host WidgetSelectDefault: click OPENS a searchable listbox (never a
+         silent cycle), with the same classes as the node's own dropdown. */
+      const pick = (event) => { event.stopPropagation(); openSelectMenu(box, field, index); };
+      btn.setAttribute("role", "combobox");
+      btn.addEventListener("click", pick);
+      chev.addEventListener("click", pick);
+      box.append(btn, chev);
+      return box;
+    }
+    if (type === "switch") {
+      const wrap = el("div", "-m-1 ml-auto flex w-fit items-center gap-2 rounded-full p-1");
+      const on = FIELD_VALUE(field) === true || FIELD_VALUE(field) === "true";
+      const btn = el("button", "group inline-flex h-6 w-10 shrink-0 cursor-pointer touch-manipulation "
+        + "items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none "
+        + "transition-shadow focus-visible:ring-1 focus-visible:ring-ring");
+      btn.type = "button"; btn.dataset.state = on ? "checked" : "unchecked";
+      const track = el("span", "pointer-events-none inline-flex h-5 w-9 items-center rounded-full "
+        + "border border-transparent bg-border px-0.5 transition-colors group-data-[state=checked]:bg-primary");
+      const knob = el("span", "pointer-events-none block size-4 rounded-full bg-background shadow-sm "
+        + "transition-transform data-[state=checked]:translate-x-3.5 data-[state=unchecked]:translate-x-0");
+      knob.dataset.state = on ? "checked" : "unchecked";
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setFieldDefault(index, !(FIELD_VALUE(S.fields[index]) === true || FIELD_VALUE(S.fields[index]) === "true"));
+      });
+      track.appendChild(knob); btn.appendChild(track); wrap.appendChild(btn);
+      return wrap;
+    }
+    /* text / textarea / fallback */
+    const input = el("input", "flex w-full min-w-0 appearance-none rounded-md border-none bg-input "
+      + "px-2 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:ring-1 "
+      + "focus-visible:ring-ring focus-visible:outline-none");
+    input.value = String(FIELD_VALUE(field) ?? "");
+    input.spellcheck = false;
+    input.addEventListener("change", (event) => setFieldDefault(index, event.target.value));
+    return input;
+  }
+
+  /* Same advanced/basic split as infcanvas-flow.js: an explicit `advanced`
+     flag wins; legacy fields fall back to the basic-label whitelist. */
+  const BASIC_LABELS = ["提示词优化", "提示词", "高宽比", "百万像素", "放大倍数", "种子"];
+  const isAdvancedField = (field) => (typeof field?.advanced === "boolean"
+    ? field.advanced
+    : !BASIC_LABELS.includes(String(field?.label || "").trim()));
+
+  /* The prompt is the node's OWN main text area, never a row in the API 参数
+     card. This is the exact mirror of infcanvas-flow.js's promptField(): it
+     matches the exposed field labelled 提示词/prompt (or a prompt-ish key),
+     excluding negative/系统 prompts. Returns the field with its S.fields index. */
+  function findPromptField() {
+    const isText = (f) => f?.type === "text" || f?.type === "textarea";
+    const texts = S.fields.map((field, index) => ({ field, index })).filter((e) => isText(e.field));
+    return texts.find((e) => /^(提示词|prompt)$/i.test(String(e.field.label || "").trim()))
+      || texts.find((e) => !/negative|负面|system|系统|task[\s_-]?prompt/i.test(String(e.field.label || ""))
+        && /^(prompt|positive|positive_prompt|prompt_text|caption|text)$/i.test(String(e.field.key || "")))
+      || null;
+  }
+
+  /* Standalone prompt textarea below the card, using the node panel's exact
+     classes (icn__gpa-inputs/box/label/area) so it is pixel-identical. */
+  function renderPromptArea() {
+    if (!D.promptBox) return;
+    const hit = findPromptField();
+    D.promptBox.replaceChildren();
+    if (!hit) { D.promptBox.hidden = true; return; }
+    D.promptBox.hidden = false;
+    const box = el("label", "icn__gpa-box");
+    box.appendChild(el("span", "icn__gpa-label", hit.field.label || t("提示词")));
+    const area = el("textarea", "icn__gpa-area icn__gpa-area--a");
+    area.value = String(FIELD_VALUE(hit.field) ?? "");
+    area.spellcheck = false;
+    area.placeholder = t("描述你想要生成的内容…");
+    area.addEventListener("input", (event) => setFieldDefault(hit.index, event.target.value, true));
+    box.appendChild(area);
+    D.promptBox.appendChild(box);
+  }
+
+  function toggleParamsAdvanced() {
+    S.paramsShowAdvanced = !S.paramsShowAdvanced;
+    renderParamOrder();
+  }
+
+  function renderParamOrder() {
+    if (!D.paramsList) return;
+    const editing = S.orderEditing;
+    D.params.classList.toggle("is-sorting", editing);
+
+    /* The prompt is rendered as its own textarea below the card — never a
+       settings row. Exclude it everywhere in the card (list, badge, ordering),
+       exactly as the node's apiBarFields skips promptField. */
+    renderPromptArea();
+    const promptHit = findPromptField();
+    const cardFields = promptHit ? S.fields.filter((f) => f !== promptHit.field) : S.fields;
+    /* Node's widget split: visible fields = all when expanded, else basics. */
+    const advanced = cardFields.filter(isAdvancedField);
+    const visible = S.paramsShowAdvanced ? cardFields : cardFields.filter((f) => !isAdvancedField(f));
+    /* Badge shows the VISIBLE count, exactly like the node's popcnt. */
+    D.paramsCount.textContent = visible.length ? String(visible.length) : "";
+
+    /* Normal mode: save defaults + reorder entry. Sort mode: confirm/cancel. */
+    D.paramsSave.hidden = editing;
+    D.paramsSave.disabled = !S.fields.length;
+    D.paramsConfirm.hidden = !editing;
+    D.paramsCancel.hidden = !editing;
+    D.paramsEdit.hidden = editing || !S.fields.length;
+    D.paramsEdit.disabled = !S.fields.length;
+
+    /* NodeFooter band: only when there are advanced fields, and its label/icon
+       mirror the node (隐藏/显示高级输入 + chevron-up / settings-2). */
+    D.paramsMore.hidden = !advanced.length;
+    if (advanced.length) {
+      D.paramsMoreLabel.textContent = t(S.paramsShowAdvanced ? "隐藏高级输入" : "显示高级输入");
+      D.paramsMoreIcon.innerHTML = S.paramsShowAdvanced ? ICO.chevronUp : ICO.settings2;
+      D.paramsMoreBtn.title = (D.paramsMoreLabel.textContent) + "（" + advanced.length + " " + t("项") + "）";
+    }
+
+    /* The node popover's body: WidgetGrid + host bg/text classes verbatim. */
+    const grid = el("div", "icn__gpa-body lg-node-widgets grid "
+      + "grid-cols-[min-content_minmax(80px,min-content)_minmax(125px,1fr)] gap-y-1 "
+      + "bg-node pt-4 pr-3 pb-3 text-xs text-node-foreground rounded-b-xl");
+    D.paramsList.replaceChildren();
+    if (!cardFields.length) {
+      D.paramsEmpty.hidden = false;
+      D.paramsList.appendChild(D.paramsEmpty);
+      return;
+    }
+    D.paramsEmpty.hidden = true;
+    /* Iterate visible fields but keep the ORIGINAL index for drag + edits. */
+    visible.forEach((field) => {
+      const index = S.fields.indexOf(field);
+      const row = el("div", "group col-span-full grid grid-cols-subgrid items-stretch ac-prow"
+        + (!editing && S.orderDrag === index ? " is-dragging" : "")
+        + (editing && S.orderDrop === index && S.orderDrag !== index ? " is-drop" : ""));
+      row.dataset.index = String(index);
+      /* native WidgetGrid has an empty w-3 first cell; the grip lives there. */
+      const grip = el("div", "ac-prow-grip z-10 flex items-stretch w-3");
+      grip.innerHTML = ICO.grip;
+      const wrap = el("div", "col-span-2 grid min-w-0 grid-cols-subgrid justify-between gap-2");
+      const label = el("div", "content-center-safe truncate", field.label || fieldKey(field.nodeId, field.key));
+      label.title = field.label || fieldKey(field.nodeId, field.key);
+      const cell = el("div", "relative min-w-0 flex-1");
+      const inner = el("div", "min-w-0 cursor-default rounded-md transition-all");
+      inner.appendChild(buildFieldControl(field, index));
+      cell.appendChild(inner);
+      wrap.append(label, cell);
+      row.append(grip, wrap);
+      if (editing) {
+        row.draggable = true;
+        row.addEventListener("dragstart", (event) => onOrderDragStart(event, index));
+        row.addEventListener("dragover", (event) => onOrderDragOver(event, index));
+        row.addEventListener("drop", (event) => onOrderDrop(event, index));
+        row.addEventListener("dragend", onOrderDragEnd);
+      }
+      grid.appendChild(row);
+    });
+    D.paramsList.appendChild(grid);
+  }
+
+  function toggleParamOrder() {
+    if (!S.fields.length) return;
+    S.orderEditing = true;
+    S.orderSnapshot = S.fields.slice();
+    S.orderDrag = -1; S.orderDrop = -1;
+    renderParamOrder();
+  }
+
+  function restoreOrderClasses() {
+    if (!D.paramsList) return;
+    D.paramsList.querySelectorAll(".ac-prow").forEach((row) => {
+      const index = Number(row.dataset.index);
+      row.classList.toggle("is-dragging", S.orderDrag === index);
+      row.classList.toggle("is-drop", S.orderDrop === index && S.orderDrag !== index);
+    });
+  }
+  function onOrderDragStart(event, index) {
+    S.orderDrag = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    }
+    restoreOrderClasses();
+  }
+  function onOrderDragOver(event, index) {
+    if (S.orderDrag < 0) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    if (S.orderDrop !== index) { S.orderDrop = index; restoreOrderClasses(); }
+  }
+  function onOrderDrop(event, index) {
+    event.preventDefault();
+    const from = S.orderDrag;
+    S.orderDrag = -1; S.orderDrop = -1;
+    if (from < 0 || from === index) { renderParamOrder(); return; }
+    const list = [...S.fields];
+    const [moved] = list.splice(from, 1);
+    list.splice(index, 0, moved);
+    S.fields = list;
+    renderParamOrder();
+  }
+  function onOrderDragEnd() {
+    S.orderDrag = -1; S.orderDrop = -1;
+    restoreOrderClasses();
+  }
+
+  /* Save the default values edited in the right-hand panel (S.fields carries
+     the new defaults). saveFields() persists both the defaults and the current
+     row order to the workflow; the editor stays in normal mode. */
+  async function saveDefaultParams() {
+    if (S.orderEditing || !S.fields.length) return;
+    const ok = await saveFields();
+    if (ok) notify(t("默认参数已保存"));
+  }
+
+  async function confirmParamOrder() {
+    if (!S.orderEditing) return;
+    const ok = await saveFields();
+    if (!ok) return;                       /* save failed: stay in edit mode */
+    S.orderEditing = false;
+    S.orderSnapshot = null;
+    S.orderDrag = -1; S.orderDrop = -1;
+    renderParamOrder();
+    notify(t("参数顺序已保存"));
+  }
+
+  function cancelParamOrder() {
+    if (S.orderSnapshot) S.fields = S.orderSnapshot.slice();
+    S.orderEditing = false;
+    S.orderSnapshot = null;
+    S.orderDrag = -1; S.orderDrop = -1;
+    renderParamOrder();
+  }
+
   function renderPreview() {
     if (!D.scene) return;
     const { nodes, edges } = layout();
@@ -1680,12 +2338,8 @@
         head.appendChild(advLabel);
       }
 
-      const def = el("span", "ml-2 min-w-0 shrink truncate text-xs text-muted-foreground",
-        t("默认值:") + " " + (entry.draft === "" ? '""' : entry.draft));
-      def.title = entry.draft;
-      /* A prompt is 200 characters long; without a ceiling it eats the row. */
-      def.style.maxWidth = "40%";
-      head.appendChild(def);
+      /* Default value is edited ONLY in the right-hand API 参数 panel now;
+         the inspector no longer shows an inline default row. */
       item.appendChild(head);
 
       const detail = el("div", "mt-2 flex flex-col gap-2 border-t pt-2");
@@ -1711,51 +2365,7 @@
         row.append(select, labelInput);
         detail.appendChild(row);
 
-        /* 默认值：这里显示的就是模板里这个输入自己的值，改动会在面板里的
-           「保存」时写回工作流文件——节点没手动改过的参数就直接显示新值，运行也用
-           新值，所以不需要第二份副本。类型跟着原值走：下拉 / 开关给选择器，
-           其余给文本框；{{image}} 这类占位符运行时才填，禁用编辑。 */
-        const defRow = el("label", "flex items-center gap-2 text-xs text-muted-foreground");
-        defRow.setAttribute("data-def-row", entry.key);
-        defRow.appendChild(el("span", "shrink-0", t("默认值")));
-        const setDraft = (text) => {
-          entry.draft = text;
-          def.textContent = t("默认值:") + " " + (text === "" ? '""' : text);
-          def.title = text;
-          syncNodeFields();
-        };
-        const DEF_INPUT = "h-6 min-w-0 flex-1 rounded-md border-0 bg-input px-2 text-xs text-foreground "
-          + "outline-none focus-visible:ring-1 focus-visible:ring-ring";
-        const isBoolField = entry.type === "switch" || typeof entry.original === "boolean";
-        if (entry.placeholder) {
-          const ro = el("input", DEF_INPUT + " cursor-not-allowed opacity-60");
-          ro.value = entry.draft;
-          ro.disabled = true;
-          defRow.appendChild(ro);
-          defRow.appendChild(el("span", "shrink-0 text-xs text-muted-foreground", t("运行时由连线填")));
-        } else if (entry.type === "select" || isBoolField) {
-          const pick = el("select", DEF_INPUT + " cursor-pointer");
-          const choices = isBoolField ? ["true", "false"] : entry.options.slice();
-          if (!choices.includes(entry.draft)) choices.unshift(entry.draft);
-          for (const value of choices) {
-            const option = document.createElement("option");
-            option.value = value;
-            option.textContent = value === "" ? t("（空）") : value;
-            if (value === entry.draft) option.selected = true;
-            pick.appendChild(option);
-          }
-          pick.addEventListener("change", () => setDraft(pick.value));
-          defRow.appendChild(pick);
-        } else {
-          const input = el("input", DEF_INPUT);
-          input.value = entry.draft;
-          input.spellcheck = false;
-          input.placeholder = t("模板里的值");
-          input.addEventListener("input", () => setDraft(input.value));
-          defRow.appendChild(input);
-        }
-        detail.appendChild(defRow);
-
+        /* Default value is edited in the right-hand API 参数 panel, not here. */
         if (entry.type === "select") {
           const options = el("div", "flex flex-col gap-2");
           entry.options.forEach((value, index) => {
@@ -1907,6 +2517,8 @@
       mask, panel,
       setApiReady(ready) { banner.hidden = ready !== false; },
       close() {
+        closeWidgetMenu();
+        closeCatMenu && closeCatMenu();
         document.removeEventListener("keydown", onKey, true);
         mask.remove();
         ui = null;

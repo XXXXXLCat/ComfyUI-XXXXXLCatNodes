@@ -169,6 +169,9 @@ import {
     groups: ref([]),
     groupEditing: ref(null),          // { id, value } while a group title is being renamed
     selectedGroupIds: ref([]),        // groups may join a multi-selection alongside nodes
+    /* Groups that currently satisfy the drop-in condition while nodes are
+       being dragged; rendered with the same highlight as a selected group. */
+    dropTargetGroupIds: ref([]),
     viewport: ref({ x: 0, y: 0, zoom: 1 }),
     mode: ref("select"),              // "select" | "drag"
     minimap: ref(false),
@@ -325,6 +328,10 @@ import {
       + '<circle cx="17" cy="17" r="3" stroke="currentColor" stroke-width="1.7" fill="none"/>'
       + '<circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.7" fill="none"/>',
     check: '<path d="M4.5 12.5 L9.5 17.5 L19.5 6.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    /* lucide tag — the header's "add label" control. One colour capsule per
+       node, picked from NODE_TAGS; the tag replaces this icon in place. */
+    tag: '<path d="M12.586 2.586a2 2 0 0 0-1.414-.586H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<circle cx="7.5" cy="7.5" r="1.3" fill="currentColor"/>',
     /* lucide minus / plus — ScrubableNumberInput's decrement & increment */
     minus: '<path d="M5 12 H19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
     plus: '<path d="M12 5 V19 M5 12 H19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
@@ -565,6 +572,19 @@ import {
      API dropdown filters to (see activeCategory); the actual generation uses
      the same generate.run path as every other generator. */
   const TEXT_MODES = ["智能对话", "语音转录"];
+  /* Node label palette — a single tag per node, chosen from this fixed list.
+     Order is the picker order; `name` is persisted in data.tag (an internal
+     key, like category), the capsule shows the localised name via $t. */
+  const NODE_TAGS = [
+    { name: "角色", color: "#FF4B4B" },
+    { name: "场景", color: "#FF9F43" },
+    { name: "道具", color: "#FFD93D" },
+    { name: "风格参考", color: "#6BCB77" },
+    { name: "分镜", color: "#4D96FF" },
+    { name: "参考", color: "#6C63FF" },
+    { name: "其他", color: "#B56CFF" },
+  ];
+  const TAG_BY_NAME = Object.fromEntries(NODE_TAGS.map((item) => [item.name, item]));
   /* Which SOURCE kinds each generator kind accepts, on the node-type level.
      This is the same contract audioWireReason / imageWireReason enforce, in
      table form: the wire-release menu reads it to list only the node types
@@ -624,6 +644,10 @@ import {
     const d = node?.data;
     if (!d) return null;
     if (d.role === "lora") return "lora";
+    /* Cleanup pills pass whatever flows through them; advertise as "lora" so
+       every generator already accepts them and incomingKindCounts ignores them
+       (a cleanup wire must never change a generator's available modes). */
+    if (d.role === "cleanup") return "lora";
     if (d.role === "text") return "text";
     return d.asset?.kind || d.result?.kind || d.kind || null;
   }
@@ -1383,6 +1407,13 @@ import {
          re-render this very node in place. */
       const isMedia = data.role === "media";
       const isGen = computed(() => isMedia && !data.asset);
+      /* Generation frame states (mutually exclusive, all outrank the white
+         selection ring): queued = yellow, running/sampling = azure, error =
+         red. queued is the window between submit and execution_start, so it is
+         status=running paired with genPhase=queued. */
+      const isWaiting = computed(() => isGen.value && data.status === "running" && data.genPhase === "queued");
+      const isError = computed(() => isGen.value && data.status === "error");
+      const isRunningFrame = computed(() => isGen.value && data.status === "running" && !isWaiting.value);
       /* Text nodes are their own role (neither media nor generator): they keep
          the asset-style frameless look but also accept an input handle. */
       const isText = data.role === "text";
@@ -1390,6 +1421,9 @@ import {
          plain data.role flag (not a Vue nodeType) so it shares the frame, resize
          grips, selection ring and out-handle with every other node. */
       const isLora = data.role === "lora";
+      /* Quick-cleanup pill: a 30px solid bar with one AnyType socket on each
+         end. Clicking the bar runs the cleanup (no generator panel involved). */
+      const isCleanup = data.role === "cleanup";
       /* A material node shows its material; a generator shows its last result.
          Material wins: once a node flips to material it never flips back, so a
          stale result can never shadow the file the user dropped on it. */
@@ -1460,18 +1494,38 @@ import {
       const loraFitHeight = (n) => HEAD_H + Math.max(
         LORA_DEF_BODY_H, LORA_CHROME + Math.max(0, n) * LORA_ROW_H + Math.max(0, n - 1) * LORA_ROW_GAP
       );
+      /* Live sample preview (ComfyUI b_preview stream) is written to data.genPreviewUrl
+         by core.js/genProgress. Its natural aspect drives the running node height;
+         measured on img load, cleared implicitly when genPreviewUrl resets. */
+      const genPreviewH = ref(0);
       const size = computed(() => Array.isArray(data.size) ? data.size : [480, 270]);
-      const bodyH = computed(() => isLora
-        ? Math.max(80, size.value[1] - HEAD_H, loraFitHeight(loras.value.length) - HEAD_H)
-        : Math.max(80, size.value[1] - HEAD_H));
+      /* While a generator is running, the HEADER band doubles as the progress bar
+         and the body shows the live sample preview with one text row floating at
+         its top. The instant generation starts there is no sample yet: keep the
+         node at its normal stored content height (don't collapse to the thin text
+         strip). Once a sample arrives, size to the image's aspect ratio. Restore
+         the stored size on completion. Ports stay centred via handleTop. */
+      const GEN_RUN_BODY_H = 40; // absolute floor: one 16px text row + breathing room
+      const bodyH = computed(() => {
+        if (isCleanup) return 0; // the whole pill IS the title bar — no body
+        if (isGen.value && data.status === "running") {
+          return data.genPreviewUrl && genPreviewH.value > 0
+            ? Math.max(GEN_RUN_BODY_H, genPreviewH.value)
+            : Math.max(GEN_RUN_BODY_H, size.value[1] - HEAD_H);
+        }
+        return isLora
+          ? Math.max(80, size.value[1] - HEAD_H, loraFitHeight(loras.value.length) - HEAD_H)
+          : Math.max(80, size.value[1] - HEAD_H);
+      });
       const rootStyle = computed(() => ({
-        width: Math.max(isLora ? LORA_MIN_W : 0, size.value[0]) + "px",
-        height: bodyH.value + HEAD_H + "px",
+        width: Math.max(isCleanup ? 160 : isLora ? LORA_MIN_W : 0, size.value[0]) + "px",
+        height: (isCleanup ? 30 : bodyH.value + HEAD_H) + "px",
       }));
       /* Ports sit on the body, not on the card: keep them centred on the content
-         area so a wire never lands on the header edge. */
+         area so a wire never lands on the header edge. A cleanup pill has no body,
+         so its single socket sits dead centre of the 30px bar. */
       const handleTop = (index, count = 1) =>
-        `calc(50% + ${HEAD_H / 2 + (index - (count - 1) / 2) * SLOT_STEP}px)`;
+        isCleanup ? "50%" : `calc(50% + ${HEAD_H / 2 + (index - (count - 1) / 2) * SLOT_STEP}px)`;
 
       /* ---- resize (four corners) ---- */
       /* `corner` is a compass label: "nw" | "ne" | "sw" | "se". Each handle
@@ -1502,8 +1556,8 @@ import {
         /* LoRA stacks share the 320px media floor and a content-derived height
            floor (never smaller than fitHeight for the current row count), so a
            manual resize can't shrink them back over their own rows. */
-        const MINW = (isMediaLike || isLora) ? ASSET_MIN_W : 160;
-        const MINH = isLora
+        const MINW = isCleanup ? 160 : (isMediaLike || isLora) ? ASSET_MIN_W : 160;
+        const MINH = isCleanup ? 30 : isLora
           ? loraFitHeight(loras.value.length)
           : HEAD_H + 80;
         resizing.value = corner;
@@ -1664,6 +1718,7 @@ import {
         key === "prompt" ? { prompt: value, promptEdited: true } : { [key]: value }
       );
       const run = () => NS.generate?.run?.(props.id);
+      const cancelGen = () => NS.generate?.cancel?.(props.id);
       /* Generate-node control bar: compact selects mirroring the reference
          video-generator toolbar, wired to this node's real parameters. */
       /* Image generator has two categories mirroring the API workflow
@@ -2070,6 +2125,24 @@ import {
         const digits = own === undefined || own === null || own === ""
           ? decimalsOf(fieldStep(field)) : Number(own);
         return Number.isFinite(digits) && digits > 0 ? num.toFixed(Math.min(digits, 6)) : String(num);
+      };
+      /* 底部设置行的只读摘要：只取普通（非高级）参数，圆点分隔显示当前值。
+         编辑仍走齿轮弹层；点摘要则转发到同 bar 的齿轮，定位逻辑不变。 */
+      const plainParams = computed(() => apiBarFields.value.filter((f) => !isAdvancedField(f)));
+      const paramLabel = (f) => String(f?.label || fieldId(f) || "").trim();
+      const paramText = (f) => {
+        if (!f) return "";
+        if (f.type === "switch") return fieldValue(f) ? t("开") : t("关");
+        const text = fieldText(f);
+        /* Aspect-ratio values read "16:9 (Widescreen)" from the node; the
+           bottom summary wants only the ratio, so drop the parenthesized
+           name. Restricted to "N:N (...)" so other fields are untouched. */
+        return String(text).replace(/^(\d+\s*:\s*\d+)\s*\(.*$/, "$1").trim();
+      };
+      const openSetFromBar = (event) => {
+        if (noWorkflow.value) return;
+        const btn = event?.currentTarget?.parentElement?.querySelector?.(".icn__gpa-set");
+        if (btn && !btn.disabled) btn.click();
       };
       const fieldFill = (field) => {
         const min = Number(field?.min), max = Number(field?.max), step = Number(field?.step);
@@ -2876,6 +2949,9 @@ import {
         return hit ? hit.label : (data.width || 512) + "×" + (data.height || 512);
       });
       const onSelOutside = (event) => {
+        /* Header tag palette: trigger + menu share [data-node-tag]; a press
+           elsewhere closes it. */
+        if (tagOpen.value && !event.target?.closest?.("[data-node-tag]")) tagOpen.value = false;
         /* The settings popover is its own layer: a press anywhere outside the
            gear wrapper (canvas, another node, the API picker) closes it. */
         /* The value-control chooser and the parameter listbox are popovers OF the
@@ -2901,12 +2977,13 @@ import {
         selOpen.value = null;
       };
       const onSelKey = (event) => {
-        if (!selOpen.value && !setOpen.value && !modeOpen.value && loraSelIndex.value == null) return;
+        if (!selOpen.value && !setOpen.value && !modeOpen.value && loraSelIndex.value == null && !tagOpen.value) return;
         if (event.key !== "Escape" && event.key !== "Esc") return;
         /* Swallow it: Vue Flow uses Escape for its own selection handling, which
            would deselect the node and hide the panel just because a list closed. */
         event.stopPropagation();
         event.preventDefault();
+        tagOpen.value = false;
         selOpen.value = null;
         setOpen.value = false;
         closeLoraSel();
@@ -3017,7 +3094,10 @@ import {
          can be renamed here. contenteditable rather than <input>: the capsule is
          inline-block and must grow with the text instead of being pinned to a
          guessed width. */
-      const DEFAULT_TITLE = { image: "图像", video: "视频", audio: "音频", text: "文本", lora: "LoRA 栈" };
+      const DEFAULT_TITLE = {
+        image: "图像", video: "视频", audio: "音频", text: "文本", lora: "LoRA 栈",
+        cleanup_vram: "清理显存", cleanup_ram: "清理内存", cleanup_both: "清理显存和内存",
+      };
       /* Titles are persisted as the Chinese medium name (an internal key, same
          as the category keys), but the capsule must read Text / Image / Video /
          Audio / LoRA Stack in English. Both spellings map back to the key on
@@ -3027,6 +3107,9 @@ import {
         "图像": "image", "Image": "image", "视频": "video", "Video": "video",
         "音频": "audio", "Audio": "audio", "文本": "text", "Text": "text",
         "LoRA 栈": "lora", "LoRA Stack": "lora",
+        "清理显存": "cleanup_vram", "Clear VRAM": "cleanup_vram",
+        "清理内存": "cleanup_ram", "Clear RAM": "cleanup_ram",
+        "清理显存和内存": "cleanup_both", "Clear VRAM & RAM": "cleanup_both",
         "节点": "node", "Node": "node",
       };
       const canonicalTitle = (name) => {
@@ -3078,6 +3161,20 @@ import {
         event.preventDefault();
         const text = String(event.clipboardData?.getData("text/plain") || "").replace(/\s+/g, " ");
         try { document.execCommand("insertText", false, text); } catch (error) { /* optional */ }
+      };
+
+      /* ---- header tag (one colour capsule per node) ----
+         Clicking the tag icon in the header opens a palette of NODE_TAGS. Picking
+         one stores its name in data.tag (persisted, like title); the palette
+         closes and the icon is replaced by a coloured capsule showing the same
+         name. Clicking the capsule reopens the palette to change/clear it. */
+      const tagOpen = ref(false);
+      const tagInfo = computed(() => TAG_BY_NAME[data.tag] || null);
+      const toggleTag = () => { tagOpen.value = !tagOpen.value; };
+      const pickTag = (name) => {
+        tagOpen.value = false;
+        const next = name || null;
+        if (next !== data.tag) patch({ tag: next });
       };
 
       /* Kept for extensions written against the earlier two-button build. */
@@ -3168,12 +3265,21 @@ import {
         const video = event?.target;
         fitToAsset(video?.videoWidth, video?.videoHeight);
       };
+      /* Live sample preview: size the running body to the streamed image's own
+         aspect ratio (width pinned to the node's stored width). Never touches
+         data.size so the final result keeps the frame the user configured. */
+      const onGenPreviewLoad = (event) => {
+        const img = event?.target;
+        const w = img?.naturalWidth, h = img?.naturalHeight;
+        if (!(w > 0) || !(h > 0)) return;
+        genPreviewH.value = Math.max(GEN_RUN_BODY_H, Math.round(size.value[0] * h / w));
+      };
 
       onMounted(() => nextTick(() => media.install()));
       watch(bar, (visible) => { if (visible) nextTick(() => media.install()); });
 
       return {
-        data, isGen, isText, isLora, kind, url, hasMedia, bar, size, bodyH, rootStyle, handleTop,
+        data, isGen, isWaiting, isError, isRunningFrame, isText, isLora, kind, url, hasMedia, bar, size, bodyH, rootStyle, handleTop,
         loras, loraOptions, loadLoraOptions, addLora, removeLora, setLoraName,
         setLoraStrength, stepLora, toggleLora, loraStrengthText,
         loraSelIndex, loraQuery, loraSelStyle, loraSelName, filteredLoraOptions,
@@ -3186,6 +3292,7 @@ import {
         isGenText, textModes, textMode, setTextMode, textModeReason, textModeAvailable,
         audioModeReason, audioModeAvailable, wiredAudio, wiredTextNodes, wiredText,
         apiFields, hasPromptArea, apiBarFields, visibleBarFields, advancedCount, toggleAdvanced,
+        plainParams, paramLabel, paramText, openSetFromBar,
         fieldId, fieldValue, setFieldValue,
         setOpen, toggleSet, popStyle, fieldText, fieldFill, bumpField, commitFieldNum,
         stepField, canFieldDec, canFieldInc, editingField,
@@ -3198,25 +3305,73 @@ import {
         selOpen, toggleSel, pickSel, wfValue, wfLabel, sizeLabel,
         promptEl, mention, mentionItems, closeMention, onPromptInput, hoverMention, pickMention, onPromptKeydown,
         refPreview, refMetaDuration, onRefMeta, onComposeStart, onComposeEnd, onPromptPaste, onRefOver, onRefOut,
-        setFileInput, pickFile, onPicked, acceptAttr, emptyHint, onImageLoad, onVideoMeta,
+        setFileInput, pickFile, onPicked, acceptAttr, emptyHint, onImageLoad, onVideoMeta, onGenPreviewLoad,
         emptyIcon, emptyIconSize, canUpload, hasIncoming,
         actions, onAction, editing, draft, setEditor, textHtml, startEdit, commitEdit, onEditKey,
         renaming, setNameBox, startRename, commitRename, cancelRename, onNameKey, onNamePaste, displayTitle,
-        hasText,
+        hasText, isCleanup,
+        NODE_TAGS, tagOpen, tagInfo, toggleTag, pickTag,
       };
     },
     template: `
-      <div class="icn" :class="['icn--' + data.role, { 'is-selected': selected }]" :style="rootStyle"
-           @dblclick.stop="startEdit">
-        <div class="icn__head" :title="$t('双击标题可重命名')">
+      <div class="icn" :class="['icn--' + data.role, { 'is-selected': selected, 'is-running': isRunningFrame, 'is-waiting': isWaiting, 'is-error': isError }]" :style="rootStyle"
+           :data-cleanup="isCleanup ? data.cleanupMode : null"
+           @dblclick.stop="isCleanup ? null : startEdit">
+        <div class="icn__head" :class="{ 'is-generating': isGen && data.status === 'running' }" :title="$t('双击标题可重命名')">
+          <div v-if="isGen && data.status === 'running'" class="icn__head-progress"
+               :style="{ width: Math.round((data.genProgress || 0) * 100) + '%' }"></div>
           <span v-if="renaming" :ref="setNameBox" class="icn__name icn__name--edit nodrag"
                 contenteditable="true" spellcheck="false"
                 @keydown="onNameKey" @paste="onNamePaste" @blur="commitRename"
                 @dblclick.stop @pointerdown.stop @mousedown.stop></span>
           <span v-else class="icn__name" @dblclick.stop="startRename"
           >{{ displayTitle }}</span>
+          <span class="icn__tag" data-node-tag>
+            <button v-if="!tagInfo" class="icn__tag-add nodrag nopan" type="button"
+                    :title="$t('添加标签')" @click.stop="toggleTag">
+              <IcIcon name="tag" :size="13" />
+            </button>
+            <button v-else class="icn__tag-chip nodrag nopan" type="button"
+                    :style="{ background: tagInfo.color }" :title="$t('更换标签')"
+                    @click.stop="toggleTag"><span class="icn__tag-chip-dot"></span><span class="icn__tag-chip-name">{{ $t(tagInfo.name) }}</span></button>
+          </span>
+        </div>
+        <!-- Tag palette hangs off the node root: the header clips overflow, so
+             the menu must be a sibling of .icn__head, not its child. -->
+        <div v-if="tagOpen" class="icn__tagmenu nodrag nopan" data-node-tag
+             @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+          <button v-for="tg in NODE_TAGS" :key="tg.name" type="button" class="icn__tagmenu-item"
+                  @click.stop="pickTag(tg.name)">
+            <span class="icn__tagmenu-dot" :style="{ background: tg.color }"></span>
+            <span class="icn__tagmenu-name">{{ $t(tg.name) }}</span>
+            <IcIcon v-if="tagInfo && tagInfo.name === tg.name" name="check" :size="13" />
+          </button>
+          <button v-if="tagInfo" type="button" class="icn__tagmenu-clear" @click.stop="pickTag('')">
+            {{ $t('清除标签') }}
+          </button>
         </div>
         <div class="icn__body" :style="{ height: bodyH + 'px' }">
+          <!-- Live generation progress (native ComfyUI WebSocket events, routed
+               by prompt_id in core.js genProgress). The HEADER band carries the
+               full-width progress fill (.icn__head-progress); the body shows the
+               live sample preview (b_preview) with one text row floating on a
+               bottom shade — step + phase left, percentage right. No sample yet:
+               the body collapses to just that row (see bodyH / onGenPreviewLoad). -->
+          <div v-if="isGen && data.status === 'running'" class="icn__genprogress nodrag nopan"
+               @pointerdown.stop @mousedown.stop @dblclick.stop>
+            <img v-if="data.genPreviewUrl" class="icn__gp-preview" :src="data.genPreviewUrl"
+                 alt="" draggable="false" @load="onGenPreviewLoad" />
+            <div v-if="data.genPreviewUrl" class="icn__gp-shade"></div>
+            <div class="icn__gp-row">
+              <span class="icn__gp-total">{{ $t('全部') }}:
+                <b>{{ Math.round((data.genTotalProgress || 0) * 100) }}%</b></span>
+              <span class="icn__gp-current">
+                <span>{{ $t('当前节点') }}:</span>
+                <span class="icn__gp-curname">{{ data.genCurrentNodeName || data.genPhaseText || $t('正在生成…') }}</span>
+                <b>{{ Math.round((data.genCurrentNodeProgress || 0) * 100) }}%</b>
+              </span>
+            </div>
+          </div>
           <!-- LoRA stack: a config-only card. Each row = name combobox /
                weight stepper / enable toggle / remove. The panel is a normal
                part of the node and drags it; only the real controls opt out
@@ -3329,7 +3484,7 @@ import {
                result they show only the glyph of their medium. Feeding one from
                the disk is the hover-row upload action (visible only while the
                input is free). -->
-          <div v-else-if="isGen" class="icn__gen-empty">
+          <div v-else-if="isGen" v-show="data.status !== 'running'" class="icn__gen-empty">
             <IcIcon :name="emptyIcon" :size="emptyIconSize" />
           </div>
           <button v-else class="icn__empty" type="button" :title="emptyHint" @click="pickFile">
@@ -3440,36 +3595,7 @@ import {
             </Teleport>
           </div>
           <div class="icn__gpv-bar">
-            <!-- Workflow (API) picker first, settings gear right beside it; the
-                 exposed params live behind that gear, drawn as Nodes 2.0 widget
-                 rows instead of a cramped wrapping row. -->
-            <div class="icn__selwrap">
-              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
-                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
-              </div>
-              <template v-else>
-                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
-                        :title="$t('工作流')" @click.stop="toggleSel('wf')">
-                  <span class="icn__sel-t">{{ wfLabel }}</span>
-                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
-                </button>
-                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
-                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
-                  <div class="icn__sel-search">
-                    <IcIcon name="search" :size="14" />
-                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
-                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
-                           @keydown.stop @pointerdown.stop @mousedown.stop />
-                  </div>
-                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
-                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
-                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
-                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
-                  </button>
-                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
-                </div>
-              </template>
-            </div>
+            <div class="icn__bar2-row icn__bar2-setrow">
             <div class="icn__gpa-setwrap">
               <button class="icn__gpa-set" :class="{ 'is-open': setOpen, 'is-disabled': noWorkflow }"
                       type="button" :disabled="noWorkflow"
@@ -3627,9 +3753,50 @@ import {
                 </div>
               </div>
             </div>
-            <button class="icn__gpv-send" type="button"
-                    :title="data.status === 'running' ? $t('正在生成…') : $t('运行生成')"
-                    :disabled="data.status === 'running'" @click.stop="run">{{$t('运行')}}</button>
+            <div class="icn__bar2-params nodrag nopan" :title="$t('点击修改参数')" @click.stop="openSetFromBar">
+              <template v-for="(f, i) in plainParams" :key="fieldId(f) + '_' + i">
+                <span v-if="i" class="icn__bar2-dot">·</span>
+                <span class="icn__bar2-param"><b>{{ paramLabel(f) }}</b><span class="icn__bar2-val" v-if="paramText(f)">{{ paramText(f) }}</span></span>
+              </template>
+              <span v-if="!plainParams.length" class="icn__bar2-empty">{{ $t('当前 API 未暴露普通参数') }}</span>
+            </div>
+            </div>
+            <div class="icn__bar2-row icn__bar2-runrow">
+            <div class="icn__selwrap">
+              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
+                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
+              </div>
+              <template v-else>
+                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
+                        :title="$t('工作流')" @click.stop="toggleSel('wf')">
+                  <span class="icn__sel-t">{{ wfLabel }}</span>
+                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
+                </button>
+                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
+                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+                  <div class="icn__sel-search">
+                    <IcIcon name="search" :size="14" />
+                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
+                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
+                           @keydown.stop @pointerdown.stop @mousedown.stop />
+                  </div>
+                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
+                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
+                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
+                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
+                  </button>
+                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
+                </div>
+              </template>
+            </div>
+            <div class="icn__gp-run">
+              <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
+                      :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
+              <button class="icn__gpv-send" type="button"
+                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
+                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+            </div>
+            </div>
           </div>
         </div>
 
@@ -3683,36 +3850,7 @@ import {
             </label>
           </div>
           <div class="icn__gpa-bar">
-            <!-- Workflow (API) picker first, settings gear right beside it; the
-                 exposed params live behind that gear, drawn as Nodes 2.0 widget
-                 rows instead of a cramped wrapping row. -->
-            <div class="icn__selwrap">
-              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
-                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
-              </div>
-              <template v-else>
-                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
-                        :title="$t('API（工作流）：') + wfLabel" @click.stop="toggleSel('wf')">
-                  <span class="icn__sel-t">{{ wfLabel }}</span>
-                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
-                </button>
-                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
-                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
-                  <div class="icn__sel-search">
-                    <IcIcon name="search" :size="14" />
-                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
-                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
-                           @keydown.stop @pointerdown.stop @mousedown.stop />
-                  </div>
-                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
-                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
-                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
-                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
-                  </button>
-                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
-                </div>
-              </template>
-            </div>
+            <div class="icn__bar2-row icn__bar2-setrow">
             <div class="icn__gpa-setwrap">
               <button class="icn__gpa-set" :class="{ 'is-open': setOpen, 'is-disabled': noWorkflow }"
                       type="button" :disabled="noWorkflow"
@@ -3870,9 +4008,50 @@ import {
                 </div>
               </div>
             </div>
-            <button class="icn__gp-send icn__gpa-send" type="button"
-                    :title="data.status === 'running' ? $t('正在生成…') : $t('运行生成')"
-                    :disabled="data.status === 'running'" @click.stop="run">{{$t('运行')}}</button>
+            <div class="icn__bar2-params nodrag nopan" :title="$t('点击修改参数')" @click.stop="openSetFromBar">
+              <template v-for="(f, i) in plainParams" :key="fieldId(f) + '_' + i">
+                <span v-if="i" class="icn__bar2-dot">·</span>
+                <span class="icn__bar2-param"><b>{{ paramLabel(f) }}</b><span class="icn__bar2-val" v-if="paramText(f)">{{ paramText(f) }}</span></span>
+              </template>
+              <span v-if="!plainParams.length" class="icn__bar2-empty">{{ $t('当前 API 未暴露普通参数') }}</span>
+            </div>
+            </div>
+            <div class="icn__bar2-row icn__bar2-runrow">
+            <div class="icn__selwrap">
+              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
+                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
+              </div>
+              <template v-else>
+                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
+                        :title="$t('API（工作流）：') + wfLabel" @click.stop="toggleSel('wf')">
+                  <span class="icn__sel-t">{{ wfLabel }}</span>
+                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
+                </button>
+                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
+                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+                  <div class="icn__sel-search">
+                    <IcIcon name="search" :size="14" />
+                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
+                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
+                           @keydown.stop @pointerdown.stop @mousedown.stop />
+                  </div>
+                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
+                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
+                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
+                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
+                  </button>
+                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
+                </div>
+              </template>
+            </div>
+            <div class="icn__gp-run">
+              <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
+                      :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
+              <button class="icn__gp-send icn__gpa-send" type="button"
+                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
+                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+            </div>
+            </div>
           </div>
         </div>
 
@@ -3934,36 +4113,7 @@ import {
             </Teleport>
           </div>
           <div class="icn__gp-bar">
-            <!-- Workflow (API) picker first, settings gear right beside it; the
-                 exposed params live behind that gear, drawn as Nodes 2.0 widget
-                 rows instead of a cramped wrapping row. -->
-            <div class="icn__selwrap">
-              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
-                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
-              </div>
-              <template v-else>
-                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
-                        :title="$t('API（工作流）：') + wfLabel" @click.stop="toggleSel('wf')">
-                  <span class="icn__sel-t">{{ wfLabel }}</span>
-                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
-                </button>
-                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
-                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
-                  <div class="icn__sel-search">
-                    <IcIcon name="search" :size="14" />
-                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
-                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
-                           @keydown.stop @pointerdown.stop @mousedown.stop />
-                  </div>
-                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
-                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
-                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
-                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
-                  </button>
-                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
-                </div>
-              </template>
-            </div>
+            <div class="icn__bar2-row icn__bar2-setrow">
             <div class="icn__gpa-setwrap">
               <button class="icn__gpa-set" :class="{ 'is-open': setOpen, 'is-disabled': noWorkflow }"
                       type="button" :disabled="noWorkflow"
@@ -4121,9 +4271,50 @@ import {
                 </div>
               </div>
             </div>
-            <button class="icn__gp-send" type="button"
-                    :title="data.status === 'running' ? $t('正在生成…') : $t('运行生成')"
-                    :disabled="data.status === 'running'" @click.stop="run">{{$t('运行')}}</button>
+            <div class="icn__bar2-params nodrag nopan" :title="$t('点击修改参数')" @click.stop="openSetFromBar">
+              <template v-for="(f, i) in plainParams" :key="fieldId(f) + '_' + i">
+                <span v-if="i" class="icn__bar2-dot">·</span>
+                <span class="icn__bar2-param"><b>{{ paramLabel(f) }}</b><span class="icn__bar2-val" v-if="paramText(f)">{{ paramText(f) }}</span></span>
+              </template>
+              <span v-if="!plainParams.length" class="icn__bar2-empty">{{ $t('当前 API 未暴露普通参数') }}</span>
+            </div>
+            </div>
+            <div class="icn__bar2-row icn__bar2-runrow">
+            <div class="icn__selwrap">
+              <div v-if="noWorkflow" class="icn__sel icn__sel--empty" :title="$t('该分类下暂无工作流')">
+                <span class="icn__sel-t">{{$t('该分类下暂无工作流')}}</span>
+              </div>
+              <template v-else>
+                <button class="icn__sel" :class="{ 'is-open': selOpen === 'wf' }" type="button"
+                        :title="$t('API（工作流）：') + wfLabel" @click.stop="toggleSel('wf')">
+                  <span class="icn__sel-t">{{ wfLabel }}</span>
+                  <IcIcon class="icn__sel-caret" name="chevron-down" :size="14" />
+                </button>
+                <div v-if="selOpen === 'wf'" class="icn__selmenu icn__selmenu--search"
+                     @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+                  <div class="icn__sel-search">
+                    <IcIcon name="search" :size="14" />
+                    <input :ref="setSelSearchEl" v-model="selQuery" type="text"
+                           class="icn__sel-searchinput" :placeholder="$t('搜索工作流…')" spellcheck="false"
+                           @keydown.stop @pointerdown.stop @mousedown.stop />
+                  </div>
+                  <button v-for="w in filteredWfOptions" :key="w.id" type="button" class="icn__selitem"
+                          :class="{ 'is-on': wfValue === w.id }" @click.stop="pickSel('wf', w.id)">
+                    <span class="icn__selitem-t">{{ w.name || w.id }}</span>
+                    <IcIcon v-if="wfValue === w.id" class="icn__selitem-check" name="check" :size="14" />
+                  </button>
+                  <div v-if="!filteredWfOptions.length" class="icn__selitem icn__selitem--hint">{{ $t('未找到匹配的工作流') }}</div>
+                </div>
+              </template>
+            </div>
+            <div class="icn__gp-run">
+              <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
+                      :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
+              <button class="icn__gp-send" type="button"
+                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
+                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+            </div>
+            </div>
           </div>
         </div>
 
@@ -4217,6 +4408,7 @@ import {
 
         <Handle v-if="isGen" id="in" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
         <Handle v-if="isText" id="text" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
+        <Handle v-if="isCleanup" id="in" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
         <Handle id="out" type="source" :position="'right'" :style="{ top: handleTop(0) }" />
 
         <div class="icn__rz icn__rz--nw nodrag" @pointerdown="onResizeDown($event, 'nw')" :class="{ 'is-active': resizing === 'nw' }"><svg viewBox="0 0 12 12"><path d="M11 1L1 11M11 6L6 11" /></svg></div>
@@ -4285,8 +4477,23 @@ import {
      the slot centre ("圆心对着圆心"); do the same for the path start. */
   const IcConnectionLine = {
     name: "IcConnectionLine",
-    props: ["sourceX", "sourceY", "sourcePosition", "targetX", "targetY", "targetPosition"],
+    props: ["sourceX", "sourceY", "sourcePosition", "targetX", "targetY", "targetPosition", "onFrame"],
     setup(props) {
+      /* Report every frame to the owner so a released wire can be frozen at
+         the exact last-drawn graph coordinates (Vue Flow drops this slot the
+         instant connectEnd fires). */
+      watch(
+        () => [props.sourceX, props.sourceY, props.sourcePosition, props.targetX, props.targetY, props.targetPosition],
+        () => {
+          if (typeof props.onFrame === "function") {
+            props.onFrame({
+              sourceX: props.sourceX, sourceY: props.sourceY, sourcePosition: props.sourcePosition,
+              targetX: props.targetX, targetY: props.targetY, targetPosition: props.targetPosition,
+            });
+          }
+        },
+        { immediate: true }
+      );
       const HALF = 3; // half of the 6px handle (graph units)
       const src = computed(() => {
         const p = String(props.sourcePosition || '').toLowerCase();
@@ -4380,6 +4587,9 @@ import {
    #AAFFAA line + green/amber endpoint dots). This rule is only a fallback if
    the slot ever misses; bundle default is grey #b1b1b7 1px. */
 .vue-flow__connection-path { stroke:#AAFFAA; stroke-width:3; fill:none; }
+/* Frozen released wire lives in the zoom-pane graph layer; let its <g> paint
+   far outside the 1x1 host <svg>, and never eat pointer events from the menu. */
+.ic-frozen-conn { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
 /* Vue Flow adds .updating to edges during recompute and its CSS forces #777
    grey at equal specificity, overriding .ic-edge -> a wire flashes grey. Pin
    our green for that state only; leave .selected/.focus feedback untouched. */
@@ -4433,23 +4643,30 @@ import {
    edge exactly like a node's, with no gap. */
 .ic-group.is-selected { border-color:rgba(255,255,255,.85);
   outline:3px solid #fff; outline-offset:0; }
+/* Live drag-in target: identical highlight to a selected group. */
+.ic-group.is-drop-target { border-color:rgba(255,255,255,.85);
+  outline:3px solid #fff; outline-offset:0; }
+.ic-group-ui.is-drop-target .ic-group-title { color:#fff; }
 /* The layer itself is inert (the pane already is); only its children take
    pointers, and z-index keeps them clickable above the node cards. */
 .ic-group-ui { position:absolute; z-index:3; pointer-events:none; box-sizing:border-box;
   font-size:20px; }
 .ic-group-ui.is-selected .ic-group-title { color:#fff; }
 .ic-group-title { display:flex; align-items:center; box-sizing:border-box;
-  width:100%; height:var(--ic-group-title-h, 30px); padding:0 10px;
+  width:100%; height:var(--ic-group-title-h, 40px); padding:0 10px;
   border-radius:12px 12px 0 0; background:rgba(255,255,255,.10);
   color:inherit; white-space:nowrap; pointer-events:auto; cursor:move; user-select:none; }
 .ic-group-title-input { display:block; box-sizing:border-box; width:100%;
-  height:var(--ic-group-title-h, 30px); padding:0 10px; border:1px solid rgba(255,255,255,.5);
+  height:var(--ic-group-title-h, 40px); padding:0 10px; border:1px solid rgba(255,255,255,.5);
   border-radius:12px 12px 0 0; outline:none; background:rgba(38,39,41,.92);
   color:#fff; font:inherit; line-height:1; pointer-events:auto; }
 /* Corner grips: same 20px box / 8px glyph / upstream SVG path as node resize. */
 .ic-group__rz { position:absolute; width:20px; height:20px; z-index:2;
   opacity:0; transition:opacity .12s ease; pointer-events:auto; }
-.ic-group-ui:hover .ic-group__rz, .ic-group-ui.is-selected .ic-group__rz,
+/* Resize grips appear only while the group is selected (or actively dragged),
+   never on hover — moving the pointer across the title bar must not restyle
+   the group. */
+.ic-group-ui.is-selected .ic-group__rz,
 .ic-group__rz.is-active { opacity:1; }
 .ic-group__rz svg { position:absolute; width:40%; height:40%; }
 .ic-group__rz svg path { fill:none; stroke:var(--color-muted-foreground, rgba(255,255,255,.62));
@@ -4494,7 +4711,13 @@ import {
   cursor:pointer; }
 .ic-selection-tools button:hover { background:var(--accent, #3c3d42); }
 .ic-selection-tools button i { width:14px; text-align:center; font-size:13px; }
-.vue-flow__selection { background:rgba(74,158,255,.08); border:1px solid rgba(74,158,255,.6); }
+/* Marquee box: window mode (left->right, SelectionMode.Full) = blue solid,
+   crossing mode (right->left, SelectionMode.Partial) = green dashed. The
+   .ic-flow container gets .marquee-crossing while a crossing stroke is active. */
+.vue-flow__selection { background:rgba(74,158,255,.08); border:1px solid rgba(74,158,255,.6);
+  border-style:solid; }
+.ic-flow.marquee-crossing .vue-flow__selection { background:rgba(74,222,128,.10);
+  border:1px dashed rgba(74,222,128,.75); }
 /* Vue Flow renders a full-box NodesSelection rect on top of multi-selected
    nodes (pointer-events:all by default). It swallows every click, so a plain
    click can no longer replace the selection and Shift/Ctrl+click cannot toggle
@@ -4518,6 +4741,15 @@ import {
 .icn { position:relative; border-radius:12px; background:var(--ic-head-bg, #202121); color:#ddd; user-select:none;
   filter:drop-shadow(0 9px 7px rgba(0,0,0,.4)); }
 .icn.is-selected { box-shadow:0 0 0 3px #fff; }
+/* Running ALWAYS shows the blue ring — identical 3px solid style to the white
+   selection ring, only a different colour. Running wins over selection: both
+   selected+running still shows ONE blue ring, never white, never two rings.
+   Listing the .is-selected variant raises specificity above .is-selected. */
+.icn.is-running, .icn.is-running.is-selected { box-shadow:0 0 0 3px #0B8CE9; }
+/* Queued = amber, error = red. Same 3px solid ring as the others; each state
+   outranks the white selection ring (running/queued/error all win over white). */
+.icn.is-waiting, .icn.is-waiting.is-selected { box-shadow:0 0 0 3px #FD9903; }
+.icn.is-error, .icn.is-error.is-selected { box-shadow:0 0 0 3px #B33A3A; }
 .icn__body { position:relative; overflow:hidden; background:var(--ic-node-bg, #262729); }
 /* Only the BOTTOM corners round: the header above owns the top ones, so a
    rounded top here would let the darker card colour show through the seam. */
@@ -4532,7 +4764,40 @@ import {
 .icn__head { position:relative; z-index:6; box-sizing:border-box;
   height:var(--ic-head-h, 28px); padding:0 10px; display:flex; align-items:center;
   border-radius:12px 12px 0 0; background:var(--ic-head-bg, #202121);
-  pointer-events:none; }
+  overflow:hidden; pointer-events:none; }
+/* While generating, the header band itself is the progress bar: a #133A56
+   fill grows left→right across the full header width, behind the title text
+   (title keeps pointer-events:auto so it stays legible & editable). */
+.icn__head-progress { position:absolute; left:0; top:0; bottom:0; z-index:0;
+  background:#133A56; pointer-events:none;
+  transition:width .25s ease; }
+.icn__head.is-generating .icn__name { position:relative; z-index:1; }
+
+/* ---- Quick-cleanup pill: a 30px solid bar, title centred, socket each end ----
+   The bar IS the header (body is 0px), so no two-tone card, no tag chip, no
+   tools and no resize grips. Colour follows the action, text is always the
+   node title (already centred by the rules below). Click anywhere runs it. */
+.icn--cleanup { border-radius:8px; cursor:default; }
+/* The bar IS the node header strip: same charcoal as every node title, same
+   title text colour and weight. Just shorter, centred and click-to-run. */
+.icn--cleanup .icn__head {
+  height:100%; border-radius:8px; padding:0 10px; justify-content:center;
+  background:var(--ic-head-bg, #202121); pointer-events:auto;
+}
+.icn--cleanup .icn__name { max-width:100%; color:#cdcdcd; font-size:12px;
+  font-weight:500; text-align:center; pointer-events:none; }
+/* The header strip fills the whole bar at z-index 6 — keep the sockets above
+   it so their inner half is not clipped/covered by the opaque head background. */
+.icn--cleanup .vue-flow__handle { z-index:10; }
+.icn--cleanup .icn__body { display:none; }
+.icn--cleanup .icn__tag,
+.icn--cleanup .icn__tools,
+.icn--cleanup .icn__rz,
+.icn--cleanup .icn__file,
+.icn--cleanup .icn__tagmenu { display:none !important; }
+/* A quick click flash confirms the job was queued. */
+.icn--cleanup.is-cleaning .icn__head { box-shadow:inset 0 0 0 1px #0B8CE9; }
+
 /* ComfyUI draws the title as BARE TEXT inside the header band (NodeHeader.vue
    wraps an EditableText, whose resting state is a plain span and whose editing
    state is a borderless input: rounded-none, zero padding, no focus ring).
@@ -4545,6 +4810,40 @@ import {
 .icn__name--edit { min-width:60px; max-width:260px; overflow:hidden; text-overflow:clip;
   background:transparent; outline:none; box-shadow:none;
   cursor:text; user-select:text; }
+/* Header tag: a single colour capsule (or the add icon) pinned to the right of
+   the title band. The title above is flex-shrunk so a long name can never push
+   the tag out (name gets the ellipsis, tag stays put). Header is pointer-events
+   :none, so the control opts back in. z-index 2 keeps it above the progress fill. */
+.icn__name { flex:0 1 auto; min-width:0; }
+.icn__tag { flex:0 0 auto; margin-left:auto; position:relative; z-index:2; pointer-events:auto;
+  display:inline-flex; align-items:center; align-self:center; line-height:0; }
+.icn__tag-add, .icn__tag-chip { display:inline-flex; align-items:center; justify-content:center;
+  box-sizing:border-box; border:0; padding:0; cursor:pointer; }
+.icn__tag-add { width:18px; height:18px; border-radius:4px; color:var(--ic-soft, #8a8a8a);
+  background:transparent; }
+.icn__tag-add:hover { color:#fff; background:rgba(255,255,255,.12); }
+.icn__tag-chip { height:20px; max-width:130px; padding:0 9px; border-radius:10px;
+  gap:6px; color:#fff; font-size:12px; line-height:1; font-weight:400; letter-spacing:.02em;
+  overflow:hidden; }
+.icn__tag-chip-dot { flex:0 0 auto; width:5px; height:5px; border-radius:50%; background:#fff; }
+.icn__tag-chip-name { display:inline-flex; align-items:center; height:100%; min-width:0;
+  line-height:1; overflow:hidden; white-space:nowrap; }
+.icn__tag-chip:hover { filter:brightness(1.12); }
+/* Palette menu: same dark floating card language as the other pickers. */
+.icn__tagmenu { position:absolute; right:6px; top:calc(var(--ic-head-h, 28px) + 4px); z-index:70;
+  box-sizing:border-box; min-width:132px; padding:4px; border-radius:8px;
+  background:var(--icnw-bg, #2b2c2f); border:1px solid rgba(255,255,255,.08);
+  box-shadow:0 8px 24px rgba(0,0,0,.5); display:flex; flex-direction:column; gap:1px; }
+.icn__tagmenu-item { display:flex; align-items:center; gap:8px; width:100%; height:28px;
+  padding:0 8px; box-sizing:border-box; border:0; border-radius:5px; background:transparent;
+  color:var(--ic-text, #fff); font-size:12px; text-align:left; cursor:pointer; }
+.icn__tagmenu-item:hover { background:var(--icnw-hover, #3c3d42); }
+.icn__tagmenu-dot { flex:0 0 auto; width:9px; height:9px; border-radius:50%; }
+.icn__tagmenu-name { flex:1 1 auto; min-width:0; }
+.icn__tagmenu-clear { margin-top:3px; padding:6px 8px 3px; border:0; cursor:pointer;
+  background:transparent; border-top:1px solid rgba(255,255,255,.1);
+  color:var(--ic-soft, #8a8a8a); font-size:11px; text-align:left; }
+.icn__tagmenu-clear:hover { color:#fff; }
 
 /* Single-node action row mirrors the multi-select toolbox (.ic-selection-tools):
    one dark floating panel with a border/radius/shadow, transparent buttons that
@@ -4727,6 +5026,23 @@ import {
 .icn__status.is-running .icn__dot { background:#e0b34a; }
 .icn__status.is-done .icn__dot { background:#5dcaa5; }
 .icn__status.is-error .icn__dot { background:var(--ic-danger, #b33a3a); }
+
+/* Live generation progress while status=running: header carries the bar; body
+   shows the streamed sample preview with a bottom shade so the text row stays
+   readable. With no sample the body is just the text row (GEN_RUN_BODY_H). */
+.icn__genprogress { position:relative; z-index:5; height:100%; box-sizing:border-box; overflow:hidden; }
+.icn__gp-preview { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.icn__gp-shade { position:absolute; left:0; right:0; top:0; height:44px;
+  background:linear-gradient(to bottom, rgba(0,0,0,.86), rgba(0,0,0,0)); }
+.icn__gp-row { position:absolute; left:0; right:0; top:0; height:44px; display:flex; align-items:flex-start;
+  padding:9px 12px 0; box-sizing:border-box; justify-content:flex-end; gap:16px;
+  font-size:12px; line-height:16px; color:#fff; }
+.icn__gp-total { flex:0 0 auto; white-space:nowrap; opacity:.9; }
+.icn__gp-total b, .icn__gp-current b { font-weight:700; font-variant-numeric:tabular-nums; }
+.icn__gp-current { display:inline-flex; align-items:baseline; gap:4px; min-width:0;
+  color:rgba(255,255,255,.72); }
+.icn__gp-curname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  max-width:200px; color:#fff; }
 
 /* ---- LoRA stack node: config-only card wired into a generator ---- */
 /* The card is auto-height (one row per LoRA); bodyH in setup grows with the
@@ -4913,6 +5229,13 @@ import {
   font-size:var(--ic-ctrl-fs, 12px); line-height:1; white-space:nowrap; cursor:pointer; }
 .icn__gp-send:hover { background:rgba(11,140,233,.9); }
 .icn__gp-send:disabled { opacity:.5; cursor:default; }
+/* Run row: 取消 (secondary) + run/sending button, kept together on the right. */
+.icn__gp-run { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto; margin-left:auto; }
+.icn__gp-run > .icn__gpv-send, .icn__gp-run > .icn__gp-send { margin-left:0; }
+.icn__gp-cancel { height:var(--ic-ctrl-h, 30px); padding:0 12px; border:0; border-radius:8px;
+  background:var(--icnw-bg, #313235); color:var(--ic-text, #fff);
+  font-size:var(--ic-ctrl-fs, 12px); line-height:1; white-space:nowrap; cursor:pointer; }
+.icn__gp-cancel:hover { background:var(--icnw-hover, #3c3d42); }
 
 /* ---- VIDEO generator panel (reference layout) ---- */
 .icn__genpanel.icn__gpv, .icn__genpanel:not(.icn__gpv):not(.icn__gpa) { width:max(100%, 460px); padding:10px; }
@@ -5202,6 +5525,27 @@ import {
 .ic-minimap__close { position:absolute; top:0; right:0; z-index:10; width:32px; height:32px; display:flex;
   align-items:center; justify-content:center; border:0; background:transparent; color:var(--muted-foreground,#999); cursor:pointer; border-radius:6px; }
 .ic-minimap__close:hover { background:rgba(255,255,255,.08); color:#fff; }
+
+/* ---- Two-row generator bottom bar -----------------------------------
+   Row 1 = settings: the gear (opens the full API-param editor) followed by a
+   read-only, dot-separated summary of the plain params. Row 2 = the workflow
+   picker on the left, cancel/run on the right. The popover still anchors to
+   .icn__gpa-setwrap, so placePop() needs no change. */
+.icn__gp-bar, .icn__gpv-bar, .icn__gpa-bar { display:flex; flex-direction:column; align-items:stretch; gap:8px; min-width:0; }
+.icn__bar2-row { display:flex; align-items:center; gap:6px; min-width:0; }
+.icn__bar2-setrow > .icn__gpa-setwrap { flex:0 0 auto; }
+.icn__bar2-runrow > .icn__selwrap { flex:0 0 auto; min-width:0; }
+.icn__bar2-runrow > .icn__selwrap > .icn__sel { max-width:220px; }
+.icn__bar2-runrow > .icn__gp-run { margin-left:auto; }
+.icn__bar2-params { flex:1 1 auto; min-width:0; display:flex; align-items:center; flex-wrap:wrap;
+  column-gap:7px; row-gap:2px; cursor:pointer; font-size:12px; line-height:1.5;
+  color:var(--ic-soft, #8a8a8a); }
+.icn__bar2-params:hover .icn__bar2-param b { color:var(--ic-soft-hover, #b6b6b6); }
+.icn__bar2-dot { flex:0 0 auto; color:var(--ic-line, #494a50); }
+.icn__bar2-param { display:inline-flex; flex-direction:column; align-items:flex-start; min-width:0; white-space:nowrap; }
+.icn__bar2-param b { font-weight:500; font-size:10px; line-height:1.3; color:var(--ic-soft, #8a8a8a); }
+.icn__bar2-val { font-size:10px; line-height:1.35; color:var(--ic-text, #f2f2f2); }
+.icn__bar2-empty { opacity:.6; }
 `;
 
   function injectStyles() {
@@ -5250,14 +5594,23 @@ import {
       const groups = state.groups;
       const groupEditing = state.groupEditing;
       const selectedGroupIds = state.selectedGroupIds;
+      const dropTargetGroupIds = state.dropTargetGroupIds;
+      /* Marquee selection mode is direction-sensitive (like ComfyUI / CAD):
+         drag left->right = window mode (a node is selected only when its whole
+         rect lies inside the marquee -> Vue Flow SelectionMode.Full); drag
+         right->left = crossing mode (any overlap selects -> SelectionMode.Partial).
+         Vue Flow re-reads this every pointermove, so updating it during the
+         stroke switches the mode live. */
+      const selectionMode = ref("full");
       /* Interaction map is ComfyUI's default, Comfy.Canvas.NavigationMode =
          "legacy" / Drag Navigation (coreSettings.ts):
            - left drag on the pane pans, exactly like the reference canvas
            - a marquee needs Ctrl/Cmd held; LGraphCanvas.ts:2826 only starts
              _setupNodeSelectionDrag when ctrlOrMeta is pressed
            - clicking with Shift/Ctrl/Meta toggles a node in the selection
-           - marquee picks any node it overlaps (partial), see _getItemsInRect
-             which uses overlapBounding rather than containment
+           - marquee is direction-sensitive (like ComfyUI/litegraph): drag
+             left->right = window mode (fully contained), right->left =
+             crossing mode (any overlap). See selectionMode / setMarqueeMode.
          Do not turn this into "left drag selects" -- that is the "standard"
          navigation mode, which is not what ComfyUI ships. */
 
@@ -5350,6 +5703,8 @@ import {
          active mode decide (modeReasonFor). */
       const genWireReason = (targetId, sourceId) => {
         const target = state.nodes.value.find((n) => n.id === targetId);
+        /* A cleanup pill is a pass-through link: it can feed any generator. */
+        if (state.nodes.value.find((n) => n.id === sourceId)?.data?.role === "cleanup") return "";
         if (isAudioGenData(target?.data)) return audioWireReason(targetId, sourceId);
         if (isImageGenData(target?.data)) return imageWireReason(targetId, sourceId);
         if (isTextGenData(target?.data)) return textWireReason(targetId, sourceId);
@@ -5385,9 +5740,18 @@ import {
       let connectOrigin = null;
       let connectSettled = false;
       const CLICK_SLOP = 6;
+      /* Frozen wire: after connectEnd over empty canvas the connection-line slot
+         disappears, so we draw our own copy at the last reported graph coords
+         and keep it until the pick menu resolves (node chosen -> clear, cancel
+         -> clear). */
+      const frozenConn = ref(null);
+      let connFrame = null;
+      const onConnFrame = (frame) => { connFrame = frame; };
+      const clearFrozenConn = () => { frozenConn.value = null; connFrame = null; };
 
       const onConnectStart = (payload) => {
         connectSettled = false;
+        clearFrozenConn();
         const event = payload?.event;
         connectOrigin = payload?.nodeId
           ? {
@@ -5413,13 +5777,13 @@ import {
         if (origin.handleType === "source") {
           const kind = assetKindOf(from);
           if (!kind) return [];
-          return specs.filter((spec) => (spec.role === "text"
+          return specs.filter((spec) => (spec.role === "text" || spec.role === "cleanup"
             ? true
             : spec.role === "media" && acceptsKind(spec.kind, kind)));
         }
         /* Drag started on an INPUT handle: offer the types that can feed it.
-           A text node accepts every kind, so its menu lists all of them. */
-        if (from.data?.role === "text") return specs.slice();
+           Text and cleanup nodes accept every kind, so their menu lists all. */
+        if (from.data?.role === "text" || from.data?.role === "cleanup") return specs.slice();
         if (from.data?.role !== "media") return [];
         const accepts = GEN_ACCEPTS[from.data.kind] || [];
         return specs.filter((spec) => accepts.indexOf(spec.kind) >= 0);
@@ -5469,6 +5833,83 @@ import {
         NS.api?.markDirty?.();
       };
 
+      /* ---- live placement: after picking a type from the wire-release menu,
+         a REAL node is created immediately (same node as any other, no ghost)
+         and follows the pointer; the FIRST left click drops it, Esc removes it.
+         The wire is connected for real from the start, so what you see while
+         moving is exactly the finished node. */
+      const placing = ref(null); // { nodeId, origin } while a real node follows
+      let placeHandlers = null;
+      const endPlacement = () => {
+        if (placeHandlers) {
+          document.removeEventListener("pointermove", placeHandlers.move, true);
+          document.removeEventListener("pointerdown", placeHandlers.down, true);
+          document.removeEventListener("keydown", placeHandlers.key, true);
+          placeHandlers = null;
+        }
+        placing.value = null;
+        document.getElementById("infcanvas-root")?.classList.remove("is-placing");
+      };
+      const beginPlacement = (spec, origin, point) => {
+        endPlacement();
+        /* Create the real node + real wire at the release point immediately. */
+        const before = new Set(state.nodes.value.map((n) => n.id));
+        createAndConnect(spec, origin, { x: point.x, y: point.y });
+        const created = state.nodes.value.find((n) => !before.has(n.id));
+        if (!created) { clearFrozenConn(); return; }
+        const nodeId = created.id;
+        placing.value = { nodeId, origin };
+        clearFrozenConn();
+        const toGraph = (clientX, clientY) => state.flow?.screenToFlowCoordinate
+          ? state.flow.screenToFlowCoordinate({ x: clientX, y: clientY })
+          : { x: clientX, y: clientY };
+        /* The pointer sits at the CENTRE of the title band, not the node's
+           top-left corner. Graph units == unscaled CSS px, so half the node
+           width and half the header height offset the node's origin. */
+        const nodeW = Number(spec?.size?.[0]) || 480;
+        const headH = spec?.role === "cleanup" ? (Number(spec?.size?.[1]) || 30) : 28;
+        const offsetX = nodeW / 2, offsetY = headH / 2;
+        NS.flow?.setNodePosition?.(nodeId, { x: point.x - offsetX, y: point.y - offsetY });
+        /* Keep a normal arrow cursor for the whole ride (connection dragging
+           leaves a crosshair/grabbing cursor behind). */
+        document.getElementById("infcanvas-root")?.classList.add("is-placing");
+        const move = (event) => {
+          if (!placing.value) return;
+          const g = toGraph(event.clientX, event.clientY);
+          NS.flow?.setNodePosition?.(nodeId, { x: g.x - offsetX, y: g.y - offsetY });
+        };
+        const down = (event) => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          event.preventDefault();
+          const p = placing.value;
+          endPlacement();
+          if (p) NS.api?.markDirty?.();
+        };
+        const key = (event) => {
+          if (event.key !== "Escape") return;
+          event.stopPropagation();
+          event.preventDefault();
+          const p = placing.value;
+          endPlacement();
+          if (!p) return;
+          /* Remove the just-created node AND its wire, restoring the pre-menu
+             state: the frozen wire is gone, no trace of the cancelled pick. */
+          state.edges.value = state.edges.value.filter((e) => e.source !== nodeId && e.target !== nodeId);
+          NS.api?.removeNode?.(nodeId);
+        };
+        placeHandlers = { move, down, key };
+        /* Defer binding one tick so the click that picked the menu item (and the
+           pointerdown that opened it) can't be mistaken for the placement click. */
+        setTimeout(() => {
+          if (placeHandlers && placeHandlers.move === move) {
+            document.addEventListener("pointermove", move, true);
+            document.addEventListener("pointerdown", down, true);
+            document.addEventListener("keydown", key, true);
+          }
+        }, 0);
+      };
+
       const onConnectEnd = (event) => {
         const origin = connectOrigin;
         const settled = connectSettled;
@@ -5497,10 +5938,15 @@ import {
         const point = state.flow?.screenToFlowCoordinate
           ? state.flow.screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
           : { x: 0, y: 0 };
+        /* Freeze the wire at the last frame the slot drew (graph coords). This
+           survives the slot's removal on connectEnd so the user sees the wire
+           still attached, exactly where they released it. */
+        if (connFrame) frozenConn.value = { ...connFrame };
         NS.ui?.showConnectNodeMenu?.({
           clientX: event.clientX, clientY: event.clientY, world: [point.x, point.y],
           specs,
-          onPick: (spec) => createAndConnect(spec, origin, point),
+          onPick: (spec) => beginPlacement(spec, origin, point),
+          onDismiss: () => { endPlacement(); clearFrozenConn(); },
         });
       };
 
@@ -5653,15 +6099,35 @@ import {
       onBeforeUnmount(() => document.removeEventListener("pointerdown", capturePointerDown, true));
 
       let lastDragStopAt = -Infinity;
-      const onNodeDragStop = () => {
+      /* Live membership highlight: recompute on every drag tick and paint the
+         groups that the dragged nodes fully entered. Uses the same highlight
+         class as a selected group; cleared on drag stop. */
+      const onNodeDrag = (payload) => {
+        /* Dragging nodes is a node-level operation: a group selection left over
+           from clicking a group title must not linger, otherwise "group + node"
+           reads as a multi-selection and paints the dashed border plus the node
+           toolbars. Plain node clicks already clear it (selectNodes); the drag
+           path never reached that, so clear it here at the first drag tick.
+           Dragging a group's own title strip uses startGroupDrag, not this
+           handler, so whole-group moves keep their selection intact. */
+        if (state.selectedGroupIds.value.length) state.selectedGroupIds.value = [];
+        const ids = draggedIds(payload);
+        state.dropTargetGroupIds.value = ids.length
+          ? [...planMembership(ids).dropTargets] : [];
+      };
+      const onNodeDragStop = (payload) => {
         /* d3-drag emits a click after some drags; that click must not collapse
            a multi-selection that was just moved as a group. */
         lastDragStopAt = performance.now();
         syncLivePositions();
+        const ids = draggedIds(payload);
+        const changed = ids.length ? applyMembership(planMembership(ids), ids) : false;
+        state.dropTargetGroupIds.value = [];
         NS.flow?.markDirty();
         /* Vue Flow owns the live position, so the deep watcher never saw this
            move — make it an undo step explicitly. */
         NS.flow?.history?.schedule?.();
+        if (changed) NS.api?.markDirty?.();
       };
 
       /* LiteGraph's resolveClickSelection (selectionIntent.ts) is explicit:
@@ -6003,7 +6469,7 @@ import {
         if (on) { measureSelectionRect(); selectionRaf = requestAnimationFrame(selectionTick); }
         else selectionRect.value = null;
       });
-      onBeforeUnmount(() => { cancelAnimationFrame(selectionRaf); });
+      onBeforeUnmount(() => { cancelAnimationFrame(selectionRaf); endPlacement(); });
 
       /* ---- multi-selection toolbox actions ------------------------------ */
       /* Boxes are in graph units. Vue Flow keeps the authoritative position
@@ -6034,10 +6500,11 @@ import {
       const selectedBoxes = () => boxesOfIds(state.selectedIds.value);
 
       /* Bounds of a set of node boxes: 10px padding on all four sides plus a
-         30px title strip on top. createGroup and the post-arrange refit share
-         this one rule so the outline always hugs its members by exactly 10px. */
+         40px title strip on top (matching --ic-group-title-h). createGroup and
+         the post-arrange refit share this one rule so the outline always hugs
+         its members by exactly 10px. */
       const groupBounds = (boxes) => {
-        const pad = 10, titleHeight = 30;
+        const pad = 10, titleHeight = 40;
         const minX = Math.min(...boxes.map((box) => box.x));
         const minY = Math.min(...boxes.map((box) => box.y));
         const maxX = Math.max(...boxes.map((box) => box.x + box.w));
@@ -6050,22 +6517,132 @@ import {
         };
       };
 
+      /* ---- node ↔ group membership --------------------------------------
+         A group is a rectangle in graph units. Membership is derived from
+         geometry, never stored on the node: "inside" means the node's whole
+         box fits inside the group rectangle; "outside" means the two boxes do
+         not intersect at all. A partial overlap is a no-op (hysteresis), so a
+         node crossing the border does not oscillate while being dragged. */
+      const boxInsideGroup = (box, group) =>
+        box.x >= group.x && box.y >= group.y &&
+        box.x + box.w <= group.x + group.w &&
+        box.y + box.h <= group.y + group.h;
+      const boxOutsideGroup = (box, group) =>
+        box.x + box.w <= group.x || box.x >= group.x + group.w ||
+        box.y + box.h <= group.y || box.y >= group.y + group.h;
+      const groupArea = (group) => group.w * group.h;
+      const groupOfNode = (groups, id) =>
+        groups.find((group) => Array.isArray(group.nodes) && group.nodes.includes(id));
+
+      /* Ids actually being dragged: Vue Flow reports them in the payload;
+         fall back to the shared selection for synthetic/drag-stop events. */
+      const draggedIds = (payload) => {
+        const fromPayload = payload?.nodes?.map((node) => node.id).filter(Boolean);
+        return fromPayload && fromPayload.length ? fromPayload : state.selectedIds.value.slice();
+      };
+
+      /* Plan a drag: for every moved node decide its TARGET group (null means
+         "no join target" — it then only leaves a group on a full exit).
+         Membership is strictly PER NODE: each node joins only the group its
+         own box is fully inside (the smallest such group); a node that did
+         not fully enter any group does NOT join one just because a sibling in
+         the same multi-select drag did. Also report which groups are newly
+         joined, for live drag highlight. */
+      const planMembership = (ids) => {
+        const boxes = new Map(boxesOfIds(ids).map((box) => [box.id, box]));
+        const groups = state.groups.value;
+        const targets = new Map();
+        const dropTargets = new Set();
+        for (const id of ids) {
+          const box = boxes.get(id);
+          let target = null;
+          if (box) {
+            const candidates = groups.filter((group) => boxInsideGroup(box, group));
+            if (candidates.length) {
+              candidates.sort((a, b) => groupArea(a) - groupArea(b));
+              target = candidates[0].id;
+            }
+          }
+          const current = groupOfNode(groups, id);
+          if (target && (!current || current.id !== target)) dropTargets.add(target);
+          targets.set(id, target);
+        }
+        return { targets, dropTargets, boxes, groups };
+      };
+
+      /* Apply the plan: reassign members on the SAME group objects (so the
+         deep watcher/history sees the graft). Groups are kept even when they
+         end up empty — membership changes never dissolve a group. Group
+         rectangles are NEVER auto-fitted — the outline only changes when the
+         user explicitly creates, pans, or resizes a group. */
+      const applyMembership = (plan, ids) => {
+        const { targets, boxes } = plan;
+        const groups = state.groups.value;
+        const touched = new Set();
+        for (const id of ids) {
+          const target = targets.get(id);
+          const current = groupOfNode(groups, id);
+          /* Still in the same group after the move: neither the nodes array
+             nor the outline should change. Skip entirely — no re-fit. */
+          if (target && current && target === current.id) continue;
+          if (target) {
+            for (const group of groups) {
+              if (Array.isArray(group.nodes) && group.nodes.includes(id)) {
+                group.nodes = group.nodes.filter((nodeId) => nodeId !== id);
+                touched.add(group.id);
+              }
+            }
+            const dest = groups.find((group) => group.id === target);
+            if (dest) {
+              if (!Array.isArray(dest.nodes)) dest.nodes = [];
+              if (!dest.nodes.includes(id)) dest.nodes.push(id);
+              touched.add(dest.id);
+            }
+          } else if (current && boxes.has(id) && boxOutsideGroup(boxes.get(id), current)) {
+            current.nodes = current.nodes.filter((nodeId) => nodeId !== id);
+            touched.add(current.id);
+          }
+        }
+        if (!touched.size) return false;
+        /* Empty groups are kept on purpose — no auto-dissolve and no re-fit.
+           A group only goes away when the user explicitly deletes it. */
+        return true;
+      };
+
       /* ComfyUI's Add Group For Selected Nodes: createBounds(selected, 10),
-         then lift the top by NODE_TITLE_HEIGHT (30) for the title strip.
-         The group itself is visual only — it never rewires or reflows nodes. */
+         then lift the top by the title-strip height (40) to fit its header.
+         The group itself is visual only — it never rewires or reflows nodes.
+         Members already in another group are pulled into the new one; old
+         groups keep their rectangle and are kept even when emptied — no
+         auto-dissolve, no auto re-fit. */
       const createGroup = () => {
-        const boxes = selectedBoxes();
+        /* Participants = selected nodes + every member of a selected group. */
+        const participantIds = new Set(state.selectedIds.value);
+        for (const gid of state.selectedGroupIds.value) {
+          const group = state.groups.value.find((entry) => entry.id === gid);
+          if (group && Array.isArray(group.nodes)) group.nodes.forEach((id) => participantIds.add(id));
+        }
+        const boxes = boxesOfIds([...participantIds]);
         if (boxes.length < 2) return;
-        state.groups.value = state.groups.value.concat([{
+        const ids = boxes.map((box) => box.id);
+        const taken = new Set(ids);
+        const survivors = state.groups.value.map((group) => ({
+          ...group,
+          nodes: (group.nodes || []).filter((id) => !taken.has(id)),
+        }));
+        survivors.push({
           id: "grp_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           title: "分组",   /* internal key, rendered via t() like node titles */
           ...groupBounds(boxes),
-          nodes: boxes.map((box) => box.id),
-        }]);
+          nodes: ids,
+        });
+        state.groups.value = survivors;
+        state.selectedGroupIds.value = [];
+        state.selectedIds.value = [];
         NS.api?.markDirty?.();
         NS.flow?.history?.schedule?.();
         NS.api?.toast?.("success", t("已创建分组"),
-          t("已把选中的 {count} 个节点放入分组", { count: boxes.length }));
+          t("已把选中的 {count} 个节点放入分组", { count: ids.length }));
       };
 
       /* ComfyUI's processSelect(group): clicking the title strip selects the
@@ -6096,7 +6673,7 @@ import {
         if (currentNodes.length) api?.removeSelectedNodes?.(currentNodes);
         state.selectedIds.value = [];
       };
-      /* Drag the 30px title strip: LGraphGroup.move(dx, dy) shifts the group
+      /* Drag the title strip: LGraphGroup.move(dx, dy) shifts the group
          AND every child node by the same amount. Screen pixels are converted
          with the live zoom, exactly like node dragging. */
       const GROUP_CORNERS = ["nw", "ne", "sw", "se"];
@@ -6226,6 +6803,23 @@ import {
          overlaps to the shared selection on release. */
       let marqueeStart = null;
       let marqueePickedAt = -Infinity;
+      /* Direction -> mode. Vue Flow re-reads selectionMode on every pointermove,
+         but that value travels through a Vue prop (async nextTick). Write the
+         store ref directly too so the CURRENT stroke already uses the new mode. */
+      const setMarqueeMode = (partial) => {
+        const mode = partial ? "partial" : "full";
+        selectionMode.value = mode;
+        try { if (state.flow?.selectionMode) state.flow.selectionMode.value = mode; }
+        catch (error) { /* store ref may be read-only in some builds; prop is enough */ }
+        /* Drive the box skin imperatively too: the reactive :class binding on
+           <VueFlow> does not always flush before Vue Flow paints the rect on
+           the same pointermove. Toggling the host class here guarantees the
+           current stroke shows green-dashed (crossing) or blue-solid (window). */
+        try {
+          document.querySelectorAll(".ic-flow").forEach((host) =>
+            host.classList.toggle("marquee-crossing", partial));
+        } catch (error) { /* non-critical visual only */ }
+      };
       const onMarqueePointerDown = (event) => {
         marqueeStart = null;
         if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
@@ -6233,6 +6827,18 @@ import {
         if (!(target instanceof Element) || !target.closest("#infcanvas-stage")) return;
         if (target.closest(".vue-flow__node, .ic-group-ui, .ic-selection-tools, .ict-menu, .ic-menu, input, textarea, [contenteditable]")) return;
         marqueeStart = { x: event.clientX, y: event.clientY };
+        /* Every new stroke starts blue/solid; pointermove switches to green
+           dashed once a leftward drag is detected. */
+        setMarqueeMode(false);
+      };
+      /* Capture phase runs before Vue Flow's pane pointermove handler, so the
+         mode is already switched when Vue Flow recomputes the selection.
+         Drag right (dx>0) -> window mode (full containment); drag left -> crossing. */
+      const onMarqueePointerMove = (event) => {
+        if (!marqueeStart) return;
+        const dx = event.clientX - marqueeStart.x;
+        if (dx > 2) setMarqueeMode(false);
+        else if (dx < -2) setMarqueeMode(true);
       };
       const onMarqueePointerUp = (event) => {
         const start = marqueeStart;
@@ -6244,9 +6850,16 @@ import {
         if (!a || !b) return;
         const left = Math.min(a.x, b.x), right = Math.max(a.x, b.x);
         const top = Math.min(a.y, b.y), bottom = Math.max(a.y, b.y);
-        const picked = state.groups.value.filter((group) =>
-          group.x <= right && group.x + group.w >= left &&
-          group.y <= bottom && group.y + group.h >= top).map((group) => group.id);
+        /* Rightward drag = window mode: a group counts only when fully inside.
+           Leftward drag = crossing mode: any overlap counts. */
+        const windowMode = event.clientX >= start.x;
+        const picked = state.groups.value.filter((group) => {
+          const inside = group.x >= left && group.x + group.w <= right &&
+            group.y >= top && group.y + group.h <= bottom;
+          const overlap = group.x <= right && group.x + group.w >= left &&
+            group.y <= bottom && group.y + group.h >= top;
+          return windowMode ? inside : overlap;
+        }).map((group) => group.id);
         if (picked.length) {
           /* A Ctrl+drag that started and ended on the pane still emits Vue
              Flow's pane-click, which would immediately clear the groups the
@@ -6265,11 +6878,13 @@ import {
       onMounted(() => {
         document.addEventListener("pointerdown", onGroupPointerDown, true);
         document.addEventListener("pointerdown", onMarqueePointerDown, true);
+        document.addEventListener("pointermove", onMarqueePointerMove, true);
         document.addEventListener("pointerup", onMarqueePointerUp, true);
       });
       onBeforeUnmount(() => {
         document.removeEventListener("pointerdown", onGroupPointerDown, true);
         document.removeEventListener("pointerdown", onMarqueePointerDown, true);
+        document.removeEventListener("pointermove", onMarqueePointerMove, true);
         document.removeEventListener("pointerup", onMarqueePointerUp, true);
       });
 
@@ -6334,17 +6949,25 @@ import {
         ]);
       };
       /* Let core.js's single keydown handler reuse this setup-scoped action. */
-      state.groupActions = { createGroup, deleteGroup, deleteGroups, selectGroup };
+      /* Bridge for core.js (and live checks): reuse these setup-scoped actions
+         from outside without duplicating the membership logic. */
+      state.groupActions = {
+        createGroup, deleteGroup, deleteGroups, selectGroup,
+        onNodeDrag, onNodeDragStop,
+        /* Set a node's live graph position the same way a drag would, so the
+           membership checks read the up-to-date coordinates. */
+        placeNode(id, x, y) {
+          const live = state.flow?.findNode?.(id);
+          const src = state.nodes.value.find((node) => node.id === id);
+          if (live) live.position = { x, y };
+          if (src) src.position = { x, y };
+        },
+      };
       onBeforeUnmount(() => { state.groupActions = null; });
 
-      /* Re-fit a group's rectangle around its members' CURRENT positions.
-         Called after an arrange so the outline follows the reflowed nodes and
-         keeps the same 10px hug it had when the group was first created. */
-      const fitGroupToNodes = (group) => {
-        const boxes = boxesOfIds(Array.isArray(group.nodes) ? group.nodes : []);
-        if (!boxes.length) return;
-        Object.assign(group, groupBounds(boxes));
-      };
+      /* Groups are re-fit ONLY when their member set changes (add/remove or
+         group creation). Plain moves — dragging nodes, arranging, panning a
+         group — never change membership, so the rectangle stays put. */
 
       /* Same three layouts and 12px default gap as ComfyUI's
          useArrangeNodes.ts; our cards already include their header in the
@@ -6390,11 +7013,8 @@ import {
           }));
         }
         for (const update of updates) NS.flow?.setNodePosition?.(update.id, { x: update.x, y: update.y });
-        /* Any group containing the moved nodes must shrink/grow to hug them. */
-        const movedIds = new Set(updates.map((update) => update.id));
-        for (const group of state.groups.value) {
-          if ((group.nodes || []).some((id) => movedIds.has(id))) fitGroupToNodes(group);
-        }
+        /* Arrange only repositions members — it never changes the member set,
+           so group rectangles stay put (no re-fit). */
         NS.flow?.history?.schedule?.();
         const label = layout === "vertical" ? t("垂直排列")
           : layout === "horizontal" ? t("水平排列") : t("网格排列");
@@ -6492,15 +7112,40 @@ import {
         }
         for (const id of runnable) if (!order.includes(id)) order.push(id); // cycles
 
+        /* Split the wire order into dependency layers. Nodes on the same layer
+           have no wire path between them, so they can all be submitted to
+           ComfyUI's native queue AT ONCE (Promise.all) instead of the old
+           "wait for one to finish before starting the next" loop. Layers are
+           still sequential: a node whose input comes from a sibling generator
+           must wait for that sibling's data.result to be attached first. */
+        const level = new Map(runnable.map((id) => [id, 0]));
+        for (const id of order) {
+          for (const next of adj.get(id) || []) {
+            level.set(next, Math.max(level.get(next) || 0, (level.get(id) || 0) + 1));
+          }
+        }
+        const layers = [];
+        for (const id of order) {
+          const lv = level.get(id) || 0;
+          if (!layers[lv]) layers[lv] = [];
+          layers[lv].push(id);
+        }
+
         NS.api?.toast?.("info", t("整组执行"),
-          t("按接线顺序执行 {count} 个节点", { count: order.length }));
+          t("一次性提交 {count} 个节点到队列", { count: order.length }));
+        for (const layer of layers) {
+          if (!layer || !layer.length) continue;
+          /* Silent per-node toasts — one summary at the end instead of a
+             stack of "生成完成" notifications when a whole layer finishes. */
+          await Promise.all(layer.map(async (id) => {
+            try { await NS.generate?.run?.(id, { silent: true }); }
+            catch (error) { console.warn("[InfCanvas] group run failed", id, error); }
+          }));
+        }
         let done = 0, failed = 0;
         for (const id of order) {
-          try { await NS.generate?.run?.(id); done += 1; }
-          catch (error) {
-            failed += 1;
-            console.warn("[InfCanvas] group run failed", id, error);
-          }
+          const node = state.nodes.value.find((entry) => entry.id === id);
+          if (node?.data?.status === "done") done += 1; else failed += 1;
         }
         NS.api?.toast?.(failed ? "warning" : "success", t("整组执行完成"),
           t("完成 {done} 个，失败 {failed} 个", { done, failed }));
@@ -6512,9 +7157,7 @@ import {
         if (ids.length + groupIds.length < 2) return;
         const gone = new Set(ids);
         const goneGroups = new Set(groupIds);
-        state.groups.value = state.groups.value.filter((group) =>
-          !goneGroups.has(group.id) &&
-          (!Array.isArray(group.nodes) || group.nodes.some((id) => !gone.has(id))));
+        state.groups.value = state.groups.value.filter((group) => !goneGroups.has(group.id));
         state.selectedGroupIds.value = state.selectedGroupIds.value.filter((id) => !goneGroups.has(id));
         if (ids.length) {
           NS.flow?.selectNodes?.([]);
@@ -6556,14 +7199,15 @@ import {
 
       return {
         mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupIds, groupDisplayTitle,
+        dropTargetGroupIds,
         groups, createGroup, selectGroup, onPaneClick, GROUP_CORNERS,
         startGroupRename, commitGroupRename, cancelGroupRename, startGroupDrag, startGroupResize,
         openGroupMenu, openArrangeMenu, batchFavorite, batchDelete,
         openGroupArrangeMenu, favoriteGroup, runGroup, ungroup: deleteGroup,
         groupStyle, toolStyle,
         onInit, onViewportChange, onConnect, isValidConnection,
-        onConnectStart, onConnectEnd,
-        onNodeDragStop, onNodeClick, onSelectionChange,
+        onConnectStart, onConnectEnd, frozenConn, onConnFrame, clearFrozenConn,
+        onNodeDrag, onNodeDragStop, onNodeClick, onSelectionChange,
         zoomFar, cutMode, cutTrail,
         /* Vue Flow clamps d3-zoom's scaleExtent from these two props; leaving
            them at the library default (0.5 .. 2) would cap the wheel at 200%. */
@@ -6587,32 +7231,40 @@ import {
         connection-mode="strict"
         :selection-key-code="mode === 'select' ? 'Control' : false"
         :multi-selection-key-code="['Shift', 'Control', 'Meta']"
-        selection-mode="partial"
+        :selection-mode="selectionMode"
         :zoom-on-scroll="true" :zoom-on-double-click="false" :prevent-scrolling="true"
         :delete-key-code="null" :fit-view-on-init="false" :elevate-edges-on-select="false"
         :default-edge-options="{ type: 'ic' }"
-        :class="['ic-flow', 'mode-' + mode, { 'is-far': zoomFar, 'is-cut-mode': cutMode, 'is-multi-select': multiSelect }]"
+        :class="['ic-flow', 'mode-' + mode, { 'is-far': zoomFar, 'is-cut-mode': cutMode, 'is-multi-select': multiSelect, 'marquee-crossing': selectionMode === 'partial' }]"
         @init="onInit" @viewport-change="onViewportChange" @connect="onConnect"
         @pane-click="onPaneClick"
         @connect-start="onConnectStart" @connect-end="onConnectEnd"
         :is-valid-connection="isValidConnection"
-        @node-drag-stop="onNodeDragStop" @node-click="onNodeClick" @selection-change="onSelectionChange"
+        @node-drag="onNodeDrag" @node-drag-stop="onNodeDragStop"
+        @node-click="onNodeClick" @selection-change="onSelectionChange"
       >
         <!-- Vue Flow native dotted background (#81818a dots, gap 20). It lives
              inside VueFlow so it follows the viewport zoom/pan automatically. -->
         <Background variant="dots" />
         <template #connection-line="slotProps">
-          <IcConnectionLine v-bind="slotProps" />
+          <IcConnectionLine v-bind="slotProps" :on-frame="onConnFrame" />
         </template>
         <!-- zoom-pane is the slot VueFlow renders INSIDE the transformation
              pane, so these use graph units and scale exactly like nodes. The
              backdrop is below the nodes; only the strip/grips/toolbar take
              pointers (the pane itself is pointer-events:none). -->
         <template #zoom-pane>
+          <!-- Frozen wire after a release over empty canvas (connect menu open):
+               same component + same graph coords as the live connection line, so
+               it reads as the wire never left the pointer. Cleared on pick/cancel. -->
+          <svg v-if="frozenConn" class="ic-frozen-conn" width="1" height="1">
+            <IcConnectionLine v-bind="frozenConn" />
+          </svg>
           <div v-for="group in groups" :key="group.id" class="ic-group" :data-id="group.id"
-               :class="{ 'is-selected': selectedGroupIds.includes(group.id) }" :style="groupStyle(group)"></div>
+               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-drop-target': dropTargetGroupIds.includes(group.id) }"
+               :style="groupStyle(group)"></div>
           <div v-for="group in groups" :key="'ui-' + group.id" class="ic-group-ui" :data-id="group.id"
-               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-multi': multiSelect }"
+               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-multi': multiSelect, 'is-drop-target': dropTargetGroupIds.includes(group.id) }"
                :style="groupStyle(group)">
             <div class="ic-group-tools" @pointerdown.stop @mousedown.stop
                  @click.stop @dblclick.stop @wheel.stop @contextmenu.stop>

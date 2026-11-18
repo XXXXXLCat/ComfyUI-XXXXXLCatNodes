@@ -338,6 +338,10 @@ html.infcanvas-mode .litegraph-contextmenu {
    keeping it inside our root avoids leaking into ComfyUI's own UI. */
 #infcanvas-root.is-resizing,
 #infcanvas-root.is-resizing * { cursor: ew-resize !important; }
+/* Live node placement (wire-release -> pick -> node rides the pointer): keep a
+   normal arrow everywhere; connection drag otherwise leaves a crosshair/grab. */
+#infcanvas-root.is-placing,
+#infcanvas-root.is-placing * { cursor: default !important; }
 
 /* #graph-canvas equivalent: absolutely positioned, full height, and NOT part
    of the panel's flex row, so opening/closing/resizing a side panel never
