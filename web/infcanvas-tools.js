@@ -746,10 +746,10 @@
      dropped by Vue Flow). core.freeSpot() does exactly that search. */
   function resultPosition(ctx, index = 0) {
     const src = NS.flow?.findNode?.(ctx.id);
-    const width = Number(src?.data?.size?.[0]) || 320;
+    const width = Number(src?.data?.size?.[0]) || 480;
     const desired = src ? [src.position.x + width + 80, src.position.y + index * 40] : null;
     if (!desired) return null;
-    return NS.api?.freeSpot ? NS.api.freeSpot(desired, [320, 180], "asset") : desired;
+    return NS.api?.freeSpot ? NS.api.freeSpot(desired, [480, 270], "asset") : desired;
   }
 
   function commitAsset(asset, ctx, index = 0) {
@@ -1800,14 +1800,20 @@
 
   /* --------------------------- shared actions ---------------------------- */
 
-  R.download = async (ctx) => {
+  R.favorite = async (ctx) => {
     /* Generated nodes keep their result in data.result; asset nodes in data.asset. */
     const asset = ctx.data?.result || ctx.data?.asset;
+    const kind = asset?.kind || ctx.data?.kind || "text";
     const url = ctx.url || asset?.url || (asset && NS.api?.viewUrl?.(asset));
-    if (!url) return;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(t("下载失败：HTTP") + " " + response.status);
-    saveBlob(await response.blob(), asset?.name || ctx.data?.title || "asset");
+    const text = ctx.data?.text ?? ctx.data?.asset?.text ?? ctx.data?.result?.text;
+    const saved = await NS.api.addToFavorites(asset || {}, {
+      url, kind,
+      name: asset?.name || asset?.filename || ctx.data?.title || "asset",
+      // Only text assets use data.text as the payload; media nodes carry an
+      // empty data.text that must NOT shadow their fetchable file.
+      text: kind === "text" && text != null ? String(text) : undefined,
+    });
+    toast("success", t("已添加到收藏"), t("已保存到收藏文件夹：{name}", { name: saved.filename }));
   };
   R.delete = (ctx) => NS.api?.removeNode?.(ctx.id);
   /* Feed a material file straight into the node from the disk. Only offered on
@@ -1828,7 +1834,7 @@
     crop: "crop", grid: "grid-3x3", mirror: "rotate-3d", adjust: "aperture",
     extractAudio: "audio-lines-off", trim: "scissors",
     videoCrop: "crop", videoSpeed: "gauge", reverse: "rewind", rotate: "rotate-3d",
-    frame: "camera", clip: "scissors", speed: "gauge", download: "download",
+    frame: "camera", clip: "scissors", speed: "gauge", favorite: "bookmark",
     upload: "upload", delete: "trash-2",
   };
 
@@ -1849,7 +1855,7 @@
     frame:        "捕捉帧：在指定时间点抽取一帧画面，生成一张图片节点，原视频保留",
     clip:         "截取：截取片段、可删除片段并拼接，生成新的音频节点，原音频保留",
     speed:        "变速：调整播放速度 0.1×–4×，保持音调，可试听，生成新的音频节点，原音频保留",
-    download:     "下载：把原始素材文件保存到本地",
+    favorite:     "添加到收藏：把素材保存到收藏文件夹，按 文本/图像/视频/音频 分类",
     upload:       "上传：从本地选择素材文件，直接填充当前节点（仅输入端未接入时可用）",
     delete:       "删除：从画布中移除这个节点（磁盘上的原素材文件不会被删除）",
   };
@@ -1857,13 +1863,12 @@
   function actionsFor(data, options) {
     /* One rule for both states: whatever the node is holding (a dropped file
        on a material node, or the result of a generator) gets the same per-kind
-       tools plus download. Text nodes have no tool set, so they only get
-       download + delete. */
+       tools plus 收藏. Text nodes have no tool set, so they only get 收藏 + delete. */
     const media = data.asset || data.result || null;
     const kind = media?.kind || data.kind;
     const pairs = [];
     if (media && TOOL_SETS[kind]) pairs.push(...TOOL_SETS[kind]);
-    if (media) pairs.push(["download", t("下载")]);
+    if (media) pairs.push(["favorite", t("添加到收藏")]);
     /* Upload sits just left of delete — the last slot before the destructive
        one, so the row reads "do things … fill … destroy". */
     if (options?.canUpload) pairs.push(["upload", t("上传")]);

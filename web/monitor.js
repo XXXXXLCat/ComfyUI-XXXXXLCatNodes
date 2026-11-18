@@ -6,6 +6,11 @@ import { api } from "../../scripts/api.js";
 
 const REFRESH_MS = 500;
 
+// ComfyUI 原生动作栏（ComfyQueueButton）用 h-8 rounded-lg：32px 高、8px 圆角。
+// 画布入口 / 清理按钮 / 状态段统一按这套尺寸，避免和原生按钮看起来不齐。
+const BAR_H = 32;
+const BAR_RADIUS = 8;
+
 // 配色（用户指定）：深底白字 + 渐变绿蓝系
 const COLORS = {
   cpu: "#207125",
@@ -18,6 +23,9 @@ const TEMP_MIN = 40;
 const TEMP_MAX = 85;
 const TEMP_COLD = "#207125";
 const TEMP_HOT = "#B33A3A";
+// 画布入口：与 GPU 段同色的亮蓝底，配白字（亮底用深字会读不清）
+// 画布入口：只显示 logo，不显示文字。SVG 相对本模块定位，适配蓝底（深色改白）版本。
+const CANVAS_LOGO_URL = new URL("./canvas-logo.svg", import.meta.url).href;
 const BOX_BG = "#262729"; // 段/按钮底色
 const TEXT_COLOR = "#FFFFFF"; // 数值文字颜色
 const LABEL_COLOR = "rgba(255,255,255,.55)"; // 标签文字颜色
@@ -50,14 +58,14 @@ function tempColor(ratio) {
   return "rgb(" + r + "," + g + "," + b + ")";
 }
 
-/** 单个状态段：窄段(约38px×30px) = 背景填充条(占用量, 自底向上) + 上方数字 + 下方标签(上下布局)。 */
+/** 单个状态段：窄段(约38px×32px) = 背景填充条(占用量, 自底向上) + 上方数字 + 下方标签(上下布局)。 */
 function mkSeg(key, label, color) {
   const seg = mk("div");
   seg.style.cssText = [
     "position:relative;overflow:hidden;flex-shrink:0;",
-    "width:38px;height:30px;border-radius:4px;",
+    "width:38px;height:" + BAR_H + "px;border-radius:" + BAR_RADIUS + "px;",
     "background:rgba(255,255,255,.07);",
-    "box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);",
+    "box-shadow:none;border:0;",
     "user-select:none;cursor:default;",
   ].join("");
 
@@ -162,7 +170,7 @@ async function runCleanup(kind, btn, inputs) {
   }, 800);
 }
 
-/** 清理按钮：与状态行同高（30px）的英文两行按钮，上=VRAM/RAM，下=Cleanup */
+/** 清理按钮：与状态行同高（32px）的英文两行按钮，上=VRAM/RAM，下=Cleanup */
 /**
  * 菜单栏两行按钮的共用外观：清理按钮与画布入口都走这里。
  * palette 可选，用来给某个按钮换一套底色/文字色（默认沿用状态段的深灰底白字）。
@@ -174,18 +182,36 @@ function mkBarButton(top, bottom, title, palette) {
   const bgHover = skin.bgHover || "rgba(255,255,255,.12)";
   const inkStrong = skin.inkStrong || TEXT_COLOR;
   const inkSoft = skin.inkSoft || LABEL_COLOR;
-  const border = skin.border || "rgba(255,255,255,.14)";
   const strongBottom = skin.strongBottom === true;
+  const icon = skin.icon || null;
+  const logo = skin.logo || null;
   const btn = mk("button");
   btn.type = "button";
   btn.title = title || top + " " + bottom;
   btn.style.cssText = [
     "display:flex;flex-direction:column;align-items:center;justify-content:center;",
-    "width:50px;height:30px;flex-shrink:0;border-radius:4px;",
-    "border:1px solid " + border + ";background:" + bg + ";",
+    "width:50px;height:" + BAR_H + "px;flex-shrink:0;border-radius:" + BAR_RADIUS + "px;",
+    "box-sizing:border-box;border:0;outline:none;box-shadow:none;background:" + bg + ";",
     "cursor:pointer;padding:0;line-height:1.15;",
     "transition:background .15s;",
   ].join("");
+  if (logo) {
+    // 纯 logo 模式：不放文字，img 居中铺满可用区域（按钮本身仍 50×32，与 Cleanup 同宽）。
+    const img = mk("img");
+    img.src = logo;
+    img.alt = title || "Infinite Canvas";
+    img.draggable = false;
+    img.style.cssText =
+      "width:50px;height:32px;object-fit:contain;display:block;pointer-events:none;border:0;outline:none;";
+    btn.append(img);
+    btn.addEventListener("mouseenter", () => {
+      if (!btn.disabled) btn.style.background = bgHover;
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (!btn.disabled) btn.style.background = bg;
+    });
+    return btn;
+  }
   const line1 = mk("div");
   line1.textContent = top;
   line1.style.cssText = "font-size:11px;font-weight:600;color:" + inkStrong + ";";
@@ -195,7 +221,25 @@ function mkBarButton(top, bottom, title, palette) {
   line2.style.cssText = strongBottom
     ? "font-size:11px;font-weight:600;color:" + inkStrong + ";"
     : "font-size:10px;color:" + inkSoft + ";";
-  btn.append(line1, line2);
+  if (icon) {
+    // 带图标（画布入口）：50px 宽里放 ∞ + 两行英文，字号缩到 8px 才不挤出按钮。
+    btn.style.flexDirection = "row";
+    btn.style.gap = "2px";
+    btn.style.padding = "0 2px";
+    line1.style.cssText = "font-size:8px;font-weight:600;line-height:1.1;white-space:nowrap;color:" + inkStrong + ";";
+    line2.style.cssText = "font-size:8px;font-weight:600;line-height:1.1;white-space:nowrap;color:" + inkStrong + ";";
+    const iconEl = mk("span");
+    iconEl.textContent = icon;
+    iconEl.style.cssText =
+      "flex:0 0 16px;width:16px;display:flex;align-items:center;justify-content:center;" +
+      "font-size:16px;line-height:1;color:" + inkStrong + ";";
+    const textBox = mk("div");
+    textBox.style.cssText = "display:flex;flex-direction:column;align-items:flex-start;justify-content:center;min-width:0;";
+    textBox.append(line1, line2);
+    btn.append(iconEl, textBox);
+  } else {
+    btn.append(line1, line2);
+  }
   btn.addEventListener("mouseenter", () => {
     if (!btn.disabled) btn.style.background = bgHover;
   });
@@ -218,13 +262,43 @@ function mkSeparator() {
   return sep;
 }
 
+/** 触发画布开/关：与 infcanvas.js 的 toggleCanvas 完全一致（新画布命名空间）。 */
+function toggleInfCanvas(tries) {
+  const api = window.InfCanvas && window.InfCanvas.api;
+  if (api && api.enter && api.exit) {
+    if (api.isActive && api.isActive()) api.exit();
+    else api.enter();
+    return;
+  }
+  // 画布模块可能尚未加载完（ComfyUI 的 /extensions 是并行加载）：有限轮询等待，
+  // 与画布自身 setup() 的等待思路一致，避免点了没反应。
+  const left = tries == null ? 30 : tries;
+  if (left > 0) setTimeout(() => toggleInfCanvas(left - 1), 100);
+}
+
+/**
+ * 无限画布入口：位于清理按钮左侧，宽度/高度/底色与清理按钮完全一致（同走 mkBarButton
+ * 默认外观），只显示 logo、无文字（logo 深色已转白以适配深色底）。
+ */
+function mkCanvasButton() {
+  const btn = mkBarButton("", "", "Infinite Canvas", {
+    logo: CANVAS_LOGO_URL,
+  });
+  btn.id = "xcat-infinite-canvas-entry";
+  btn.addEventListener("click", () => toggleInfCanvas());
+  return btn;
+}
+
 function build() {
   root = mk("div");
   root.id = "xxxxxlcat-monitor";
   root.style.cssText =
     "display:flex;flex-direction:row;gap:5px;flex-wrap:wrap;align-items:center;" +
     "user-select:none;cursor:default;";
-  // 清理按钮放在状态行左侧：RAM Cleanup 在左、VRAM Cleanup 在右（与状态段同高 30px）
+  // 画布入口固定在清理按钮左侧，与清理按钮之间用竖分隔符隔开
+  root.append(mkCanvasButton());
+  root.append(mkSeparator());
+  // 清理按钮放在状态行左侧：RAM Cleanup 在左、VRAM Cleanup 在右（与状态段同高 32px）
   root.append(
     mkCleanupButton("ram", "RAM", "Cleanup", {
       clean_file_cache: true,

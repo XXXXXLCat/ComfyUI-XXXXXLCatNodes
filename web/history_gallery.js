@@ -1,12 +1,14 @@
-// History Gallery 🐈‍⬛ — a sidebar tab that lists every file in the account's
-// output/ and input/ trees, not just the ones the Assets panel saw this session.
+// History Gallery 🐈‍⬛ — the canvas-only media browser. It lists every file in
+// the account's output/ and input/ trees, mounted in the infinite canvas's own
+// sidebar drawer (infcanvas-ui.js -> window.InfCanvas.galleryPanel.mount).
+// There is intentionally NO ComfyUI main-UI sidebar tab: this panel belongs to
+// the canvas and only features that work inside the canvas shell are exposed.
 //
 // Data comes from nodes/history_gallery.py:
 //   GET  /xcat/gallery         manifest (each entry carries its own signed URLs)
 //   GET  /xcat/gallery/file    the file itself, or a thumbnail with preview=1
 //   POST /xcat/gallery/zip     multi-file download as a single archive
 //   POST /xcat/gallery/delete  removes the files from disk
-//   POST /xcat/gallery/insert  stages one file in input/ for a Load* node
 // Under --multi-user the server scopes everything to the signed-in account.
 //
 // Layout and interaction are ported from the native Assets panel — read those
@@ -21,19 +23,18 @@
 //   useAssetGridSelection.ts   4px threshold, rectsIntersect, suppressNextClick
 //   marqueeSelectionUtil.ts    normalise + intersect helpers
 //
-// The panel is plain DOM (no Vue) because custom sidebar tabs are mounted with
-// `render(el)`; kept deliberately dependency-free so it works on every
-// frontend version that has `app.extensionManager.registerSidebarTab`.
+// The panel is plain DOM (no Vue) so it can mount into the canvas shell's
+// drawer directly, independent of the frontend's Vue internals.
 
-import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { langCode } from "./i18n.js";
 
 const LIST_URL = "/xcat/gallery";
+const MEDIA_FOLDER_URL = "/xcat/media/folder";
+const MEDIA_PICK_URL = "/xcat/media/folder/pick";
+const PROMPT_URL = "/xcat/gallery/prompt";
 const ZIP_URL = "/xcat/gallery/zip";
 const DELETE_URL = "/xcat/gallery/delete";
-const INSERT_URL = "/xcat/gallery/insert";
-const TAB_ID = "xcat-history-gallery";
 const BATCH = 60;
 const CACHE_TTL = 5000;
 
@@ -43,13 +44,21 @@ const STRINGS = {
     zh: {
         // Sidebar strip label is deliberately short — the full name would wrap
         // to two lines and push the whole tab column around.
-        title: "画廊",
-        panelTitle: "历史画廊",
+        title: "资产",
+        panelTitle: "资产",
         tooltip: "浏览 output 与 input 目录里的所有文件",
+        mediaFolder: "存放文件夹",
+        chooseMediaFolder: "选择存放文件夹",
+        mediaFolderNotSet: "尚未设置存放文件夹，点击上方选择",
+        mediaFolderOpening: "正在打开文件夹选择…",
+        mediaFolderPicked: "存放文件夹已更新",
+        mediaFolderPickFailed: "选择文件夹失败",
+        mediaFolderSaveFailed: "保存文件夹设置失败",
         tabOutput: "已生成",
         tabInput: "已导入",
         all: "全部",
-        image: "图片",
+        text: "文本",
+        image: "图像",
         video: "视频",
         audio: "音频",
         other: "其他",
@@ -76,7 +85,6 @@ const STRINGS = {
         // Actions below mirror mediaAsset.actions / mediaAsset.selection in the
         // official locale pack, so both panels use the same wording.
         inspect: "查看资产",
-        insertNode: "作为节点插入到工作流",
         download: "下载",
         moreOptions: "更多选项",
         delete: "删除",
@@ -89,18 +97,32 @@ const STRINGS = {
         deleteToTrash: "它们将被移动到回收站。",
         cancel: "取消",
         deleteFailed: "删除失败",
-        insertDone: "已插入 {node} 节点",
-        insertFailed: "插入失败",
-        insertNoNode: "找不到 {node} 节点",
-        insertUnsupported: "该文件类型不能作为节点插入",
+        model: "模型",
+        prompt: "提示词",
+        params: "参数",
+        noMetadata: "此文件没有可读取的生成信息",
+        metadataFailed: "生成信息读取失败",
+        copyPrompt: "复制提示词",
+        copied: "提示词已复制",
+        copyFailed: "复制失败",
+        prevAsset: "上一个素材",
+        nextAsset: "下一个素材",
     },
     en: {
-        title: "Gallery",
-        panelTitle: "History Gallery",
+        title: "Assets",
+        panelTitle: "Assets",
         tooltip: "Browse every file in the output and input directories",
+        mediaFolder: "Storage folder",
+        chooseMediaFolder: "Choose storage folder",
+        mediaFolderNotSet: "No storage folder yet — click above to choose",
+        mediaFolderOpening: "Opening folder picker…",
+        mediaFolderPicked: "Storage folder updated",
+        mediaFolderPickFailed: "Could not choose folder",
+        mediaFolderSaveFailed: "Could not save folder",
         tabOutput: "Generated",
         tabInput: "Imported",
         all: "All",
+        text: "Text",
         image: "Images",
         video: "Videos",
         audio: "Audio",
@@ -124,7 +146,6 @@ const STRINGS = {
         play: "Play",
         pause: "Pause",
         inspect: "Inspect asset",
-        insertNode: "Insert as node in workflow",
         download: "Download",
         moreOptions: "More options",
         delete: "Delete",
@@ -137,16 +158,31 @@ const STRINGS = {
         deleteToTrash: "They will be moved to the Recycle Bin.",
         cancel: "Cancel",
         deleteFailed: "Delete failed",
-        insertDone: "Added a {node} node",
-        insertFailed: "Could not add the node",
-        insertNoNode: "Node type {node} is not available",
-        insertUnsupported: "This file type cannot be added as a node",
+        model: "Model",
+        prompt: "Prompt",
+        params: "Parameters",
+        noMetadata: "No generation info in this file",
+        metadataFailed: "Could not read generation info",
+        copyPrompt: "Copy prompt",
+        copied: "Prompt copied",
+        copyFailed: "Could not copy prompt",
+        prevAsset: "Previous asset",
+        nextAsset: "Next asset",
     },
 };
 
-// Resolved per call — `langCode()` caches itself once the setting is readable,
-// and returns a guess (uncached) while the app is still booting.
-const t = (key) => (STRINGS[langCode()] || STRINGS.en)[key] ?? key;
+// The gallery is mounted inside the canvas shell, so it must follow the SAME
+// language switch as the rest of the canvas: the rail's language button calls
+// NS.i18n.toggleLang(), which persists `InfCanvas.Lang` and rebuilds this panel
+// on change. `langCode()` (Comfy.Locale) is the node panels' source and can
+// disagree with the canvas, so it is only a fallback for a standalone mount
+// where the canvas i18n bus is not present at all. Resolve on every call —
+// a value captured at mount time would stay stale after a switch.
+function activeLang() {
+    const fromCanvas = window.InfCanvas?.i18n?.current?.();
+    return fromCanvas === "en" || fromCanvas === "zh" ? fromCanvas : langCode();
+}
+const t = (key) => (STRINGS[activeLang()] || STRINGS.en)[key] ?? key;
 
 // ------------------------------------------------------------------- icons
 
@@ -183,18 +219,17 @@ const ICON_PATHS = {
     x: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M18 6L6 18M6 6l12 12'/>",
     zoomIn:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21l-4.35-4.35M11 8v6m-3-3h6'/></g>",
-    /* The only non-lucide glyph here: the native insert action is
-       icon-[comfy--node] (16px grid, 1.3 stroke), copied verbatim from the
-       shipped .icon-\[comfy--node\] rule — a plus sign was our own invention. */
-    node: "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-width='1.3' d='m11.267 10.45-.084.316c-.143.536-.63.909-1.184.909H4.694a1.225 1.225 0 01-1.183-1.54l1.307-4.9c.143-.537.628-.91 1.183-.91h5.464c.724 0 1.252.687 1.065 1.387l-.03.112M15.35 8h-4.9M3.713 8H.65'/>",
     ellipsis:
         "<g fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/><circle cx='5' cy='12' r='1'/></g>",
+    chevronLeft:
+        "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m15 18-6-6 6-6'/>",
+    chevronRight:
+        "<path fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m9 18 6-6-6-6'/>",
 };
 
-// lucide draws on a 24px grid; the comfy set uses 16.
-const ICON_META = {
-    node: { viewBox: "0 0 16 16", strokeWidth: "1.3" },
-};
+// Per-icon overrides for non-lucide glyphs. None remain — insert-as-node was a
+// main-UI-only feature and is not exposed in the canvas.
+const ICON_META = {};
 
 function svgIcon(name, cls) {
     const meta = ICON_META[name] || {};
@@ -216,14 +251,14 @@ function svgIcon(name, cls) {
 const VIEW_KEY = "xcat.gallery.view";
 const VIEW_MODES = ["list", "grid-small", "grid"];
 
-// The chips group the six kinds the way a user thinks about them: 3D models and
-// text files are "other" (there is no thumbnail for either).
+// Five media chips: 全部 / 文本 / 图像 / 视频 / 音频. `all` is the default and
+// maps to null (no kind restriction), so 3D/other files stay reachable there.
 const FILTER_GROUPS = {
     all: null,
+    text: ["text"],
     image: ["image"],
     video: ["video"],
     audio: ["audio"],
-    other: ["3d", "text", "other"],
 };
 
 // Marquee constants, straight from useAssetGridSelection.ts.
@@ -285,38 +320,6 @@ function fileUrl(file, preview) {
     return file?.url || "";
 }
 
-// Native drag contract (assetDragUtil.startAssetDrag): Ctrl/Meta cancels the
-// gesture because those modifiers belong to selection, otherwise the card
-// publishes the ORIGINAL file URL — never the webp preview the tile renders.
-//
-// Two payloads, because the drop side reads different ones:
-//   text/uri-list            → the bytes (same-origin only)
-//   application/x-comfy-asset-info → the name. Deliberately carries
-//     display_name but NOT filename: the canvas names the upload from
-//     display_name, while a `filename` would send the node drop-zone down its
-//     result-item path (asset record lookup) that our files have no record for.
-//     The URL also carries ?filename= for that same node path.
-function startDrag(ev, file) {
-    if (ev.ctrlKey || ev.metaKey) {
-        ev.preventDefault();
-        return;
-    }
-    const dt = ev.dataTransfer;
-    const raw = fileUrl(file, false);
-    if (!dt || !raw || !file) return;
-    const url = new URL(raw, location.href);
-    url.searchParams.set("filename", file.filename || "");
-    dt.setData("text/uri-list", url.toString());
-    dt.setData(
-        "application/x-comfy-asset-info",
-        JSON.stringify({
-            display_name: file.filename,
-            media_kind: file.kind === "3d" ? "3D" : file.kind,
-        })
-    );
-    dt.effectAllowed = "copy";
-}
-
 function relPath(file) {
     return file.subfolder ? `${file.subfolder}/${file.filename}` : file.filename;
 }
@@ -331,6 +334,25 @@ function fileExt(file) {
 
 function payload(files) {
     return { files: files.map((f) => ({ source: f.source, path: f.path })) };
+}
+
+// The canvas shell is a separate IIFE with its own drop contract: it accepts
+// `application/x-infcanvas-asset` carrying a flat asset record, NOT ComfyUI's
+// main-UI `x-comfy-asset-info`. Rebuild that record from the gallery entry and
+// keep its signed URL verbatim — re-deriving a /view? URL would 404 for
+// multi-user files and for thumbnails served by the gallery route.
+function toCanvasAsset(file) {
+    return {
+        name: file.filename,
+        filename: file.filename,
+        subfolder: file.subfolder || "",
+        type: file.source === "input" ? "input" : "output",
+        kind: file.kind || "other",
+        size: file.size,
+        mtime: file.mtime,
+        path: file.path,
+        url: fileUrl(file),
+    };
 }
 
 // Waveform peaks for an audio tile. Decoding a whole file into an AudioBuffer is
@@ -395,7 +417,8 @@ const CSS = `
 .xog-dlg,
 .xog-selbar,
 .xog-lb,
-.xog-marquee {
+.xog-marquee,
+.xog-head-slot {
     --xog-fg: var(--text-primary, var(--fg-color, #e8e8e8));
     --xog-muted: var(--text-secondary, color-mix(in srgb, var(--fg-color, #e8e8e8) 62%, transparent));
     --xog-line: var(--interface-stroke, color-mix(in srgb, var(--fg-color, #e8e8e8) 18%, transparent));
@@ -443,29 +466,42 @@ const CSS = `
     padding: 0;
     background: var(--comfy-menu-bg, var(--bg-color, #171718));
 }
-.xog-head {
+.xog-srctabs-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 64px;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--xog-line);
-}
-.xog-title {
-    flex: 1;
-    min-width: 0;
-    color: var(--xog-fg);
-    font-size: 16px;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    padding: 8px 16px 1px;     /* native px-4 pt-2 pb-px */
 }
 .xog-count {
     flex: none;
+    margin-left: auto;
     color: var(--xog-muted);
     font-size: 12px;
     white-space: nowrap;
+}
+/* Header-slot variant (canvas shell title row, left of the close X): the count
+   and refresh share one inline group with no auto margin. Uses the same
+   .xog-count / .xog-btn base rules; only the row layout is overridden. */
+/* The shell's title-row actions already own the 8px gap, so these wrappers
+   must not create a second flex context (that doubled the gap between our
+   refresh and the native close X). display:contents puts count + refresh
+   directly into the same flex row as the close button. */
+.xog-head-slot,
+.xog-head-group { display: contents; }
+.xog-head-group .xog-count { margin-left: 0; }
+/* Header refresh must be a pixel-for-pixel match of the native close X
+   (SidebarTabCloseButton): bg-transparent, muted icon, hover:bg-accent. */
+.xog-head-group .xog-refresh {
+    background: transparent;
+    color: var(--muted-foreground, var(--xog-muted));
+}
+.xog-head-group .xog-refresh:hover {
+    background: var(--accent, var(--xog-surface-hover));
+    color: var(--muted-foreground, var(--xog-muted));
+}
+.xog-head-group .xog-refresh:focus-visible {
+    outline: 1px solid var(--ring, var(--xog-accent));
+    outline-offset: 0;
 }
 .xog-btn {
     display: inline-flex;
@@ -489,42 +525,76 @@ const CSS = `
 .xog-btn:hover { background: var(--xog-surface-hover); }
 .xog-btn:focus-visible { outline: 1px solid var(--xog-accent); outline-offset: 0; }
 .xog-btn svg { width: 16px; height: 16px; }
+/* Match ComfyUI's native Assets tab strip (sideToolbar): "output / input"
+   are pill-shaped chips with a filled selected state, and there is NO rule
+   under them. The canvas shell renders the "历史画廊" title; count + refresh
+   share this row, pushed to the right of "input" (no separate header/divider). */
 .xog-srctabs {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 8px 16px 0;
-    border-bottom: 1px solid var(--xog-line);
+    gap: 8px;
+    min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
 }
 .xog-srctabs::-webkit-scrollbar { display: none; }
+/* In the canvas shell count + refresh were moved to the title row, leaving
+   this chip as the sole item: let it stretch across the whole row so a long
+   folder path uses all the room instead of ellipsising at 190px. */
+.xog--shell .xog-srctabs { flex: 1; min-width: 0; }
 .xog-srctab {
     flex: none;
-    padding: 4px 0 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;              /* native Tab.vue h-8 */
+    padding: 0 10px;           /* native Tab.vue px-2.5 */
     border: none;
-    border-bottom: 2px solid transparent;
+    border-radius: 8px;        /* native rounded-lg */
     background: transparent;
     color: var(--xog-muted);
     font-family: inherit;
-    font-size: 14px;
-    line-height: 20px;
+    font-size: 14px;           /* native text-sm */
+    line-height: 1;
     white-space: nowrap;
     cursor: pointer;
-    transition: color 0.2s ease, border-color 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 .xog-srctab:hover { color: var(--xog-fg); }
 .xog-srctab[data-active="true"] {
+    background: var(--xog-tab-active);
     color: var(--xog-fg);
-    border-bottom-color: var(--xog-fg);
     font-weight: 500;
+}
+/* 媒体 panel replaces the output/input tabs with one folder chip. In the
+   canvas shell the count + refresh live in the title row, so this chip is the
+   only thing on the row and can use the FULL width -- no 190px cap needed.
+   Keep the cap only for the standalone (non-shell) layout. */
+.xog-media-path {
+    max-width: 100%;
+    overflow: hidden;
+}
+.xog:not(.xog--shell) .xog-media-path,
+.xog:not(.xog--shell) .xog-media-path[data-active="true"] { max-width: 190px; }
+/* A block-level inner label is required for text-overflow: ellipsis to clip
+   the END of a long Windows path. The chip itself is inline-flex + centered,
+   which clipped both ends of bare text (dropping "C:\\U" and the tail). */
+.xog-media-label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .xog-tabs {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    padding: 8px 16px 1px;
+    /* Match the tab-strip→search gap (~9px) on BOTH sides: searchrow already
+       contributes pb 8px, so pt 1px gives 9px above; grid has no top padding,
+       so pb 9px gives the same 9px below the chips. */
+    padding: 1px 16px 9px;
 }
 .xog-chip {
     display: inline-flex;
@@ -552,6 +622,10 @@ const CSS = `
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Native filter bar measured on the live panel: padding 8px 16px (the
+       search row itself carries the top gap; the tab strip's pb-px adds 1px,
+       yielding the ~9px tab-to-search spacing). Source shows px-4 pb-2 but the
+       shipped build also applies py-2 — trust the computed value. */
     padding: 8px 16px;
 }
 .xog-searchbox {
@@ -968,6 +1042,13 @@ const CSS = `
     flex: 1;
     gap: 4px;
 }
+/* While the hover-only download/delete actions are revealed, reserve their
+   full width (2×32 + 8 gap + 4 inset) so name/sub ellipsize before them
+   instead of running underneath and getting clipped by the buttons. */
+.xog-grid[data-view="list"] .xog-card:hover .xog-meta,
+.xog-grid[data-view="list"] .xog-card:focus-within .xog-meta {
+    padding-right: 80px;
+}
 .xog-grid[data-view="list"] .xog-name {
     font-size: 12px;
     line-height: 12px;
@@ -1241,7 +1322,9 @@ const CSS = `
 .xog-lb-panel {
     display: flex;
     flex-direction: column;
-    max-width: min(1100px, 94vw);
+    width: min(1600px, 96vw);
+    height: 92vh;
+    max-width: min(1600px, 96vw);
     max-height: 92vh;
     border: 1px solid var(--xog-line);
     border-radius: 8px;
@@ -1259,8 +1342,14 @@ const CSS = `
     padding: 0 16px;
     border-bottom: 1px solid var(--xog-line);
 }
+.xog-lb-titles {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
 .xog-lb-name {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     color: var(--xog-fg);
     font-size: 16px;
@@ -1269,27 +1358,81 @@ const CSS = `
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.xog-lb-actions { display: flex; gap: 8px; }
+.xog-lb-meta {
+    flex: none;
+    min-width: 0;
+    color: var(--xog-muted);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.xog-lb-actions { display: flex; gap: 8px; flex: none; margin-left: auto; }
+/* Preview on the left, fixed-width parameter column on the right. The preview
+   flexes with the viewport; the parameter column never shrinks. */
+.xog-lb-main {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+}
+.xog-lb-stage {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+}
 .xog-lb-body {
     display: flex;
+    flex: 1 1 0;
     align-items: center;
     justify-content: center;
     background: #0d0d0d;
-    min-width: 260px;
-    min-height: 120px;
-    overflow: auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
 }
+.xog-lb-nav {
+    position: absolute;
+    top: 50%;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--xog-line);
+    border-radius: 50%;
+    background: var(--comfy-menu-bg, rgba(20, 20, 20, 0.82));
+    color: var(--xog-fg);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.xog-lb-nav svg { width: 20px; height: 20px; }
+.xog-lb-nav:hover { background: var(--xog-surface-hover, rgba(60, 60, 60, 0.9)); }
+.xog-lb-stage:hover .xog-lb-nav,
+.xog-lb-nav:focus-visible { opacity: 1; }
+.xog-lb-nav[hidden] { display: none; }
+.xog-lb-prev { left: 14px; }
+.xog-lb-next { right: 14px; }
 .xog-lb-body img,
 .xog-lb-body video {
     display: block;
-    max-width: min(1000px, 90vw);
-    max-height: 76vh;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
     object-fit: contain;
 }
-.xog-lb-body audio { width: min(480px, 80vw); margin: 24px; }
+.xog-lb-body audio { width: min(480px, 80%); margin: 24px; }
 .xog-lb-body pre {
-    width: min(1000px, 90vw);
-    max-height: 76vh;
+    width: 100%;
+    height: 100%;
     margin: 0;
     padding: 16px;
     box-sizing: border-box;
@@ -1311,24 +1454,152 @@ const CSS = `
     font-size: 14px;
 }
 .xog-lb-face svg { width: 48px; height: 48px; }
-.xog-lb-foot {
-    padding: 8px 16px;
-    border-top: 1px solid var(--xog-line);
+/* Generation info: fixed-width right column, one parameter per row. Only this
+   column scrolls; the preview on the left keeps the rest of the dialog width. */
+.xog-lb-info {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 360px;
+    width: 360px;
+    height: 100%;
+    min-height: 0;
+    padding: 16px;
+    box-sizing: border-box;
+    border-left: 1px solid var(--xog-line);
+    background: var(--xog-surface, #171718);
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted, var(--xog-muted)) transparent;
+}
+.xog-lb-info[hidden] { display: none; }
+.xog-lb-prompts {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.xog-lb-prompts + .xog-lb-badges { margin-top: 10px; }
+.xog-lb-prompts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.xog-lb-prompts-title {
     color: var(--xog-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.xog-lb-prompt-copy {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 6px;
     font-size: 12px;
+}
+.xog-lb-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 7px 8px;
+    border: 1px solid var(--xog-line);
+    border-radius: 6px;
+    background: var(--xog-surface-hover, transparent);
+    color: var(--xog-fg);
+}
+.xog-lb-prompt-text {
+    font-size: 12px;
+    line-height: 18px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.xog-lb-badges {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    flex: none;
+    gap: 6px;
+    width: 100%;
+}
+.xog-lb-badge {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--xog-line);
+    border-radius: 6px;
+    background: var(--xog-surface-hover, rgba(127, 127, 127, 0.1));
+    font-size: 12px;
+    line-height: 18px;
+    box-sizing: border-box;
+}
+.xog-lb-badge-tag {
+    flex: 0 0 auto;
+    min-width: 46px;
+    color: var(--xog-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+.xog-lb-badge-val {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--xog-fg);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.xog ::-webkit-scrollbar { width: 8px; height: 8px; }
-.xog ::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--xog-fg) 24%, transparent);
-    border-radius: 4px;
+.xog-lb-badge-val.xog-lb-badge-lora {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    text-overflow: clip;
 }
-.xog ::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--xog-fg) 38%, transparent);
+.xog-lb-badge-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.xog ::-webkit-scrollbar-track { background: transparent; }
+.xog-lb-badge-weight {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--xog-muted);
+    white-space: nowrap;
+}
+.xog-lb-info-empty {
+    color: var(--xog-muted);
+    font-size: 12px;
+}
+/* Match ComfyUI's native .scrollbar-custom exactly (SidebarTabTemplate body):
+   thin scrollbar-color for standards browsers + 10px webkit bar whose thumb is
+   var(--muted) with a 2px transparent border (6px visual) and a pill radius. */
+.xog-body,
+.xog-lb-info { scrollbar-width: thin; scrollbar-color: var(--muted, var(--xog-muted)) transparent; }
+.xog ::-webkit-scrollbar,
+.xog-lb ::-webkit-scrollbar { background-color: #0000; width: 10px; height: 10px; }
+.xog ::-webkit-scrollbar-track,
+.xog-lb ::-webkit-scrollbar-track { background: transparent; }
+.xog ::-webkit-scrollbar-thumb,
+.xog-lb ::-webkit-scrollbar-thumb {
+    background: var(--muted, var(--xog-muted));
+    border: 2px solid #0000;
+    border-radius: 9999px;
+}
+.xog ::-webkit-scrollbar-thumb:hover,
+.xog-lb ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted, var(--xog-muted));
+}
+.xog ::-webkit-scrollbar-corner,
+.xog-lb ::-webkit-scrollbar-corner { background: transparent; }
 `;
 
 function ensureStyle() {
@@ -1342,6 +1613,13 @@ function ensureStyle() {
 // ------------------------------------------------------------------ lightbox
 
 let lightbox = null;
+// The file currently shown, so the header's delete button always acts on the
+// asset the user is looking at (it changes with the prev/next arrows too).
+let currentLbFile = null;
+// Bumped every time the lightbox opens or closes so a slow metadata response
+// for a previous file cannot overwrite the info strip of the current one.
+let infoSeq = 0;
+let lbSeq = 0;
 
 function ensureLightbox() {
     if (lightbox) return lightbox;
@@ -1353,57 +1631,327 @@ function ensureLightbox() {
     el.innerHTML = `
         <div class="xog-lb-panel">
             <div class="xog-lb-head">
-                <span class="xog-lb-name"></span>
+                <div class="xog-lb-titles">
+                    <span class="xog-lb-name"></span>
+                    <span class="xog-lb-meta"></span>
+                </div>
                 <div class="xog-lb-actions">
                     <button class="xog-btn xog-lb-open" type="button"></button>
                     <button class="xog-btn xog-lb-download" type="button"></button>
+                    <button class="xog-btn xog-lb-delete" type="button"></button>
                     <button class="xog-btn xog-lb-close" type="button"></button>
                 </div>
             </div>
-            <div class="xog-lb-body"></div>
-            <div class="xog-lb-foot"></div>
+            <div class="xog-lb-main">
+                <div class="xog-lb-stage">
+                    <button class="xog-lb-nav xog-lb-prev" type="button" hidden></button>
+                    <div class="xog-lb-body"></div>
+                    <button class="xog-lb-nav xog-lb-next" type="button" hidden></button>
+                </div>
+                <div class="xog-lb-info" hidden></div>
+            </div>
         </div>`;
     document.body.appendChild(el);
 
     const openBtn = el.querySelector(".xog-lb-open");
     const downloadBtn = el.querySelector(".xog-lb-download");
+    const deleteBtn = el.querySelector(".xog-lb-delete");
     const closeBtn = el.querySelector(".xog-lb-close");
     openBtn.title = t("open");
     openBtn.innerHTML = '<i class="pi pi-external-link"></i>';
     downloadBtn.title = t("download");
     downloadBtn.innerHTML = '<i class="pi pi-download"></i>';
+    deleteBtn.title = t("delete");
+    deleteBtn.setAttribute("aria-label", t("delete"));
+    deleteBtn.appendChild(svgIcon("trash"));
     closeBtn.title = t("close");
     closeBtn.innerHTML = '<i class="pi pi-times"></i>';
 
+    deleteBtn.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (deleteBtn.disabled) return;
+        const file = currentLbFile;
+        if (!file) return;
+        deleteBtn.disabled = true;
+        try {
+            const done = await deleteFiles([file]);
+            if (!done) return;
+            document.dispatchEvent(new CustomEvent("xog-lightbox-deleted", { detail: { file } }));
+            close();
+        } finally {
+            deleteBtn.disabled = false;
+        }
+    });
+
     const close = () => {
+        infoSeq++;
+        currentLbFile = null;
         el.hidden = true;
         el.querySelector(".xog-lb-body").replaceChildren();
+        const info = el.querySelector(".xog-lb-info");
+        info.hidden = true;
+        info.replaceChildren();
+        navFiles = [];
+        navIndex = -1;
+        updateNav();
     };
     closeBtn.addEventListener("click", close);
     el.addEventListener("click", (ev) => {
         if (ev.target === el) close();
     });
     document.addEventListener("keydown", (ev) => {
-        if (ev.key === "Escape" && !el.hidden) close();
+        if (el.hidden) return;
+        if (ev.key === "Escape") close();
+        else if (ev.key === "ArrowLeft" && navIndex > 0) {
+            ev.preventDefault();
+            lightbox.step(-1);
+        } else if (ev.key === "ArrowRight" && navIndex < navFiles.length - 1) {
+            ev.preventDefault();
+            lightbox.step(1);
+        }
     });
+
+    const infoEl = el.querySelector(".xog-lb-info");
+
+    // Short, stable labels for the badges. The backend already collapses the
+    // widget names to Checkpoint/UNet/LoRA/strength and cfg/steps/seed; keep a
+    // fallback for any other spelling a custom node might use.
+    const BADGE_ORDER = { CHECKPOINT: 0, UNET: 0, LORA: 1, SEED: 2, STEP: 3, CFG: 4 };
+    function badgeTag(field) {
+        const key = String(field.key || "").toLowerCase();
+        if (key.includes("checkpoint")) return "CHECKPOINT";
+        if (key.includes("unet")) return "UNET";
+        if (key.includes("lora")) return "LORA";
+        if (key === "strength" || key === "强度") return "强度";
+        if (key === "step" || key === "steps") return "STEP";
+        if (key === "seed") return "SEED";
+        if (key === "cfg") return "CFG";
+        return String(field.key || "").toUpperCase();
+    }
+
+    async function loadInfo(file) {
+        const seq = ++infoSeq;
+        infoEl.hidden = true;
+        infoEl.replaceChildren();
+        // Reuse the signed file URL's query (source/path/token) so the prompt
+        // route is scoped to exactly the file this lightbox is showing.
+        let query;
+        try {
+            query = new URL(file.url || "", location.href).search;
+        } catch {
+            return;
+        }
+        if (!query) return;
+        try {
+            const res = await api.fetchApi(PROMPT_URL + query, { cache: "no-store" });
+            if (seq !== infoSeq || el.hidden) return;
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            if (seq !== infoSeq || el.hidden) return;
+            const models = data.models || [];
+            const prompts = data.prompts || [];
+            const params = data.params || [];
+            if (!data.found || (!models.length && !prompts.length && !params.length)) {
+                const empty = document.createElement("div");
+                empty.className = "xog-lb-info-empty";
+                empty.textContent = t("noMetadata");
+                infoEl.appendChild(empty);
+            } else {
+                // Prompt text gets a dedicated, readable block of its own,
+                // with the label and copy button inside that box.
+                if (prompts.length) {
+                    const box = document.createElement("div");
+                    box.className = "xog-lb-prompts";
+                    const card = document.createElement("div");
+                    card.className = "xog-lb-prompt";
+                    const head = document.createElement("div");
+                    head.className = "xog-lb-prompts-head";
+                    const title = document.createElement("span");
+                    title.className = "xog-lb-prompts-title";
+                    title.textContent = t("prompt");
+                    const copyBtn = document.createElement("button");
+                    copyBtn.type = "button";
+                    copyBtn.className = "xog-btn xog-lb-prompt-copy";
+                    copyBtn.title = t("copyPrompt");
+                    copyBtn.setAttribute("aria-label", t("copyPrompt"));
+                    copyBtn.innerHTML = '<i class="pi pi-copy"></i>';
+                    copyBtn.addEventListener("click", async () => {
+                        const text = prompts.map((field) => String(field.value ?? "")).join("\n");
+                        try {
+                            await navigator.clipboard.writeText(text);
+                            window.InfCanvas?.api?.toast?.("success", t("copied"));
+                        } catch {
+                            window.InfCanvas?.api?.toast?.("error", t("copyFailed"));
+                        }
+                    });
+                    head.append(title, copyBtn);
+                    card.appendChild(head);
+                    for (const field of prompts) {
+                        const item = document.createElement("div");
+                        item.className = "xog-lb-prompt-text";
+                        item.textContent = String(field.value ?? "");
+                        card.appendChild(item);
+                    }
+                    box.appendChild(card);
+                    infoEl.appendChild(box);
+                }
+
+                // Everything else is a badge. LoRA strength is a separate
+                // widget on the same node, so fold it into the filename badge
+                // as "（0.2）" rather than showing a second, orphan chip.
+                // Pair by the SAME LoRA row (node id + entry index), not by
+                // display title: one loader can hold several rows, and a
+                // disabled row must not shift the strength onto the next one.
+                const entryKey = (field) => `${field.id || field.node || ""}::${field.group || ""}`;
+                const strengthByEntry = new Map();
+                for (const field of models) {
+                    if (badgeTag(field) !== "强度") continue;
+                    const key = entryKey(field);
+                    const list = strengthByEntry.get(key) || [];
+                    list.push(String(field.value ?? ""));
+                    strengthByEntry.set(key, list);
+                }
+                const loraSeen = new Map();
+                const badges = [];
+                const addBadge = (tag, value, weight = "") => {
+                    // Model/LoRA selectors store "folder/name.safetensors";
+                    // both the folder and the model extension are noise in a
+                    // badge. Numeric params have neither and stay intact. The
+                    // strength is kept separately so it can sit at the right
+                    // edge while the name ellipsizes on one line.
+                    const text = String(value ?? "")
+                        .split(/[\\/]/).pop()
+                        .replace(/\.(safetensors|ckpt|pt|pth|bin|onnx)/gi, "");
+                    if (!badges.some((b) => b.tag === tag && b.value === text && b.weight === weight)) {
+                        badges.push({ tag, value: text, weight });
+                    }
+                };
+                for (const field of models) {
+                    const tag = badgeTag(field);
+                    if (tag === "强度") continue;
+                    const value = String(field.value ?? "");
+                    let weight = "";
+                    if (tag === "LORA") {
+                        const key = entryKey(field);
+                        const i = loraSeen.get(key) || 0;
+                        loraSeen.set(key, i + 1);
+                        const strength = (strengthByEntry.get(key) || [])[i];
+                        if (strength) weight = String(strength);
+                    }
+                    addBadge(tag, value, weight);
+                }
+                for (const field of params) addBadge(badgeTag(field), field.value);
+                badges.sort((a, b) => (BADGE_ORDER[a.tag] ?? 9) - (BADGE_ORDER[b.tag] ?? 9));
+                if (badges.length) {
+                    const box = document.createElement("div");
+                    box.className = "xog-lb-badges";
+                    for (const badge of badges) {
+                        const chip = document.createElement("span");
+                        chip.className = "xog-lb-badge";
+                        const tag = document.createElement("span");
+                        tag.className = "xog-lb-badge-tag";
+                        tag.textContent = `${badge.tag}:`;
+                        const val = document.createElement("span");
+                        val.className = "xog-lb-badge-val";
+                        if (badge.weight) {
+                            val.classList.add("xog-lb-badge-lora");
+                            const name = document.createElement("span");
+                            name.className = "xog-lb-badge-name";
+                            name.textContent = badge.value;
+                            name.title = badge.value;
+                            const weight = document.createElement("span");
+                            weight.className = "xog-lb-badge-weight";
+                            weight.textContent = `（${badge.weight}）`;
+                            val.append(name, weight);
+                        } else {
+                            val.textContent = badge.value;
+                            val.title = badge.value;
+                        }
+                        chip.append(tag, val);
+                        box.appendChild(chip);
+                    }
+                    infoEl.appendChild(box);
+                }
+            }
+            infoEl.hidden = false;
+        } catch {
+            if (seq !== infoSeq || el.hidden) return;
+            const empty = document.createElement("div");
+            empty.className = "xog-lb-info-empty";
+            empty.textContent = t("metadataFailed");
+            infoEl.appendChild(empty);
+            infoEl.hidden = false;
+        }
+    }
+
+    // Ordered list backing the prev/next arrows. The caller passes the current
+    // (filtered) gallery view so stepping follows exactly what the user sees.
+    let navFiles = [];
+    let navIndex = -1;
+    const prevBtn = el.querySelector(".xog-lb-prev");
+    const nextBtn = el.querySelector(".xog-lb-next");
+    prevBtn.appendChild(svgIcon("chevronLeft"));
+    nextBtn.appendChild(svgIcon("chevronRight"));
+    prevBtn.title = t("prevAsset");
+    nextBtn.title = t("nextAsset");
+    prevBtn.setAttribute("aria-label", t("prevAsset"));
+    nextBtn.setAttribute("aria-label", t("nextAsset"));
+
+    function sameFile(a, b) {
+        if (!a || !b) return false;
+        if (a.id !== undefined && b.id !== undefined) return a.id === b.id;
+        return a.source === b.source && a.path === b.path && a.filename === b.filename;
+    }
+
+    function updateNav() {
+        prevBtn.hidden = navIndex <= 0;
+        nextBtn.hidden = navIndex < 0 || navIndex >= navFiles.length - 1;
+    }
 
     lightbox = {
         el,
-        open(file) {
+        open(file, files) {
+            navFiles = Array.isArray(files) && files.length ? files : [file];
+            navIndex = navFiles.findIndex((f) => sameFile(f, file));
+            if (navIndex < 0) {
+                navFiles = [file];
+                navIndex = 0;
+            }
+            updateNav();
+            this.show(file);
+        },
+        step(delta) {
+            const next = navIndex + delta;
+            if (next < 0 || next >= navFiles.length) return;
+            navIndex = next;
+            updateNav();
+            this.show(navFiles[next]);
+        },
+        show(file) {
+            currentLbFile = file;
             const url = fileUrl(file, false);
+            const seq = ++lbSeq;
             el.querySelector(".xog-lb-name").textContent = file.filename || "";
-            el.querySelector(".xog-lb-foot").textContent =
-                `${relPath(file)} · ${fmtSize(file.size)} · ${fmtTime(file.mtime)}`;
+            const metaEl = el.querySelector(".xog-lb-meta");
+            const baseMeta = `${fmtSize(file.size)} · ${fmtTime(file.mtime)}`;
+            metaEl.textContent = baseMeta;
+            const setDims = (w, h) => {
+                if (seq !== lbSeq || !w || !h) return;
+                metaEl.textContent = `${w}×${h} · ${baseMeta}`;
+            };
 
             const body = el.querySelector(".xog-lb-body");
             body.replaceChildren();
             let node;
             if (file.kind === "image") {
                 node = document.createElement("img");
+                node.addEventListener("load", () => setDims(node.naturalWidth, node.naturalHeight));
                 node.src = url;
                 node.alt = file.filename || "";
+                if (node.complete && node.naturalWidth) setDims(node.naturalWidth, node.naturalHeight);
             } else if (file.kind === "video") {
                 node = document.createElement("video");
+                node.addEventListener("loadedmetadata", () => setDims(node.videoWidth, node.videoHeight));
                 node.src = url;
                 node.controls = true;
                 node.autoplay = true;
@@ -1442,8 +1990,43 @@ function ensureLightbox() {
             openBtn.onclick = () => window.open(url, "_blank", "noopener");
             downloadBtn.onclick = () => triggerDownload([file]);
             el.hidden = false;
+            // Images, videos and audio saved by ComfyUI all carry the same
+            // prompt/workflow graph in their metadata. Text and unknown kinds
+            // have no such graph, so don't flash an empty strip for them.
+            if (["image", "video", "audio"].includes(file.kind)) loadInfo(file);
         },
     };
+    prevBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        lightbox.step(-1);
+    });
+    nextBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        lightbox.step(1);
+    });
+
+    // The lightbox is a module-level singleton: a language switch only rebuilds
+    // the drawer panel, not this element. Repaint its own static labels and any
+    // metadata strip already on screen. Subscribe once, outside the panel's
+    // cleanup lifetime, so it keeps working across panel remounts.
+    if (!window.InfCanvas?._xogLbLocaleSubscribed && window.InfCanvas?.i18n?.onChange) {
+        window.InfCanvas.i18n.onChange(() => {
+            openBtn.title = t("open");
+            downloadBtn.title = t("download");
+            deleteBtn.title = t("delete");
+            deleteBtn.setAttribute("aria-label", t("delete"));
+            closeBtn.title = t("close");
+            prevBtn.title = t("prevAsset");
+            nextBtn.title = t("nextAsset");
+            prevBtn.setAttribute("aria-label", t("prevAsset"));
+            nextBtn.setAttribute("aria-label", t("nextAsset"));
+            if (currentLbFile && !el.hidden &&
+                ["image", "video", "audio"].includes(currentLbFile.kind)) {
+                void loadInfo(currentLbFile);
+            }
+        });
+        window.InfCanvas._xogLbLocaleSubscribed = true;
+    }
     return lightbox;
 }
 
@@ -1611,147 +2194,25 @@ async function deleteFiles(files) {
     }
 }
 
-// ------------------------------------------------------------------ insert
-
-// Core loaders only, mirroring _INSERT_NODES in nodes/history_gallery.py: each
-// takes a filename resolved against the input directory.
-const NODE_FOR_KIND = {
-    image: { type: "LoadImage", widget: "image" },
-    video: { type: "LoadVideo", widget: "file" },
-    audio: { type: "LoadAudio", widget: "audio" },
-};
-
-// The native toast service; extensions are expected to use it rather than
-// paint their own banner inside the panel.
-function notify(summary, { detail, severity = "success" } = {}) {
-    const toast = app?.extensionManager?.toast;
-    if (typeof toast?.add === "function") {
-        toast.add({ severity, summary, detail, life: 3000 });
-        return;
-    }
-    console.info("[🐈‍⬛ Gallery]", summary, detail || "");
-}
-
-// Canvas coordinates of the middle of the viewport. LiteGraph maps a graph
-// position to the screen as `(pos + ds.offset) * ds.scale`.
-function viewportCenter() {
-    const canvas = app?.canvas;
-    const ds = canvas?.ds;
-    const el = canvas?.canvas;
-    if (!ds || !el || !el.clientWidth) return [0, 0];
-    return [
-        el.clientWidth / 2 / ds.scale - ds.offset[0],
-        el.clientHeight / 2 / ds.scale - ds.offset[1],
-    ];
-}
-
-let insertNudge = 0;
-
-function spawnLoaderNode(type, widgetName, value) {
-    const lite = window.LiteGraph;
-    if (typeof lite?.createNode !== "function" || !app?.graph) return null;
-
-    let node;
-    try {
-        // Keep this a method call: createNode() reads `this.registered_node_types`,
-        // so pulling the function off the object throws.
-        node = lite.createNode(type);
-    } catch (err) {
-        console.warn("[🐈‍⬛ Gallery] could not create", type, err);
-        return null;
-    }
-    if (!node) return null;
-
-    app.graph.add(node);
-    const [cx, cy] = viewportCenter();
-    // Repeated inserts must not stack on top of each other.
-    insertNudge = (insertNudge + 1) % 6;
-    const shift = insertNudge * 28;
-    const [w, h] = node.size || [210, 100];
-    node.pos = [cx - w / 2 + shift, cy - h / 2 + shift];
-
-    const widget = (node.widgets || []).find((item) => item.name === widgetName);
-    if (widget) {
-        // The combo only offers what /object_info knew when the page loaded, so
-        // a file staged a moment ago is not among its options. Registering the
-        // name first is what ComfyUI's own upload does; without it the widget
-        // holds a value its list does not contain.
-        const options = widget.options || (widget.options = {});
-        if (Array.isArray(options.values) && !options.values.includes(value)) {
-            options.values.push(value);
-        }
-        const previous = widget.value;
-        widget.value = value;
-        node.onWidgetChanged?.(widgetName, value, previous, widget);
-        // A widget that cannot match the value may normalise it away.
-        if (widget.value !== value) widget.value = value;
-    }
-    const canvas = app.canvas;
-    if (typeof canvas?.selectNodes === "function") canvas.selectNodes([node]);
-    else canvas?.selectNode?.(node);
-    app.graph.setDirtyCanvas?.(true, true);
-    return node;
-}
-
-async function insertAsNode(file) {
-    const target = NODE_FOR_KIND[file?.kind];
-    if (!target) {
-        notify(t("insertFailed"), {
-            detail: t("insertUnsupported"),
-            severity: "warn",
-        });
-        return;
-    }
-
-    let info;
-    try {
-        const res = await api.fetchApi(INSERT_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload([file])),
-        });
-        if (!res.ok) throw new Error(String(res.status));
-        info = await res.json();
-    } catch {
-        notify(t("insertFailed"), { detail: file.filename, severity: "error" });
-        return;
-    }
-
-    // The server tells us which widget to fill (it owns the staging rules).
-    const node = spawnLoaderNode(
-        info.node || target.type,
-        info.widget || target.widget,
-        info.filename
-    );
-    if (!node) {
-        notify(t("insertFailed"), {
-            detail: t("insertNoNode").replace("{node}", info.node || target.type),
-            severity: "error",
-        });
-        return;
-    }
-    notify(t("insertDone").replace("{node}", info.node || target.type), {
-        detail: info.filename,
-    });
-}
-
 // ------------------------------------------------------------------ panel
 
 // Last manifest, so switching tabs repaints instantly instead of flashing.
 let cache = { at: 0, data: null };
 
-function buildPanel(host) {
+function buildPanel(host, options = {}) {
+    const mediaMode = options.mode === "media";
     ensureStyle();
     host.classList.add("xog");
+    host.classList.toggle("xog-media", mediaMode);
+    host.classList.toggle("xog--shell", !!options.headSlot);
 
     host.innerHTML = `
         <div class="xog-bar">
-            <div class="xog-head">
-                <span class="xog-title"></span>
+            <div class="xog-srctabs-row">
+                <div class="xog-srctabs" role="tablist"></div>
                 <span class="xog-count"></span>
                 <button class="xog-btn xog-refresh" type="button"></button>
             </div>
-            <div class="xog-srctabs" role="tablist"></div>
             <div class="xog-searchrow">
                 <div class="xog-searchbox">
                     <span class="xog-search-icon"></span>
@@ -1770,7 +2231,6 @@ function buildPanel(host) {
             <div class="xog-sentinel"></div>
         </div>`;
 
-    host.querySelector(".xog-title").textContent = t("panelTitle");
     const refreshBtn = host.querySelector(".xog-refresh");
     refreshBtn.title = t("refresh");
     refreshBtn.setAttribute("aria-label", t("refresh"));
@@ -1783,25 +2243,43 @@ function buildPanel(host) {
     // Output / input switch, the same pair the native panel puts above its
     // filter bar (sideToolbar.labels.generated / imported).
     const srcTabs = host.querySelector(".xog-srctabs");
-    const sources = [
-        { source: "output", label: "tabOutput" },
-        { source: "input", label: "tabInput" },
-    ];
-    srcTabs.replaceChildren(
-        ...sources.map((item) => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "xog-srctab";
-            btn.setAttribute("role", "tab");
-            btn.dataset.source = item.source;
-            btn.dataset.active = String(item.source === "output");
-            btn.textContent = t(item.label);
-            return btn;
-        })
-    );
+    let folderBtn = null;
+    let folderLabel = null;
+    if (mediaMode) {
+        // Same pill row as output/input, but one chip: the chosen save folder.
+        // It is deliberately not a source tab (no dataset.source), so the
+        // generic tab switch below never mistakes it for "output".
+        folderBtn = document.createElement("button");
+        folderBtn.type = "button";
+        folderBtn.className = "xog-srctab xog-media-path";
+        folderBtn.dataset.active = "true";
+        folderLabel = document.createElement("span");
+        folderLabel.className = "xog-media-label";
+        folderLabel.textContent = t("chooseMediaFolder");
+        folderBtn.appendChild(folderLabel);
+        folderBtn.title = t("mediaFolder");
+        srcTabs.replaceChildren(folderBtn);
+    } else {
+        const sources = [
+            { source: "output", label: "tabOutput" },
+            { source: "input", label: "tabInput" },
+        ];
+        srcTabs.replaceChildren(
+            ...sources.map((item) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "xog-srctab";
+                btn.setAttribute("role", "tab");
+                btn.dataset.source = item.source;
+                btn.dataset.active = String(item.source === "output");
+                btn.textContent = t(item.label);
+                return btn;
+            })
+        );
+    }
 
     const filters = host.querySelector(".xog-tabs");
-    const kinds = ["all", "image", "video", "audio", "other"];
+    const kinds = ["all", "text", "image", "video", "audio"];
     filters.replaceChildren(
         ...kinds.map((kind) => {
             const btn = document.createElement("button");
@@ -1868,6 +2346,16 @@ function buildPanel(host) {
     const count = host.querySelector(".xog-count");
     const sentinel = host.querySelector(".xog-sentinel");
 
+    /* Canvas shell offers a slot in the panel title row (left of the close X).
+       Move count + refresh there; a DOM move keeps their listeners and our
+       node references intact. Without a slot (standalone) they stay in the bar. */
+    if (options.headSlot) {
+        const head = document.createElement("div");
+        head.className = "xog-head-group";
+        head.append(count, refreshBtn);
+        options.headSlot.replaceChildren(head);
+    }
+
     // The bar floats above the panel, so it lives on <body> — the sidebar
     // around the panel is the scroll container and clips nothing, but a sticky
     // child would be trapped inside its own parent box.
@@ -1916,12 +2404,13 @@ function buildPanel(host) {
 
     const state = {
         files: [],
-        source: "output",
+        source: mediaMode ? "media" : "output",
         filter: "all",
         query: "",
         matched: [],
         shown: 0,
     };
+    let mediaFolder = "";
 
     // ---- selection (useAssetSelection.ts)
 
@@ -2107,14 +2596,7 @@ function buildPanel(host) {
                   menuItem({
                       icon: "zoomIn",
                       label: t("inspect"),
-                      onClick: () => ensureLightbox().open(file),
-                  }),
-                  menuItem({
-                      icon: "node",
-                      label: t("insertNode"),
-                      // 3D / text files have no core loader reading input/.
-                      disabled: !NODE_FOR_KIND[file.kind],
-                      onClick: () => insertAsNode(file),
+                      onClick: () => ensureLightbox().open(file, state.matched),
                   }),
                   menuItem({
                       icon: "download",
@@ -2375,7 +2857,7 @@ function buildPanel(host) {
         const icon = document.createElement("i");
         icon.className = "pi pi-info-circle";
         const heading = document.createElement("h3");
-        heading.textContent = t("empty");
+        heading.textContent = mediaMode && !mediaFolder ? t("mediaFolderNotSet") : t("empty");
         box.append(icon, heading);
         status.replaceChildren(box);
         status.style.display = "";
@@ -2573,11 +3055,18 @@ function buildPanel(host) {
         card.tabIndex = 0;
         card.setAttribute("role", "button");
         card.setAttribute("aria-label", file.filename);
-        // Native card is the drag source (MediaAssetCard :draggable="true"), so
-        // the payload comes from the card and not from the <img> the browser
-        // would otherwise drag.
+        // Drag a card onto the canvas to create a matching asset node. The
+        // payload is the canvas shell's own contract (see toCanvasAsset), not
+        // ComfyUI's main-UI asset-info one.
         card.draggable = true;
-        card.addEventListener("dragstart", (ev) => startDrag(ev, file));
+        card.addEventListener("dragstart", (ev) => {
+            if (!ev.dataTransfer) return;
+            ev.dataTransfer.setData(
+                "application/x-infcanvas-asset",
+                JSON.stringify(toCanvasAsset(file))
+            );
+            ev.dataTransfer.effectAllowed = "copy";
+        });
 
         const thumb = document.createElement("div");
         thumb.className = "xog-thumb";
@@ -2609,7 +3098,7 @@ function buildPanel(host) {
             toggleSelection(file.id, index);
         });
 
-        // Download + more options, top-right — the native IconGroup pair.
+        // Download + delete, top-right — a fixed pair, no overflow menu.
         const actions = document.createElement("div");
         actions.className = "xog-actions";
         const dl = document.createElement("button");
@@ -2623,18 +3112,19 @@ function buildPanel(host) {
             ev.stopPropagation();
             triggerDownload([file]);
         });
-        const more = document.createElement("button");
-        more.type = "button";
-        more.className = "xog-act";
-        more.tabIndex = -1;
-        more.title = t("moreOptions");
-        more.setAttribute("aria-label", t("moreOptions"));
-        more.appendChild(svgIcon("ellipsis"));
-        more.addEventListener("click", (ev) => {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "xog-act";
+        del.tabIndex = -1;
+        del.title = t("delete");
+        del.setAttribute("aria-label", t("delete"));
+        del.appendChild(svgIcon("trash"));
+        del.addEventListener("click", async (ev) => {
             ev.stopPropagation();
-            openContextMenu(ev, file);
+            const done = await deleteFiles([file]);
+            if (done) await load();
         });
-        actions.append(dl, more);
+        actions.append(dl, del);
 
         const meta = document.createElement("div");
         meta.className = "xog-meta";
@@ -2656,7 +3146,7 @@ function buildPanel(host) {
         });
         thumb.addEventListener("dblclick", (ev) => {
             ev.stopPropagation();
-            ensureLightbox().open(file);
+            ensureLightbox().open(file, state.matched);
         });
         meta.addEventListener("click", (ev) => {
             ev.stopPropagation();
@@ -2803,6 +3293,57 @@ function buildPanel(host) {
         load();
     });
 
+    if (folderBtn) {
+        const toast = (kind, message) => window.InfCanvas?.api?.toast?.(kind, message);
+        let pickerBusy = false;
+        const paintFolder = (folder) => {
+            // The initial GET may resolve while the dialog is opening; never
+            // let it overwrite the visible "opening…" feedback.
+            if (pickerBusy) return;
+            mediaFolder = folder || "";
+            folderLabel.textContent = mediaFolder || t("chooseMediaFolder");
+            folderBtn.title = mediaFolder || t("mediaFolder");
+        };
+        folderBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            pickerBusy = true;
+            folderBtn.disabled = true;
+            folderLabel.textContent = t("mediaFolderOpening");
+            try {
+                const pickRes = await api.fetchApi(MEDIA_PICK_URL, { method: "POST" });
+                if (!pickRes.ok) throw new Error(`HTTP ${pickRes.status}`);
+                const picked = (await pickRes.json()).folder || "";
+                if (!picked) return; // native dialog cancelled: leave everything alone
+                const saveRes = await api.fetchApi(MEDIA_FOLDER_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ folder: picked }),
+                });
+                if (!saveRes.ok) {
+                    const body = await saveRes.json().catch(() => ({}));
+                    throw new Error(body.error || `HTTP ${saveRes.status}`);
+                }
+                const saved = (await saveRes.json()).folder || picked;
+                mediaFolder = saved;
+                cache = { at: 0, data: null };
+                await load();
+                toast("success", t("mediaFolderPicked"));
+            } catch (err) {
+                toast("error", `${t("mediaFolderPickFailed")}: ${err?.message || err}`);
+            } finally {
+                pickerBusy = false;
+                folderBtn.disabled = false;
+                paintFolder(mediaFolder);
+            }
+        });
+        // Initial folder label; the manifest load that follows supplies files.
+        api.fetchApi(MEDIA_FOLDER_URL, { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : {}))
+            .then((data) => paintFolder(data.folder || ""))
+            .catch(() => {})
+            .finally(() => { applyFilter(); paintCount(); });
+    }
+
     search.addEventListener("input", () => {
         state.query = search.value;
         applyFilter();
@@ -2811,7 +3352,7 @@ function buildPanel(host) {
 
     srcTabs.addEventListener("click", (ev) => {
         const btn = ev.target.closest(".xog-srctab");
-        if (!btn) return;
+        if (!btn || btn === folderBtn) return;
         state.source = btn.dataset.source || "output";
         for (const tab of srcTabs.children) {
             tab.dataset.active = String(tab === btn);
@@ -2851,6 +3392,17 @@ function buildPanel(host) {
 
     applyView(getViewMode());
 
+    // A deletion from the lightbox must repaint this panel too; the lightbox
+    // lives at module scope, so it announces the removal instead of reaching
+    // back into the mounted panel.
+    const onLbDeleted = () => { void load(); };
+    document.addEventListener("xog-lightbox-deleted", onLbDeleted);
+
+    // A "add to 收藏" from a canvas node announces the new asset. Drop the warm
+    // cache and reload so an open 收藏 panel shows it without a manual refresh.
+    const onFavChanged = () => { cache = { at: 0, data: null }; void load(); };
+    document.addEventListener("xcat-favorites-changed", onFavChanged);
+
     // Warm-start from the previous fetch, then revalidate in the background.
     if (cache.data && Date.now() - cache.at < CACHE_TTL) {
         state.files = Array.isArray(cache.data.files) ? cache.data.files : [];
@@ -2862,6 +3414,8 @@ function buildPanel(host) {
     }
 
     return () => {
+        document.removeEventListener("xog-lightbox-deleted", onLbDeleted);
+        document.removeEventListener("xcat-favorites-changed", onFavChanged);
         observer.disconnect();
         lazy.stop();
         document.removeEventListener("pointerdown", onDocDown, true);
@@ -2881,100 +3435,14 @@ function buildPanel(host) {
     };
 }
 
-// ------------------------------------------------------------------ register
-
-// Sit just above the "Assets" tab. Core exposes the tab list as a reactive
-// array, so splicing it re-renders the icon strip — no core patching involved.
-function sidebarTabArray() {
-    const manager = app?.extensionManager;
-    const ref = manager?.getSidebarTabs?.();
-    const tabs = Array.isArray(ref) ? ref : ref?.value || manager?.sidebarTab?.sidebarTabs;
-    return Array.isArray(tabs) ? tabs : null;
-}
-
-function placeAboveAssets() {
-    const tabs = sidebarTabArray();
-    if (!tabs) return false;
-    const from = tabs.findIndex((tab) => tab?.id === TAB_ID);
-    const anchor = tabs.findIndex((tab) => tab?.id === "assets");
-    if (from < 0) return false;
-    // No Assets tab (very old frontend) — keep the default append position.
-    if (anchor < 0 || from === anchor - 1) return true;
-    const [mine] = tabs.splice(from, 1);
-    // Removing a tab above the anchor shifts the anchor down by one.
-    tabs.splice(from < anchor ? anchor - 1 : anchor, 0, mine);
-    return true;
-}
-
-// The tab button renders `tab.title` / `tab.tooltip` as plain strings, and this
-// frontend switches language **in place** — no page reload, so nothing re-runs
-// our registration and a captured string would stay in the old language for the
-// rest of the session (core tabs look fine because theirs are i18n keys resolved
-// lazily). Publish both labels as accessors instead: the tab strip re-renders on
-// a locale change and reads them again, so the button follows the language with
-// no polling and no timers.
-function bindLiveLabels(tab) {
-    const bind = (key, read) => {
-        Object.defineProperty(tab, key, {
-            configurable: true,
-            enumerable: true,
-            get: read,
-            // The core may write the field back when re-registering; swallow it
-            // so the accessor survives instead of being replaced by a string.
-            set() {},
-        });
-    };
-    bind("title", () => t("title"));
-    bind("tooltip", () => t("tooltip"));
-}
-
-function registerTab() {
-    const manager = app?.extensionManager;
-    if (!manager || typeof manager.registerSidebarTab !== "function") return false;
-    const tabs = sidebarTabArray();
-    const existing = tabs?.find((tab) => tab?.id === TAB_ID);
-    if (existing) {
-        // Another load of this extension beat us to it — make sure its labels
-        // still resolve through the current language.
-        bindLiveLabels(existing);
-        placeAboveAssets();
-        return true;
-    }
-
-    let cleanup = null;
-    const spec = {
-        id: TAB_ID,
-        icon: "pi pi-images",
-        title: "",
-        tooltip: "",
-        type: "custom",
-        render: (el) => {
-            cleanup?.();
-            cleanup = buildPanel(el);
-        },
-        destroy: () => {
-            cleanup?.();
-            cleanup = null;
-        },
-    };
-    bindLiveLabels(spec);
-    manager.registerSidebarTab(spec);
-    placeAboveAssets();
-    // Extensions load in folder-name order, so a tab registered later could
-    // still land above us — re-assert the slot once the dust settles.
-    setTimeout(placeAboveAssets, 1000);
-    return true;
-}
-
-app.registerExtension({
-    name: "XXXXXLCat.HistoryGallery",
-    async setup() {
-        if (registerTab()) return;
-        // Older/lazier boot orders may not have the manager yet — retry briefly.
-        let tries = 0;
-        const timer = setInterval(() => {
-            tries += 1;
-            if (registerTab() || tries > 40) clearInterval(timer);
-        }, 250);
+// Canvas bridge: the embedded canvas shell (infcanvas-ui.js, a separate IIFE)
+// cannot import this ES module, so publish the panel builder on the shared
+// namespace for the canvas rail's "画廊" entry. This is the ONLY entry point —
+// there is no ComfyUI main-UI tab; the gallery is canvas-only. The caller owns
+// the returned cleanup and must run it when the panel is switched or the canvas
+// is exited.
+(window.InfCanvas = window.InfCanvas || {}).galleryPanel = {
+    mount(host, options) {
+        return buildPanel(host, options);
     },
-});
+};

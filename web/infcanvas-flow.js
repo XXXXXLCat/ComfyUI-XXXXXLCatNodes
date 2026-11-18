@@ -66,7 +66,7 @@ import {
   /* Asset media nodes: minimum width and the fixed width used when a source
      is first loaded (height then follows the source aspect ratio). */
   const ASSET_MIN_W = 320;
-  const ASSET_DEF_W = 320;
+  const ASSET_DEF_W = 480;
   /* Node header strip — the darker band at the top of every card. ComfyUI 2.0
      builds it from LGraphNode.vue (.node-inner-wrapper = bg-node-header) plus a
      NodeHeader.vue child (p-1 around an icon-sm control), then paints the body
@@ -89,12 +89,6 @@ import {
   const WAVE_HEAD_HIT = 9;
   const WAVE_HEAD_PAD_Y = 12;
 
-  /* Byte-identical to LGraphCanvas.DEFAULT_BACKGROUND_IMAGE (verified against
-     the frontend sourcemap). Do not replace with gradients: the tile's minor
-     and major line weights are part of the canvas' look. */
-  const GRID_TILE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAQBJREFUeNrs1rEKwjAUhlETUkj3vP9rdmr1Ysammk2w5wdxuLgcMHyptfawuZX4pJSWZTnfnu/lnIe/jNNxHHGNn//HNbbv+4dr6V+11uF527arU7+u63qfa/bnmh8sWLBgwYJlqRf8MEptXPBXJXa37BSl3ixYsGDBMliwFLyCV/DeLIMFCxYsWLBMwSt4Be/NggXLYMGCBUvBK3iNruC9WbBgwYJlsGApeAWv4L1ZBgsWLFiwYJmCV/AK3psFC5bBggULloJX8BpdwXuzYMGCBctgwVLwCl7Be7MMFixYsGDBsu8FH1FaSmExVfAxBa/gvVmwYMGCZbBg/W4vAQYA5tRF9QYlv/QAAAAASUVORK5CYII=";
-  /* LGraphCanvas.ts:1358 clear_background_color */
-  const GRID_CLEAR = "#222222";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const pad2 = (n) => String(n).padStart(2, "0");
@@ -441,6 +435,8 @@ import {
     gauge: '<path d="m12 14 4-4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>'
       + '<path d="M3.34 19a10 10 0 1 1 17.32 0" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 21h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    /* lucide bookmark — the 添加到收藏 toolbar glyph. */
+    bookmark: '<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     "trash-2": '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 5v6m4-6v6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   };
 
@@ -1441,7 +1437,7 @@ import {
       const loraFitHeight = (n) => HEAD_H + Math.max(
         LORA_DEF_BODY_H, LORA_CHROME + Math.max(0, n) * LORA_ROW_H + Math.max(0, n - 1) * LORA_ROW_GAP
       );
-      const size = computed(() => Array.isArray(data.size) ? data.size : [320, 180]);
+      const size = computed(() => Array.isArray(data.size) ? data.size : [480, 270]);
       const bodyH = computed(() => isLora
         ? Math.max(80, size.value[1] - HEAD_H, loraFitHeight(loras.value.length) - HEAD_H)
         : Math.max(80, size.value[1] - HEAD_H));
@@ -1499,8 +1495,7 @@ import {
              never creeps while the dragged side hits the limit. */
           if (w < MINW) { w = MINW; if (west) x = x0 + w0 - MINW; }
           if (h < MINH) { h = MINH; if (north) y = y0 + h0 - MINH; }
-          /* Grid snap: align the MOVING edge to the nearest 10px cell (the
-             canvas grid tile is 100x100 with a 10px minor square), keeping
+          /* Grid snap: align the MOVING edge to the nearest 10px cell, keeping
              the opposite edge pinned. Same step as node-move snapping. */
           if (snapped()) {
             if (west) { x = snap10(x); w = (x0 + w0) - x; }
@@ -3198,23 +3193,25 @@ import {
         </div>
         <div class="icn__body" :style="{ height: bodyH + 'px' }">
           <!-- LoRA stack: a config-only card. Each row = name combobox /
-               weight stepper / enable toggle / remove. Shared controls stop
-               pointer events so they never drag the node. Wheel is deliberately
-               NOT stopped here (or on any child): Vue Flow's zoom handler lives
-               on the canvas ancestor, so the wheel must bubble through to let
-               this node zoom like every other one. Only the floating option
-               menu stops the wheel, since that list scrolls itself. -->
-          <div v-if="isLora" class="icn__lora nodrag nopan" @pointerdown.stop @mousedown.stop @dblclick.stop>
+               weight stepper / enable toggle / remove. The panel is a normal
+               part of the node and drags it; only the real controls opt out
+               with nodrag so pressing them never moves the node. Wheel is
+               deliberately NOT stopped here (or on any child): Vue Flow's zoom
+               handler lives on the canvas ancestor, so the wheel must bubble
+               through to let this node zoom like every other one. Only the
+               floating option menu stops the wheel, since that list scrolls
+               itself. -->
+          <div v-if="isLora" class="icn__lora nopan" @dblclick.stop>
             <div class="icn__lora-head">
               <span class="icn__lora-head-hint">{{ $t('启用的 LoRA 会按顺序叠加') }}</span>
-              <button class="icn__lora-refresh" type="button" :title="$t('刷新 LoRA 列表')" @click.stop="loadLoraOptions">
+              <button class="icn__lora-refresh nodrag" type="button" :title="$t('刷新 LoRA 列表')" @click.stop="loadLoraOptions">
                 <IcIcon name="refresh-cw" :size="13" />
               </button>
             </div>
             <div class="icn__lora-list">
               <div v-for="(lora, i) in loras" :key="i" class="icn__lora-row" :class="{ 'is-off': lora.enabled === false }">
                 <!-- Switch: verbatim WidgetToggleSwitch.vue from the 画布 API 参数面板 -->
-                <button class="group inline-flex h-6 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring"
+                <button class="nodrag group inline-flex h-6 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-shadow focus-visible:ring-1 focus-visible:ring-ring"
                         type="button" role="switch"
                         :data-state="lora.enabled !== false ? 'checked' : 'unchecked'"
                         :title="lora.enabled === false ? $t('启用该 LoRA') : $t('关闭该 LoRA')"
@@ -3227,7 +3224,7 @@ import {
                      (outer focus-within:ring wrapper included), plus data-lora-sel
                      so the search popover anchors to it. -->
                 <div class="relative min-w-0 flex-1">
-                  <div class="min-w-0 cursor-default rounded-md transition-all focus-within:ring focus-within:ring-ring"
+                  <div class="nodrag min-w-0 cursor-default rounded-md transition-all focus-within:ring focus-within:ring-ring"
                        @pointerdown.stop @pointermove.stop @pointerup.stop>
                     <div class="flex w-full min-w-0 items-center overflow-hidden rounded-md bg-input text-foreground h-6 hover:bg-accent">
                       <button type="button" role="combobox" data-lora-sel
@@ -3248,7 +3245,7 @@ import {
                      left-aligned, aspect-square ± buttons, focus-within:ring
                      wrapper). No progress fill — a LoRA weight is a plain number. -->
                 <div class="relative shrink-0" style="width:100px">
-                  <div class="min-w-0 cursor-default rounded-md transition-all focus-within:ring focus-within:ring-ring"
+                  <div class="nodrag min-w-0 cursor-default rounded-md transition-all focus-within:ring focus-within:ring-ring"
                        @pointerdown.stop @mousedown.stop @dblclick.stop>
                     <div class="relative flex w-full items-stretch overflow-hidden rounded-md bg-input text-xs text-foreground h-6">
                       <button type="button" :title="$t('减小权重')"
@@ -3266,14 +3263,14 @@ import {
                     </div>
                   </div>
                 </div>
-                <button class="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-input text-muted-foreground hover:bg-accent hover:text-red-400"
+                <button class="nodrag flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-input text-muted-foreground hover:bg-accent hover:text-red-400"
                         type="button" :title="$t('移除该 LoRA')" @click.stop="removeLora(i)">
                   <IcIcon name="trash-2" class="size-4" />
                 </button>
               </div>
               <div v-if="!loras.length" class="icn__lora-empty">{{ $t('尚未添加 LoRA') }}</div>
             </div>
-            <button class="icn__lora-add" type="button" @click.stop="addLora()">
+            <button class="icn__lora-add nodrag" type="button" @click.stop="addLora()">
               <IcIcon name="plus" :size="13" /><span>{{ $t('添加 LoRA') }}</span>
             </button>
           </div>
@@ -4294,7 +4291,7 @@ import {
   /* -------------------------------- styles ------------------------------- */
 
   const CSS = `
-#infcanvas-vueflow { position:absolute; inset:0; overflow:hidden; background:#1d1d1d;
+#infcanvas-vueflow { position:absolute; inset:0; overflow:hidden; background:#0F0F0F;
   --icw-bg:#232428; --icw-bar:#8b929e; --icw-played:#4a9eff;
   --icw-head:#3d9cff; --icw-head-fg:#ffffff;
   /* Node cards are dark by design (reference fidelity). Pin the shared control
@@ -4314,8 +4311,6 @@ import {
      here — that is a darker dialog surface, the opposite of node widgets. */
   --icnw-bg:#313235; --icnw-hover:#3c3d42; --icnw-ring:#8a8a8a; --icnw-r:6px;
   --icnw-r-sm:4px; --icnw-panel:#262729; }
-.ic-canvas-grid { position:absolute; inset:0; display:block; width:100%; height:100%;
-  pointer-events:none; z-index:0; }
 /* Groups render before VueFlow in DOM order; this z-index keeps every node
    above their tinted backdrop, exactly like LGraphCanvas.drawGroups. */
 .ic-flow { background:transparent; position:relative; z-index:2; }
@@ -4406,8 +4401,12 @@ import {
   border:1px solid rgba(255,255,255,.5); border-radius:12px;
   background:rgba(255,255,255,.10); color:rgba(255,255,255,.82); overflow:visible;
   font-size:20px; }
+/* Selected groups mirror a selected node's 3px pure-white highlight ring
+   (.icn.is-selected uses box-shadow:0 0 0 3px #fff). An outline is drawn
+   outside the border box anyway, so offset stays 0 -- the ring hugs the group
+   edge exactly like a node's, with no gap. */
 .ic-group.is-selected { border-color:rgba(255,255,255,.85);
-  outline:1px solid rgba(255,255,255,.8); outline-offset:var(--ic-group-sel-pad, 6px); }
+  outline:3px solid #fff; outline-offset:0; }
 /* The layer itself is inert (the pane already is); only its children take
    pointers, and z-index keeps them clickable above the node cards. */
 .ic-group-ui { position:absolute; z-index:3; pointer-events:none; box-sizing:border-box;
@@ -4438,10 +4437,26 @@ import {
 .ic-group__rz--sw svg { top:4px; right:4px; transform:scaleX(-1); }
 .ic-group__rz--nw { left:-4px; top:-4px; cursor:nw-resize; }
 .ic-group__rz--nw svg { bottom:4px; right:4px; transform:scale(-1,-1); }
+/* Group toolbar: same floating-panel look as the node/selection toolbars,
+   centred just above the group's top edge. Only the selected group shows it. */
+.ic-group-tools { position:absolute; left:50%; top:-42px; z-index:11;
+  display:none; align-items:center; gap:2px; height:32px; padding:2px;
+  box-sizing:border-box; white-space:nowrap; transform:translateX(-50%);
+  -webkit-user-select:none; user-select:none; pointer-events:auto;
+  border:1px solid var(--border, #494a50); border-radius:8px;
+  background:var(--ic-panel, #262729); box-shadow:0 6px 20px rgba(0,0,0,.45); }
+.ic-group-ui.is-selected .ic-group-tools { display:flex; }
+.ic-group-tools button { display:inline-flex; align-items:center; gap:5px;
+  height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent;
+  color:var(--ic-text, #ffffff); font:inherit; font-size:12px; line-height:1;
+  cursor:pointer; }
+.ic-group-tools button:hover { background:var(--accent, #3c3d42); }
+.ic-group-tools button i { width:14px; text-align:center; font-size:13px; }
 /* Selection toolbox: host floating-panel look, centred 10px above the box. */
 .ic-selection-tools { position:absolute; z-index:11; display:flex; align-items:center;
   gap:2px; height:32px; padding:2px; box-sizing:border-box; white-space:nowrap;
   transform:translate(-50%, -100%); pointer-events:auto;
+  -webkit-user-select:none; user-select:none;
   border:1px solid var(--border, #494a50); border-radius:8px;
   background:var(--ic-panel, #262729); box-shadow:0 6px 20px rgba(0,0,0,.45); }
 .ic-selection-tools button { display:inline-flex; align-items:center; gap:5px;
@@ -5217,80 +5232,15 @@ import {
          Do not turn this into "left drag selects" -- that is the "standard"
          navigation mode, which is not what ComfyUI ships. */
 
-      /* Verbatim port of LGraphCanvas.drawBackCanvas's background pass.
-         ComfyUI's canvas does NOT stretch a CSS background: it fills a
-         CanvasPattern in world coordinates with imageSmoothingEnabled off,
-         which is why native zooming never blurs. See LGraphCanvas.ts:5732. */
-      const gridCanvas = ref(null);
-      let gridImage = null, gridPattern = null, gridPatternCtx = null, gridRO = null;
-
-      const drawGrid = (viewport) => {
-        const canvas = gridCanvas.value;
-        if (!canvas) return;
-        const w = canvas.clientWidth, h = canvas.clientHeight;
-        if (!w || !h) return;
-        const dpr = window.devicePixelRatio || 1;
-        const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
-        if (canvas.width !== pw || canvas.height !== ph) {
-          canvas.width = pw; canvas.height = ph;
-          gridPattern = null;
-        }
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, pw, ph);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = GRID_CLEAR;
-        ctx.fillRect(0, 0, w, h);
-
-        const zoom = viewport?.zoom || 1;
-        if (!gridImage || zoom <= 0.5) return;
-        if (!gridPattern || gridPatternCtx !== ctx) {
-          gridPattern = ctx.createPattern(gridImage, "repeat");
-          gridPatternCtx = ctx;
-        }
-        if (!gridPattern) return;
-        const x = viewport?.x || 0, y = viewport?.y || 0;
-        ctx.save();
-        /* LGraphCanvas.ts:5715 ds.toCanvasContext() = scale(scale) +
-           translate(offset). VueFlow's screen = world * zoom + [x, y], so
-           offset = [x, y] / zoom and visible_area is [-x/zoom, -y/zoom,
-           w/zoom, h/zoom] (DragAndScale.ts:101-123). */
-        ctx.imageSmoothingEnabled = false;
-        /* zoom_modify_alpha is true by default (LGraphCanvas.ts:1327), so at
-           100% the grid is only 50% opaque and firms up as you zoom in. */
-        ctx.globalAlpha = 1 - 0.5 / zoom;
-        ctx.scale(zoom, zoom);
-        ctx.translate(x / zoom, y / zoom);
-        ctx.fillStyle = gridPattern;
-        ctx.fillRect(-x / zoom, -y / zoom, w / zoom, h / zoom);
-        ctx.restore();
-      };
-
-      const gridTile = new Image();
-      gridTile.onload = () => { gridImage = gridTile; drawGrid(state.viewport.value); };
-      gridTile.src = GRID_TILE;
-
-      const onGridResize = () => drawGrid(state.viewport.value);
-      onMounted(() => {
-        drawGrid(state.viewport.value);
-        if (window.ResizeObserver && gridCanvas.value) {
-          gridRO = new ResizeObserver(onGridResize);
-          gridRO.observe(gridCanvas.value);
-        }
-        window.addEventListener("resize", onGridResize);
-      });
-      onBeforeUnmount(() => {
-        gridRO?.disconnect(); gridRO = null;
-        window.removeEventListener("resize", onGridResize);
-      });
+      /* Background is now Vue Flow's native <Background variant="dots"> —
+         default #81818a dots, gap 20, size 1, following viewport zoom/pan.
+         The old hand-drawn ComfyUI grid canvas was removed. */
 
       const onInit = (instance) => {
         state.flow = instance;
         state.mounted = true;
         const vp = state.viewport.value;
         instance.setViewport({ x: vp.x, y: vp.y, zoom: vp.zoom }, { duration: 0 });
-        drawGrid(vp);
         /* Selection is Vue Flow's own state (click, Ctrl+click, marquee,
            Ctrl+A, node deletion). Mirror it into state.selectedIds so every
            edge can tell whether one of its endpoints is selected — the same
@@ -5302,7 +5252,6 @@ import {
 
       const onViewportChange = (viewport) => {
         state.viewport.value = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-        drawGrid(viewport);
         /* Link centre markers disappear below 60% zoom, like ComfyUI. */
         zoomFar.value = (viewport.zoom || 1) < 0.6;
         NS.flow?.onViewport?.(viewport);
@@ -6024,10 +5973,10 @@ import {
       /* Boxes are in graph units. Vue Flow keeps the authoritative position
          and measured size in its live node; fall back to the DOM (or the
          node's declared size) when a freshly added node has not measured yet. */
-      const selectedBoxes = () => {
+      const boxesOfIds = (ids) => {
         syncLivePositions();
         const zoom = state.viewport.value.zoom || 1;
-        return state.selectedIds.value.map((id) => {
+        return ids.map((id) => {
           const src = state.nodes.value.find((node) => node.id === id);
           if (!src) return null;
           const live = state.flow?.findNode?.(id);
@@ -6046,6 +5995,24 @@ import {
           return { id, x: src.position.x, y: src.position.y, w, h };
         }).filter(Boolean);
       };
+      const selectedBoxes = () => boxesOfIds(state.selectedIds.value);
+
+      /* Bounds of a set of node boxes: 10px padding on all four sides plus a
+         30px title strip on top. createGroup and the post-arrange refit share
+         this one rule so the outline always hugs its members by exactly 10px. */
+      const groupBounds = (boxes) => {
+        const pad = 10, titleHeight = 30;
+        const minX = Math.min(...boxes.map((box) => box.x));
+        const minY = Math.min(...boxes.map((box) => box.y));
+        const maxX = Math.max(...boxes.map((box) => box.x + box.w));
+        const maxY = Math.max(...boxes.map((box) => box.y + box.h));
+        return {
+          x: minX - pad,
+          y: minY - pad - titleHeight,
+          w: maxX - minX + 2 * pad,
+          h: maxY - minY + 2 * pad + titleHeight,
+        };
+      };
 
       /* ComfyUI's Add Group For Selected Nodes: createBounds(selected, 10),
          then lift the top by NODE_TITLE_HEIGHT (30) for the title strip.
@@ -6053,18 +6020,10 @@ import {
       const createGroup = () => {
         const boxes = selectedBoxes();
         if (boxes.length < 2) return;
-        const pad = 10, titleHeight = 30;
-        const minX = Math.min(...boxes.map((box) => box.x));
-        const minY = Math.min(...boxes.map((box) => box.y));
-        const maxX = Math.max(...boxes.map((box) => box.x + box.w));
-        const maxY = Math.max(...boxes.map((box) => box.y + box.h));
         state.groups.value = state.groups.value.concat([{
           id: "grp_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           title: t("分组"),
-          x: minX - pad,
-          y: minY - pad - titleHeight,
-          w: maxX - minX + 2 * pad,
-          h: maxY - minY + 2 * pad + titleHeight,
+          ...groupBounds(boxes),
           nodes: boxes.map((box) => box.id),
         }]);
         NS.api?.markDirty?.();
@@ -6179,7 +6138,7 @@ import {
         for (let i = list.length - 1; i >= 0; i -= 1) {
           const group = list[i];
           if (point.x >= group.x && point.x <= group.x + group.w &&
-              point.y >= group.y && point.y <= group.y + group.h) return group.id;
+              point.y >= group.y && point.y <= group.y + group.h) return group;
         }
         return null;
       };
@@ -6190,13 +6149,24 @@ import {
         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
+        /* This hit-test is purely by SCREEN coordinate, so a press on any
+           chrome overlaying the canvas (the side-panel resize handle, the
+           panel/sidebar themselves, the tab bar) would also land inside a
+           group rectangle and get wrongly claimed via stopImmediatePropagation
+           -- e.g. dragging the panel splitter failed whenever its edge sat
+           over a group. Groups only ever live in the stage, so ignore press
+           targets outside it. */
+        if (!target.closest("#infcanvas-stage")) return;
         if (target.closest(".vue-flow__node, .ic-group, .ic-group-ui, .ic-selection-tools, .ict-menu, .ic-menu, input, textarea, [contenteditable]")) return;
-        const id = groupAtScreen(event.clientX, event.clientY);
-        if (!id) return;
+        const group = groupAtScreen(event.clientX, event.clientY);
+        if (!group) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         suppressPaneClick = true;   /* the matching click is still a group hit */
-        selectGroup(id);
+        /* A group used to move only from its 30px title strip. A press anywhere
+           else inside the rectangle (i.e. not on a node) now starts the same
+           group+children drag; startGroupDrag also selects the group. */
+        startGroupDrag(event, group);
       };
       /* A real pane click (outside every group) deselects the group. */
       const onPaneClick = () => {
@@ -6260,11 +6230,20 @@ import {
       state.groupActions = { createGroup, deleteGroup, selectGroup };
       onBeforeUnmount(() => { state.groupActions = null; });
 
+      /* Re-fit a group's rectangle around its members' CURRENT positions.
+         Called after an arrange so the outline follows the reflowed nodes and
+         keeps the same 10px hug it had when the group was first created. */
+      const fitGroupToNodes = (group) => {
+        const boxes = boxesOfIds(Array.isArray(group.nodes) ? group.nodes : []);
+        if (!boxes.length) return;
+        Object.assign(group, groupBounds(boxes));
+      };
+
       /* Same three layouts and 12px default gap as ComfyUI's
          useArrangeNodes.ts; our cards already include their header in the
          measured size, so their titleHeight term is zero. */
-      const arrangeSelected = (layout) => {
-        const boxes = selectedBoxes();
+      const arrangeNodes = (layout, ids) => {
+        const boxes = boxesOfIds(ids);
         if (boxes.length < 2) return;
         const gap = 12;
         const anchor = boxes.reduce((best, box) =>
@@ -6304,12 +6283,20 @@ import {
           }));
         }
         for (const update of updates) NS.flow?.setNodePosition?.(update.id, { x: update.x, y: update.y });
+        /* Any group containing the moved nodes must shrink/grow to hug them. */
+        const movedIds = new Set(updates.map((update) => update.id));
+        for (const group of state.groups.value) {
+          if ((group.nodes || []).some((id) => movedIds.has(id))) fitGroupToNodes(group);
+        }
         NS.flow?.history?.schedule?.();
         const label = layout === "vertical" ? t("垂直排列")
           : layout === "horizontal" ? t("水平排列") : t("网格排列");
         NS.api?.toast?.("success", t("排列完成"),
           t("已按{layout}排列 {count} 个节点", { layout: label, count: boxes.length }));
       };
+      /* The multi-select toolbox arranges the current selection; the group
+         toolbar passes the group's own member ids instead. */
+      const arrangeSelected = (layout) => arrangeNodes(layout, state.selectedIds.value);
 
       const openArrangeMenu = (event) => {
         NS.tools?.openMenu?.(event.currentTarget, [
@@ -6318,30 +6305,98 @@ import {
           { label: t("网格排列"), onPick: () => arrangeSelected("grid") },
         ]);
       };
+      const openGroupArrangeMenu = (event, group) => {
+        const ids = Array.isArray(group.nodes) ? group.nodes.slice() : [];
+        NS.tools?.openMenu?.(event.currentTarget, [
+          { label: t("垂直排列"), onPick: () => arrangeNodes("vertical", ids) },
+          { label: t("水平排列"), onPick: () => arrangeNodes("horizontal", ids) },
+          { label: t("网格排列"), onPick: () => arrangeNodes("grid", ids) },
+        ]);
+      };
 
-      const batchDownload = async () => {
-        const ids = new Set(state.selectedIds.value);
+      const favoriteNodes = async (nodeIds) => {
+        const ids = new Set(nodeIds);
         const nodes = state.nodes.value.filter((node) => ids.has(node.id));
         let count = 0;
         for (const node of nodes) {
           const asset = node.data?.result || node.data?.asset;
+          const kind = asset?.kind || node.data?.kind || "text";
           const url = asset?.url || (asset && NS.api?.viewUrl?.(asset));
-          if (url) {
-            try {
-              await NS.tools?.registry?.download?.({ id: node.id, data: node.data, url });
-              count += 1;
-              continue;
-            } catch (error) { console.warn("[InfCanvas] batch download failed", error); }
-          }
-          const text = node.data?.text ?? node.data?.asset?.text ?? node.data?.result?.text;
-          if (text != null) {
-            const blob = new Blob([String(text)], { type: "text/plain;charset=utf-8" });
-            NS.tools?.helpers?.saveBlob?.(blob, (node.data?.title || "text") + ".txt");
+          try {
+            // Only text nodes carry their payload in data.text; media nodes
+            // have an empty data.text that must not shadow their fetchable file.
+            const text = node.data?.text ?? node.data?.asset?.text ?? node.data?.result?.text;
+            await NS.api.addToFavorites(asset || {}, {
+              url, kind,
+              name: asset?.name || asset?.filename || node.data?.title || "asset",
+              text: kind === "text" && text != null ? String(text) : undefined,
+            });
             count += 1;
+          } catch (error) {
+            console.warn("[InfCanvas] batch 收藏 failed", error);
           }
         }
         NS.api?.toast?.(count ? "success" : "info",
-          count ? t("已下载 {count} 个素材", { count }) : t("没有可下载的素材"));
+          count ? t("已添加 {count} 个素材到收藏", { count }) : t("没有可添加的素材"));
+      };
+      const batchFavorite = () => favoriteNodes(state.selectedIds.value);
+      const favoriteGroup = (group) => favoriteNodes(
+        Array.isArray(group.nodes) ? group.nodes : []);
+
+      /* "整组执行": run the group's generator nodes in WIRE order, so a node
+         whose input comes from a sibling is queued only AFTER that sibling has
+         finished and attached its result. Kahn topological sort over the
+         edges whose two ends are both group members; ties keep wire/array
+         order. Nodes already carrying an asset/result are materials, not
+         generators, and are skipped. Cycles fall back to array order. */
+      const runGroup = async (group) => {
+        const memberIds = Array.isArray(group.nodes) ? group.nodes.slice() : [];
+        const members = new Set(memberIds);
+        const runnable = memberIds.filter((id) => {
+          const node = state.nodes.value.find((entry) => entry.id === id);
+          const role = node?.data?.role;
+          /* Generators: media nodes with no asset yet, or empty text nodes. */
+          return !!node && ((role === "media" && !node.data?.asset)
+            || (role === "text" && !node.data?.asset && !node.data?.result));
+        });
+        if (!runnable.length) {
+          NS.api?.toast?.("info", t("整组执行"), t("组内没有可执行的生成节点"));
+          return;
+        }
+        const indeg = new Map(runnable.map((id) => [id, 0]));
+        const adj = new Map(runnable.map((id) => [id, []]));
+        for (const edge of state.edges.value || []) {
+          if (!members.has(edge.source) || !adj.has(edge.target)) continue;
+          /* Only order by edges between two RUNNABLE members; an edge from a
+             material sibling is an input, not a dependency on another run. */
+          if (!adj.has(edge.source)) continue;
+          adj.get(edge.source).push(edge.target);
+          indeg.set(edge.target, (indeg.get(edge.target) || 0) + 1);
+        }
+        const queue = runnable.filter((id) => indeg.get(id) === 0);
+        const order = [];
+        while (queue.length) {
+          const id = queue.shift();
+          order.push(id);
+          for (const next of adj.get(id) || []) {
+            indeg.set(next, indeg.get(next) - 1);
+            if (indeg.get(next) === 0) queue.push(next);
+          }
+        }
+        for (const id of runnable) if (!order.includes(id)) order.push(id); // cycles
+
+        NS.api?.toast?.("info", t("整组执行"),
+          t("按接线顺序执行 {count} 个节点", { count: order.length }));
+        let done = 0, failed = 0;
+        for (const id of order) {
+          try { await NS.generate?.run?.(id); done += 1; }
+          catch (error) {
+            failed += 1;
+            console.warn("[InfCanvas] group run failed", id, error);
+          }
+        }
+        NS.api?.toast?.(failed ? "warning" : "success", t("整组执行完成"),
+          t("完成 {done} 个，失败 {failed} 个", { done, failed }));
       };
 
       const batchDelete = () => {
@@ -6383,10 +6438,11 @@ import {
       };
 
       return {
-        gridCanvas, mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupId,
+        mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupId,
         groups, createGroup, selectGroup, onPaneClick, GROUP_CORNERS,
         startGroupRename, commitGroupRename, cancelGroupRename, startGroupDrag, startGroupResize,
-        openGroupMenu, openArrangeMenu, batchDownload, batchDelete,
+        openGroupMenu, openArrangeMenu, batchFavorite, batchDelete,
+        openGroupArrangeMenu, favoriteGroup, runGroup, ungroup: deleteGroup,
         groupStyle, toolStyle,
         onInit, onViewportChange, onConnect, isValidConnection,
         onConnectStart, onConnectEnd,
@@ -6404,7 +6460,6 @@ import {
       };
     },
     template: `
-      <canvas class="ic-canvas-grid" ref="gridCanvas"></canvas>
       <VueFlow
         :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
         :min-zoom="minZoom" :max-zoom="maxZoom"
@@ -6426,6 +6481,9 @@ import {
         :is-valid-connection="isValidConnection"
         @node-drag-stop="onNodeDragStop" @node-click="onNodeClick" @selection-change="onSelectionChange"
       >
+        <!-- Vue Flow native dotted background (#81818a dots, gap 20). It lives
+             inside VueFlow so it follows the viewport zoom/pan automatically. -->
+        <Background variant="dots" />
         <template #connection-line="slotProps">
           <IcConnectionLine v-bind="slotProps" />
         </template>
@@ -6438,6 +6496,21 @@ import {
                :class="{ 'is-selected': selectedGroupId === group.id }" :style="groupStyle(group)"></div>
           <div v-for="group in groups" :key="'ui-' + group.id" class="ic-group-ui"
                :class="{ 'is-selected': selectedGroupId === group.id }" :style="groupStyle(group)">
+            <div class="ic-group-tools" @pointerdown.stop @mousedown.stop
+                 @click.stop @dblclick.stop @wheel.stop @contextmenu.stop>
+              <button type="button" :title="$t('排列')" @click="openGroupArrangeMenu($event, group)">
+                <i class="icon-[lucide--layout-grid]"></i><span>{{ $t('排列') }}</span>
+              </button>
+              <button type="button" :title="$t('批量添加到收藏')" @click="favoriteGroup(group)">
+                <i class="icon-[lucide--bookmark]"></i><span>{{ $t('批量添加到收藏') }}</span>
+              </button>
+              <button type="button" :title="$t('整组执行')" @click="runGroup(group)">
+                <i class="icon-[lucide--play]"></i><span>{{ $t('整组执行') }}</span>
+              </button>
+              <button type="button" :title="$t('解组')" @click="ungroup(group.id)">
+                <i class="icon-[lucide--ungroup]"></i><span>{{ $t('解组') }}</span>
+              </button>
+            </div>
             <input v-if="groupEditing && groupEditing.id === group.id"
                    class="ic-group-title-input" v-model="groupEditing.value"
                    @keydown.enter.prevent="commitGroupRename" @keydown.esc.prevent="cancelGroupRename"
@@ -6461,8 +6534,8 @@ import {
             <button type="button" :title="$t('排列')" @click="openArrangeMenu">
               <i class="icon-[lucide--layout-grid]"></i><span>{{ $t('排列') }}</span>
             </button>
-            <button type="button" :title="$t('批量下载')" @click="batchDownload">
-              <i class="icon-[lucide--download]"></i><span>{{ $t('批量下载') }}</span>
+            <button type="button" :title="$t('批量添加到收藏')" @click="batchFavorite">
+              <i class="icon-[lucide--bookmark]"></i><span>{{ $t('批量添加到收藏') }}</span>
             </button>
             <button type="button" :title="$t('批量删除')" @click="batchDelete">
               <i class="icon-[lucide--trash-2]"></i><span>{{ $t('批量删除') }}</span>
@@ -6854,7 +6927,7 @@ import {
       return Math.max(0, Math.min(box.width, p.right - box.left));
     },
     setMode(mode) { state.mode.value = mode === "drag" ? "drag" : "select"; },
-    /* ---- grid snap (10px cells, matches the canvas background grid) ---- */
+    /* ---- grid snap (10px cells) ---- */
     snap: {
       enabled() { return !!state.snap.value; },
       set(value) { state.snap.value = !!value; },
