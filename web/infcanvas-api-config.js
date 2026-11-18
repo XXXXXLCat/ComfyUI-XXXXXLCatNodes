@@ -1327,8 +1327,9 @@
     if (!S.currentName) return;
     const ok = await NS.api?.confirmDialog?.({
       title: t("删除工作流"),
-      message: t("删除工作流「{name}」？", { name: S.currentName }),
-      confirmLabel: t("删除"), denyLabel: t("取消"),
+      message: t("您确定要删除此工作流吗？"),
+      itemList: [S.currentName],
+      type: "delete", key: "infcanvas-delete-workflow",
     });
     if (!ok) return;
     const name = S.currentName;

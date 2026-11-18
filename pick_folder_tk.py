@@ -4,9 +4,11 @@ ComfyUI's embedded Python has no tkinter, so the media panel asks a system
 Python that does.  The transient Tk root stays withdrawn; only the native
 folder chooser is visible.  An empty stdout means the user cancelled.
 
-The chooser is forced topmost/foreground for as long as it is open: the server
+The chooser is lifted to topmost/foreground once when it appears: the server
 that launches this helper has no visible window of its own, so without this the
-dialog opens behind the browser and looks like the click did nothing.
+dialog opens behind the browser and looks like the click did nothing. It is
+done only once (no continuous polling) so it never keeps stealing focus or
+interfering with typing inside the dialog.
 """
 from __future__ import annotations
 
@@ -55,21 +57,23 @@ _SWP_SHOWWINDOW = 0x0040
 _VK_MENU = 0x12  # ALT - a keystroke releases Windows' foreground lock
 _KEYEVENTF_KEYUP = 0x0002
 
-_running = True
-_ticks = 0
+_raised = False
+_max_wait_ticks = 50  # 100ms * 50 = 5s ceiling waiting for the dialog window
 
 
-def _raise_all() -> None:
-    """Keep every visible top-level window of this process topmost.
+def _raise_once() -> None:
+    """Lift the chooser to topmost/foreground exactly once, then stop.
 
-    Enumerating by PID (instead of matching one fixed class/title) survives the
-    modern IFileDialog recreating its window, and covers the case where the
-    chooser's class name is not the classic '#32770'.
+    The native dialog window is only created after askdirectory() starts, so
+    the first few ticks may find nothing — keep checking until it appears (or
+    we hit the ceiling), then do the topmost/foreground lift once and never
+    schedule another tick. Enumerating by PID (not a fixed class/title) copes
+    with the modern IFileDialog recreating its window and with a class name
+    other than the classic '#32770'.
     """
-    global _ticks
-    if not _running:
+    global _raised
+    if _raised:
         return
-    _ticks += 1
     pid = os.getpid()
     found = []
 
@@ -82,6 +86,14 @@ def _raise_all() -> None:
 
     user32.EnumWindows(EnumWindowsProc(visit), 0)
 
+    if not found:
+        # Dialog not up yet; wait a little more (bounded), then give up.
+        global _max_wait_ticks
+        _max_wait_ticks -= 1
+        if _max_wait_ticks > 0:
+            root.after(100, _raise_once)
+        return
+
     for hwnd in found:
         user32.ShowWindow(hwnd, _SW_RESTORE)
         user32.SetWindowPos(
@@ -90,24 +102,18 @@ def _raise_all() -> None:
         )
         user32.BringWindowToTop(hwnd)
 
-    # topmost alone can still look "behind" the browser: the dialog keeps no
-    # focus, so clicking around leaves the browser painted over it. Steal the
-    # foreground whenever the chooser is not it. SetForegroundWindow from a
-    # background process is normally refused -- a synthetic ALT keypress
-    # satisfies Windows' foreground-lock requirement. Throttle the keystroke
-    # to once every ~1s so it never interferes with typing in the dialog.
-    if found:
-        hwnd = user32.FindWindowW("#32770", TITLE) or found[0]
-        if user32.GetForegroundWindow() != hwnd:
-            if _ticks % 10 == 1:
-                user32.keybd_event(_VK_MENU, 0, 0, None)
-                user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, None)
-            user32.SetForegroundWindow(hwnd)
+    # A synthetic ALT satisfies Windows' foreground lock so a background
+    # process can focus the dialog; done once, not on a timer.
+    hwnd = user32.FindWindowW("#32770", TITLE) or found[0]
+    if user32.GetForegroundWindow() != hwnd:
+        user32.keybd_event(_VK_MENU, 0, 0, None)
+        user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, None)
+        user32.SetForegroundWindow(hwnd)
 
-    root.after(100, _raise_all)
+    _raised = True
 
 
-root.after(100, _raise_all)
+root.after(100, _raise_once)
 try:
     folder = filedialog.askdirectory(
         title=TITLE,
@@ -115,7 +121,6 @@ try:
         parent=root,
     )
 finally:
-    _running = False
     root.destroy()
 
 if folder:

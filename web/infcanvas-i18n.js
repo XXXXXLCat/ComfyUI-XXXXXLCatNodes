@@ -326,6 +326,24 @@ import { Vue } from "./vendor/vueflow.bundle.mjs";
     "读取素材失败：HTTP": "Could not read asset: HTTP",
     "添加到收藏失败": "Could not add to Favorites",
     "收藏文件夹尚未设置": "Favorites folder is not set yet",
+    /* Sidebar 提示词收藏 drawer (per-account saved snippets). */
+    "提示词收藏": "Saved Prompts",
+    "添加提示词": "Add Prompt",
+    "提示词标题": "Prompt title",
+    "提示词内容": "Prompt text",
+    "标题和提示词不能都为空": "Title and prompt cannot both be empty",
+    "提示词已保存": "Prompt saved",
+    "保存失败": "Save failed",
+    "加载提示词失败": "Could not load prompts",
+    "还没有保存的提示词": "No saved prompts yet",
+    "未命名": "Untitled",
+    "提示词已复制": "Prompt copied",
+    "复制提示词失败": "Could not copy prompt",
+    "复制提示词": "Copy prompt",
+    "修改提示词": "Edit prompt",
+    "修改": "Edit",
+    "提示词已更新": "Prompt updated",
+    "删除提示词": "Delete prompt",
     "处理失败": "Processing failed",
     "正在用 FFmpeg 处理{kind}，请稍候…": "Processing {kind} with FFmpeg, please wait…",
     "取消处理": "Cancel processing",
@@ -660,6 +678,8 @@ import { Vue } from "./vendor/vueflow.bundle.mjs";
     "已下载 {count} 个素材": "Downloaded {count} assets",
     "没有可下载的素材": "Nothing to download",
     "已删除 {count} 个节点": "Deleted {count} nodes",
+    "已删除 {count} 个分组": "Deleted {count} groups",
+    "已删除 {count} 项": "Deleted {count} items",
   };
 
   /* Resolve a key to the active language. */

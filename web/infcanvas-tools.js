@@ -1831,7 +1831,7 @@
   /* Lucide glyph name per tool key, rendered by IcIcon in the node toolbar.
      These are stable internal names; only the visible label is localised. */
   const TOOL_ICONS = {
-    crop: "crop", grid: "grid-3x3", mirror: "rotate-3d", adjust: "aperture",
+    crop: "crop", grid: "layout-grid", mirror: "rotate-3d", adjust: "aperture",
     extractAudio: "audio-lines-off", trim: "scissors",
     videoCrop: "crop", videoSpeed: "gauge", reverse: "rewind", rotate: "rotate-3d",
     frame: "camera", clip: "scissors", speed: "gauge", favorite: "bookmark",

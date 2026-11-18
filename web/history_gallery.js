@@ -2084,75 +2084,26 @@ let confirmDialog = null;
 
 function ensureConfirmDialog() {
     if (confirmDialog) return confirmDialog;
-    ensureStyle();
-
-    const el = document.createElement("div");
-    el.className = "xog-dlg";
-    el.hidden = true;
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-modal", "true");
-    el.innerHTML = `
-        <div class="xog-dlg-panel">
-            <h3 class="xog-dlg-title"></h3>
-            <p class="xog-dlg-msg"></p>
-            <ul class="xog-dlg-list"></ul>
-            <div class="xog-dlg-actions">
-                <button class="xog-dlg-btn" type="button" data-kind="cancel"></button>
-                <button class="xog-dlg-btn" type="button" data-kind="delete"></button>
-            </div>
-        </div>`;
-    document.body.appendChild(el);
-
-    const title = el.querySelector(".xog-dlg-title");
-    const msg = el.querySelector(".xog-dlg-msg");
-    const list = el.querySelector(".xog-dlg-list");
-    const cancelBtn = el.querySelector('[data-kind="cancel"]');
-    const deleteBtn = el.querySelector('[data-kind="delete"]');
-
-    let resolveFn = null;
-
-    function finish(value) {
-        if (!resolveFn) return;
-        const fn = resolveFn;
-        resolveFn = null;
-        el.hidden = true;
-        fn(value);
-    }
-
-    cancelBtn.addEventListener("click", () => finish(false));
-    deleteBtn.addEventListener("click", () => finish(true));
-    el.addEventListener("click", (ev) => {
-        if (ev.target === el) finish(false);
-    });
-    document.addEventListener("keydown", (ev) => {
-        if (ev.key === "Escape" && !el.hidden) finish(false);
-    });
-
+    /* Every delete in the product uses ComfyUI's own dialog.confirm(type:delete)
+       so the look matches ComfyUI exactly — no hand-rolled dialog. Keep the
+       .ask(files) shape so all callers stay unchanged. */
     confirmDialog = {
         /** Resolves true when the user confirms; mirrors dialogService.confirm. */
-        ask(files) {
-            title.textContent = t("deleteItems");
-            msg.textContent = t("deleteToTrash");
-            list.replaceChildren(
-                ...files.slice(0, 50).map((file) => {
-                    const li = document.createElement("li");
-                    li.textContent = relPath(file);
-                    li.title = li.textContent;
-                    return li;
-                })
-            );
-            if (files.length > 50) {
-                const li = document.createElement("li");
-                li.textContent = `… +${files.length - 50}`;
-                list.appendChild(li);
+        async ask(files) {
+            const paths = files.slice(0, 50).map((file) => relPath(file));
+            if (files.length > 50) paths.push(`… +${files.length - 50}`);
+            const api = window.InfCanvas?.api;
+            if (api?.confirmDialog) {
+                return await api.confirmDialog({
+                    title: t("deleteItems"),
+                    message: t("deleteToTrash"),
+                    itemList: paths,
+                    type: "delete", key: "xog-delete-items",
+                });
             }
-            cancelBtn.textContent = t("cancel");
-            deleteBtn.textContent = t("delete");
-            el.hidden = false;
-            deleteBtn.focus();
-            return new Promise((resolve) => {
-                resolveFn = resolve;
-            });
+            /* Fallback (canvas API not ready): plain confirm. */
+            return window.confirm(t("deleteItems") + "\n\n" + t("deleteToTrash") +
+                "\n\n" + paths.join("\n"));
         },
     };
     return confirmDialog;

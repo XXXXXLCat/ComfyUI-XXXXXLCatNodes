@@ -35,8 +35,9 @@
        sidebar tab (infcanvas-ui.js setPanel -> NS.galleryPanel.mount). */
     { key: "gallery", icon: "icon-[comfy--image-ai-edit]", label: "资产", tip: "资产" },
     { key: "nodes", icon: "icon-[comfy--node]", label: "节点", tip: "节点" },
-    /* Placeholder rail button: no panel/action yet, just sits below 节点. */
     { key: "media", icon: "icon-[comfy--ai-model]", label: "收藏", tip: "收藏" },
+    /* Saved prompts: a small per-account snippet library in its own drawer. */
+    { key: "prompts", icon: "icon-[lucide--text]", label: "提示词", tip: "提示词收藏" },
     { key: "canvases", icon: "icon-[comfy--workflow]", label: "画布", tip: "画布列表" },
     /* Reference: the "工作流配置" tab in the library dock (canvas-app.js:272)
        opens the WorkflowConfig FloatingWindow dialog. Here the same entry is
@@ -46,7 +47,7 @@
     { key: "api", icon: "icon-[lucide--panels-top-left]", label: "配置", tip: "配置" },
   ];
   const PANEL_TITLES = {
-    gallery: "资产", nodes: "添加节点", media: "收藏", canvases: "画布管理",
+    gallery: "资产", nodes: "添加节点", media: "收藏", prompts: "提示词收藏", canvases: "画布管理",
   };
   /* Cleanup returned by NS.galleryPanel.mount — the gallery installs global
      listeners and body-portaled popovers, so it must be torn down on switch. */
@@ -804,6 +805,7 @@
           { ...(key === "media" ? { mode: "media" } : {}), headSlot: shell.headSlot }
       ) || null;
     } else if (key === "nodes") renderNodeLibrary(shell.panelBody);
+    else if (key === "prompts") renderPrompts(shell.panelBody);
     else if (key === "canvases") renderCanvasList(shell.panelBody);
   }
 
@@ -838,6 +840,193 @@
     const panel = node("div", "ic-panel");
     if (hintText) panel.appendChild(node("div", "ic-hint", hintText));
     return panel;
+  }
+
+  /* Saved prompts drawer. Layout requested by the user:
+       [+ 添加提示词]                       <- top, always visible
+       (on click) title input + prompt textarea + [保存] [取消]
+       item: 标题 / 提示词前一段…     [删除]   <- newest first
+     Clicking an item copies its prompt to the clipboard for immediate reuse. */
+  /* Native ComfyUI classes, copied verbatim from the frontend sourcesContent
+     (see .workbuddy/tmp/dump_src.py). Used on our own DOM so every control here
+     is pixel-identical to the host's — no invented borders, no brand blue.
+       button   -> packages/design-system/src/button.variants.ts
+                   (default variant=secondary, size=md)
+       input    -> src/components/ui/input/Input.vue
+       textarea -> src/components/ui/textarea/Textarea.vue
+       row      -> treeStyles.ts treeItemClass (hover:bg-accent) */
+  /* Button tokens copied verbatim from design-system button.variants.ts.
+     Geometry (padding / height / font-size) lives in the SIZE variant, not
+     the base — omitting it is what squashed the two-character buttons down
+     to the browser default (1px 6px). */
+  const BTN_BASE =
+    "relative inline-flex cursor-pointer touch-manipulation appearance-none " +
+    "items-center justify-center gap-2 rounded-lg border-none font-inter " +
+    "font-medium whitespace-nowrap transition-colors " +
+    "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none " +
+    "disabled:pointer-events-none disabled:opacity-50 " +
+    "bg-secondary text-foreground hover:bg-accent";
+  /* size=md geometry with 14px text to match the native active tab (已生成). */
+  const NATIVE_BTN_LG_TEXT = BTN_BASE + " h-8 p-2 text-sm";
+  /* Save/cancel — matched to the reference "全部" chip: 32px tall (h-8) and
+     ~46px wide for two CJK characters, so px-3 (48px measured) is used over
+     p-2 (40px). 12px/500 text. This is size=md height, NOT size=lg (40px). */
+  const NATIVE_BTN = BTN_BASE + " h-8 px-3 py-1 text-xs";
+  const NATIVE_INPUT =
+    "flex h-10 w-full min-w-0 appearance-none rounded-lg border-none bg-secondary " +
+    "px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground " +
+    "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none " +
+    "disabled:pointer-events-none disabled:opacity-50";
+  const NATIVE_TEXTAREA =
+    "flex min-h-16 w-full scrollbar-gutter-stable rounded-lg border-none bg-secondary " +
+    "px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground " +
+    "focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none " +
+    "disabled:pointer-events-none disabled:opacity-50";
+  const NATIVE_ROW =
+    "flex items-center gap-2 w-full min-h-9 rounded-lg px-2 py-1 " +
+    "bg-transparent text-foreground cursor-pointer hover:bg-accent";
+
+  async function renderPrompts(container) {
+    if (!isCurrent(container, "prompts")) return;
+    const panel = panelHeader(null);
+    panel.classList.add("ic-panel--prompts");
+
+    const addBtn = node("button", NATIVE_BTN_LG_TEXT + " ic-prompt-add");
+    addBtn.type = "button";
+    addBtn.textContent = t("添加提示词");
+    panel.appendChild(addBtn);
+
+    /* The editor is created lazily and toggled, so the list stays put. */
+    const editor = node("div", "ic-prompt-editor");
+    editor.style.display = "none";
+    const titleInput = node("input", NATIVE_INPUT + " ic-prompt-title");
+    titleInput.type = "text";
+    titleInput.placeholder = t("提示词标题");
+    titleInput.setAttribute("aria-label", t("提示词标题"));
+    const textInput = node("textarea", NATIVE_TEXTAREA + " ic-prompt-text");
+    textInput.placeholder = t("提示词内容");
+    textInput.setAttribute("aria-label", t("提示词内容"));
+    textInput.rows = 5;
+    const actions = node("div", "ic-prompt-actions");
+    const saveBtn = node("button", NATIVE_BTN + " ic-prompt-save");
+    saveBtn.type = "button";
+    saveBtn.textContent = t("保存");
+    const cancelBtn = node("button", NATIVE_BTN + " ic-prompt-cancel");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = t("取消");
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    editor.appendChild(titleInput);
+    editor.appendChild(textInput);
+    editor.appendChild(actions);
+    panel.appendChild(editor);
+
+    const list = node("div", "ic-list ic-prompt-list scrollbar-custom");
+    panel.appendChild(list);
+    container.replaceChildren(panel);
+
+    /* null = adding a new prompt; a string id = editing that prompt. */
+    let editingId = null;
+    const openEditor = (item = null) => {
+      editingId = item ? item.id : null;
+      editor.style.display = "";
+      titleInput.value = item ? (item.title || "") : "";
+      textInput.value = item ? (item.text || "") : "";
+      titleInput.focus();
+    };
+    const closeEditor = () => { editor.style.display = "none"; editingId = null; };
+    addBtn.addEventListener("click", () => openEditor(null));
+    cancelBtn.addEventListener("click", closeEditor);
+
+    saveBtn.addEventListener("click", async () => {
+      const title = titleInput.value.trim();
+      const text = textInput.value;
+      if (!title && !text.trim()) {
+        api().toast("error", t("标题和提示词不能都为空"));
+        return;
+      }
+      saveBtn.disabled = true;
+      try {
+        if (editingId) {
+          await api().updatePrompt(editingId, title, text);
+          api().toast("success", t("提示词已更新"));
+        } else {
+          await api().addPrompt(title, text);
+          api().toast("success", t("提示词已保存"));
+        }
+        closeEditor();
+        await load();
+      } catch (error) {
+        api().toast("error", t("保存失败"), String(error?.message || error));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    const load = async () => {
+      if (!isCurrent(container, "prompts")) return;
+      let items = [];
+      try {
+        const data = await api().listPrompts();
+        items = Array.isArray(data?.items) ? data.items : [];
+      } catch (error) {
+        list.replaceChildren(node("div", "ic-hint", t("加载提示词失败")));
+        return;
+      }
+      if (!isCurrent(container, "prompts")) return;
+      if (!items.length) {
+        list.replaceChildren(node("div", "ic-hint", t("还没有保存的提示词")));
+        return;
+      }
+      list.replaceChildren();
+      for (const item of items) {
+        const row = node("div", NATIVE_ROW + " ic-prompt-item");
+        const body = node("div", "ic-prompt-body");
+        const titleEl = node("div", "text-sm text-foreground ic-prompt-item-title", item.title || t("未命名"));
+        /* Keep the original newlines: the summary shows up to three lines. */
+        const textEl = node("div", "text-xs text-muted-foreground ic-prompt-item-text", String(item.text || "").trim());
+        body.appendChild(titleEl);
+        body.appendChild(textEl);
+
+        const copyPrompt = async () => {
+          try {
+            await navigator.clipboard.writeText(String(item.text || ""));
+            api().toast("success", t("提示词已复制"));
+          } catch (error) {
+            api().toast("error", t("复制提示词失败"), String(error?.message || error));
+          }
+        };
+        const editPrompt = () => openEditor(item);
+        const deletePrompt = async () => {
+          const ok = await api().confirmDialog({
+            title: t("删除提示词"),
+            message: t("确定删除「{name}」？", { name: item.title || t("未命名") }),
+            type: "delete", key: "infcanvas-delete-prompt",
+          });
+          if (ok !== true) return;
+          try {
+            await api().removePrompt(item.id);
+            await load();
+          } catch (error) {
+            api().toast("error", t("删除失败"), String(error?.message || error));
+          }
+        };
+        /* Same context-menu surface as the tab / canvas / node menus. */
+        row.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openMenu(event, [
+            { label: t("复制提示词"), icon: "pi pi-copy", command: copyPrompt },
+            { label: t("修改提示词"), icon: "pi pi-pencil", command: editPrompt },
+            { separator: true },
+            { label: t("删除提示词"), icon: "pi pi-trash", command: deletePrompt },
+          ]);
+        });
+        row.appendChild(body);
+        list.appendChild(row);
+      }
+    };
+    await load();
   }
 
   function renderNodeLibrary(container) {

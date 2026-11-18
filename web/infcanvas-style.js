@@ -288,7 +288,10 @@ html.infcanvas-mode .litegraph-contextmenu {
   width: var(--infcanvas-panel-width, 312px);
   display: none; overflow: hidden;
   background: var(--ic-input, #171718);
-  z-index: 3;
+  /* The multi-select dashed border / Alt-knife trail are siblings of VueFlow
+     at z=10 / z=9. The drawer is an overlay, so it must paint above them;
+     otherwise the selection rect cuts straight across an open side panel. */
+  z-index: 12;
 }
 /* --infcanvas-panel-width is set on #infcanvas-root by attachPanelResizer():
    the pixel width restored from localStorage / clamped while dragging. */
@@ -328,7 +331,7 @@ html.infcanvas-mode .litegraph-contextmenu {
 #infcanvas-panel-resize-handle {
   position: absolute; top: 0; bottom: 0;
   left: calc(var(--sidebar-width, 56px) + var(--infcanvas-panel-width, 312px));
-  width: 1px; display: none; z-index: 4;
+  width: 1px; display: none; z-index: 13;
 }
 #infcanvas-root.has-panel #infcanvas-panel-resize-handle { display: flex; }
 /* reka-ui injects a global '*{cursor:ew-resize!important}' style during drag;
@@ -375,7 +378,9 @@ html.infcanvas-mode .litegraph-contextmenu {
   font-size: var(--ic-ctrl-fs, 12px); font-weight: 400; white-space: nowrap; cursor: pointer;
   transition: background-color .1s cubic-bezier(.4, 0, .2, 1), color .1s cubic-bezier(.4, 0, .2, 1);
 }
-.ic-btn:hover:not(:disabled) { border-color: var(--ic-brand, #0b8ce9); color: var(--ic-brand, #0b8ce9); }
+/* Neutral hover, matching every other sidebar control (menu/target/canvas
+   rows all use --accent); no brand blue here. */
+.ic-btn:hover:not(:disabled) { background: var(--accent, #313235); color: var(--foreground, #ffffff); }
 .ic-btn:disabled { opacity: .45; cursor: default; }
 .ic-btn i { font-size: 14px; }
 .ic-btn.danger:hover:not(:disabled) {
@@ -572,5 +577,50 @@ html.infcanvas-mode .litegraph-contextmenu {
    popover's number field reuses FormNumberField.vue's classes, and the minimap
    settings panel reuses Checkbox.vue's. Everything follows the host theme. */
 .ic-controls { font-family: Inter, Arial, sans-serif; }
+
+
+/* ---- saved prompts drawer --------------------------------------------
+   Every control here carries ComfyUI's OWN utility classes verbatim (set in
+   infcanvas-ui.js: NATIVE_BTN / NATIVE_INPUT / NATIVE_TEXTAREA / NATIVE_ROW /
+   NATIVE_ICON_BTN, copied from button.variants.ts, Input.vue, Textarea.vue,
+   treeStyles.ts). Hover/ring/border/background/colour all come from the host
+   stylesheet — so hover is --accent and focus is --ring, never brand blue.
+   This block only adds geometry the utility classes don't express: panel
+   spacing, full-width add button, editor show/hide, list scroll, row text
+   truncation, and the delete glyph's hover-only reveal. */
+.ic-panel--prompts { gap: 8px; padding: 8px 0 16px; height: 100%; min-height: 0; }
+/* 16px side insets match the native sidebar search box (.ic-search:
+   margin 8px 16px) and the panel title's 16px px-4 — the whole column
+   lines up. Button geometry (size=md add / size=lg save+cancel, including
+   their padding) comes verbatim from the native class strings in the JS;
+   no geometry is overridden here. */
+.ic-prompt-add {
+  flex: 0 0 auto; width: calc(100% - 32px); margin: 0 16px;
+}
+.ic-prompt-editor {
+  display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto;
+  margin: 0 16px;
+}
+.ic-prompt-text { resize: vertical; }
+.ic-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Same 16px side inset as the button; rows fill the remaining width. */
+.ic-prompt-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 0 16px;
+}
+/* Row has three-line summaries, so anchor text at the top rather than the
+   native tree row's centred alignment. */
+.ic-prompt-item { align-items: flex-start; }
+.ic-prompt-body { flex: 1 1 auto; min-width: 0; }
+.ic-prompt-item-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Summary shows up to three lines of the original text (newlines kept),
+   then ellipsises — the whole prompt is still one right-click away. */
+.ic-prompt-item-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; line-height: 16px; max-height: 48px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 `;
 })();
