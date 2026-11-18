@@ -168,7 +168,7 @@ import {
        Rendered behind nodes and saved with the canvas. */
     groups: ref([]),
     groupEditing: ref(null),          // { id, value } while a group title is being renamed
-    selectedGroupId: ref(null),       // groups are selected independently of nodes
+    selectedGroupIds: ref([]),        // groups may join a multi-selection alongside nodes
     viewport: ref({ x: 0, y: 0, zoom: 1 }),
     mode: ref("select"),              // "select" | "drag"
     minimap: ref(false),
@@ -393,6 +393,18 @@ import {
       + '<path d="M18 22V8a2 2 0 0 0-2-2H2" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     "grid-3x3": '<rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.8" fill="none"/>'
       + '<path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" stroke-width="1.8" fill="none"/>',
+    /* lucide layout-grid — the 宫格裁剪 tool glyph (four equal detached cells),
+       distinct from grid-3x3's continuous snap/group grid. */
+    "layout-grid": '<rect width="7" height="7" x="3" y="3" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="7" x="14" y="3" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="7" x="14" y="14" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="7" x="3" y="14" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>',
+    /* lucide layout-dashboard — the 排列 toolbar glyph: four uneven dashboard
+       panels, not the equal-cell layout-grid used by 宫格裁剪. */
+    "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="5" x="14" y="3" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="9" x="14" y="12" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      + '<rect width="7" height="5" x="3" y="16" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/>',
     "rotate-cw": '<path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/>'
       + '<path d="M21 3v6h-6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     /* lucide rotate-3d — the 旋转 tool's 3D orbit glyph. */
@@ -437,6 +449,17 @@ import {
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 21h16" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     /* lucide bookmark — the 添加到收藏 toolbar glyph. */
     bookmark: '<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    /* lucide grid-3x3-off — 解组, the crossed-out counterpart of 打组's
+       grid-3x3. Added upstream after our bundled Iconify CSS, so draw locally. */
+    "grid-3x3-off": '<path d="M15 9.344V3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="m2 2 20 20" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M20.414 20.414A2 2 0 0119 21H5a2 2 0 01-2-2V5a2 2 0 01.586-1.414" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M20.656 15H21" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M21 9h-6.344" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M3 15h12v6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M3 9h6v12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M8.656 3H19a2 2 0 012 2v10.343" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<path d="M9 3v.344" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
     "trash-2": '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m5 5v6m4-6v6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   };
 
@@ -2994,14 +3017,16 @@ import {
          can be renamed here. contenteditable rather than <input>: the capsule is
          inline-block and must grow with the text instead of being pinned to a
          guessed width. */
-      const DEFAULT_TITLE = { image: "图像", video: "视频", audio: "音频", text: "文本" };
+      const DEFAULT_TITLE = { image: "图像", video: "视频", audio: "音频", text: "文本", lora: "LoRA 栈" };
       /* Titles are persisted as the Chinese medium name (an internal key, same
          as the category keys), but the capsule must read Text / Image / Video /
-         Audio in English. Both spellings map back to the key on rename so a
-         language switch never turns a default title into a "custom" one. */
+         Audio / LoRA Stack in English. Both spellings map back to the key on
+         rename so a language switch never turns a default title into a
+         "custom" one. */
       const TITLE_KEYS = {
         "图像": "image", "Image": "image", "视频": "video", "Video": "video",
         "音频": "audio", "Audio": "audio", "文本": "text", "Text": "text",
+        "LoRA 栈": "lora", "LoRA Stack": "lora",
         "节点": "node", "Node": "node",
       };
       const canonicalTitle = (name) => {
@@ -4386,7 +4411,8 @@ import {
   stroke-linecap:round; stroke-linejoin:round;
   filter:drop-shadow(0 0 3px rgba(255,255,255,.65)); }
 /* Multi-selection outline, mirroring ComfyUI's Comfy.SelectionBorder:
-   host --border colour, 2px dashes at 5/5, 8px corners, never interactive. */
+   host --border colour, 2px dashes at 5/5, 8px corners, never interactive.
+   The side drawer is a sibling overlay at z=12 so it stays above this rect. */
 .ic-selection-border { position:absolute; inset:0; width:100%; height:100%;
   pointer-events:none; z-index:10; overflow:visible; }
 /* Groups live INSIDE VueFlow's transformation pane (the zoom-pane slot), in
@@ -4446,6 +4472,9 @@ import {
   border:1px solid var(--border, #494a50); border-radius:8px;
   background:var(--ic-panel, #262729); box-shadow:0 6px 20px rgba(0,0,0,.45); }
 .ic-group-ui.is-selected .ic-group-tools { display:flex; }
+/* In a shared selection the dashed border + multi toolbox describe the whole
+   set; a single group's own toolbar would overlap them, so hide it there. */
+.ic-group-ui.is-multi .ic-group-tools { display:none; }
 .ic-group-tools button { display:inline-flex; align-items:center; gap:5px;
   height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent;
   color:var(--ic-text, #ffffff); font:inherit; font-size:12px; line-height:1;
@@ -5211,7 +5240,7 @@ import {
   /* -------------------------------- root app ------------------------------ */
 
   const Root = {
-    components: { VueFlow: VueFlowComponent, MiniMap, Background, IcConnectionLine },
+    components: { VueFlow: VueFlowComponent, MiniMap, Background, IcConnectionLine, IcIcon },
     setup() {
       const showMinimap = ref(state.minimap.value);
       const zoomFar = ref(state.viewport.value.zoom < 0.6);   // <60% hides link dots
@@ -5220,7 +5249,7 @@ import {
       const snap = state.snap;
       const groups = state.groups;
       const groupEditing = state.groupEditing;
-      const selectedGroupId = state.selectedGroupId;
+      const selectedGroupIds = state.selectedGroupIds;
       /* Interaction map is ComfyUI's default, Comfy.Canvas.NavigationMode =
          "legacy" / Drag Navigation (coreSettings.ts):
            - left drag on the pane pans, exactly like the reference canvas
@@ -5662,13 +5691,16 @@ import {
           next = [node.id];
         }
         if (next.length === current.length && next.every((id, i) => id === current[i])) return;
-        NS.flow?.selectNodes?.(next);
+        /* A modifier click is additive: keep any groups in the shared
+           selection. A plain click replaces the nodes and clears groups. */
+        NS.flow?.selectNodes?.(next, toggling);
       };
       const onSelectionChange = (payload) => {
         state.selectedIds.value = (payload?.nodes || []).map((node) => node.id);
-        /* Nodes and groups are mutually exclusive selections, matching
-           ComfyUI's shared selectedItems set. */
-        if (state.selectedIds.value.length) state.selectedGroupId.value = null;
+        /* Groups can stay selected while nodes are selected: Ctrl/Shift clicks,
+           marquee selection and Ctrl+A all keep the current group selection.
+           A plain node click clears it via onNodeClick, and a pane click clears
+           both via onPaneClick. */
         NS.flow?.onSelection?.(payload?.nodes || []);
       };
 
@@ -5925,7 +5957,8 @@ import {
       /* A bulk selection is for moving/deleting nodes, not for editing one.
          Hide every node's top action row and bottom parameter panel while
          more than one node is selected so they don't cover the neighbours. */
-      const multiSelect = computed(() => state.selectedIds.value.length > 1);
+      const multiSelect = computed(() =>
+        state.selectedIds.value.length + state.selectedGroupIds.value.length > 1);
 
       /* ComfyUI's Comfy.SelectionBorder extension draws a dashed round-rect
          around every selected item once there are 2+. Mirror it in screen
@@ -5940,8 +5973,11 @@ import {
         if (!host) return;
         const hostBox = host.getBoundingClientRect();
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const id of state.selectedIds.value) {
-          const el = host.querySelector('.vue-flow__node[data-id="' + id + '"]');
+        const selectedEls = [
+          ...state.selectedIds.value.map((id) => host.querySelector('.vue-flow__node[data-id="' + id + '"]')),
+          ...state.selectedGroupIds.value.map((id) => host.querySelector('.ic-group[data-id="' + id + '"]')),
+        ];
+        for (const el of selectedEls) {
           if (!el) continue;
           const box = el.getBoundingClientRect();
           minX = Math.min(minX, box.left - hostBox.left);
@@ -6022,7 +6058,7 @@ import {
         if (boxes.length < 2) return;
         state.groups.value = state.groups.value.concat([{
           id: "grp_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          title: t("分组"),
+          title: "分组",   /* internal key, rendered via t() like node titles */
           ...groupBounds(boxes),
           nodes: boxes.map((box) => box.id),
         }]);
@@ -6035,12 +6071,29 @@ import {
       /* ComfyUI's processSelect(group): clicking the title strip selects the
          group rectangle itself. Children stay unselected by default —
          LiteGraph.Group.SelectChildrenOnClick defaults to false. */
-      const selectGroup = (id) => {
+      const selectGroup = (id, additive = false) => {
         if (state.groupEditing.value) commitGroupRename();
-        state.selectedGroupId.value = id;
+        const current = state.selectedGroupIds.value.slice();
+        /* Shift/Ctrl/Cmd + click toggles a group in the shared selection,
+           leaving any selected nodes alone — the same "add" intent ComfyUI's
+           resolveClickSelection uses for nodes. */
+        if (additive) {
+          state.selectedGroupIds.value = current.includes(id)
+            ? current.filter((entry) => entry !== id)
+            : current.concat(id);
+          return;
+        }
+        /* A plain group click joins an existing node multi-selection instead
+           of collapsing it; with no/one node selected it stays a group-only
+           selection (ComfyUI picks a single item on a plain click). */
+        if (state.selectedIds.value.length > 1) {
+          if (!current.includes(id)) state.selectedGroupIds.value = current.concat(id);
+          return;
+        }
+        state.selectedGroupIds.value = [id];
         const api = state.flow;
-        const current = api?.getSelectedNodes?.value || [];
-        if (current.length) api?.removeSelectedNodes?.(current);
+        const currentNodes = api?.getSelectedNodes?.value || [];
+        if (currentNodes.length) api?.removeSelectedNodes?.(currentNodes);
         state.selectedIds.value = [];
       };
       /* Drag the 30px title strip: LGraphGroup.move(dx, dy) shifts the group
@@ -6050,7 +6103,7 @@ import {
       const startGroupDrag = (event, group) => {
         if (event.button !== 0 || state.groupEditing.value || !NS.api?.isActive?.()) return;
         event.stopPropagation();
-        selectGroup(group.id);
+        selectGroup(group.id, event.shiftKey || event.ctrlKey || event.metaKey);
         const zoom = state.viewport.value.zoom || 1;
         const startX = event.clientX, startY = event.clientY;
         const x0 = group.x, y0 = group.y;
@@ -6093,7 +6146,7 @@ import {
         if (event.button !== 0 || !NS.api?.isActive?.()) return;
         event.preventDefault();
         event.stopPropagation();
-        selectGroup(group.id);
+        selectGroup(group.id, event.shiftKey || event.ctrlKey || event.metaKey);
         const zoom = state.viewport.value.zoom || 1;
         const startX = event.clientX, startY = event.clientY;
         const x0 = group.x, y0 = group.y, w0 = group.w, h0 = group.h;
@@ -6168,20 +6221,70 @@ import {
            group+children drag; startGroupDrag also selects the group. */
         startGroupDrag(event, group);
       };
-      /* A real pane click (outside every group) deselects the group. */
+      /* Ctrl/Cmd + drag marquee: Vue Flow only selects nodes (groups are DOM
+         overlays in the zoom pane), so add every group rectangle the marquee
+         overlaps to the shared selection on release. */
+      let marqueeStart = null;
+      let marqueePickedAt = -Infinity;
+      const onMarqueePointerDown = (event) => {
+        marqueeStart = null;
+        if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest("#infcanvas-stage")) return;
+        if (target.closest(".vue-flow__node, .ic-group-ui, .ic-selection-tools, .ict-menu, .ic-menu, input, textarea, [contenteditable]")) return;
+        marqueeStart = { x: event.clientX, y: event.clientY };
+      };
+      const onMarqueePointerUp = (event) => {
+        const start = marqueeStart;
+        marqueeStart = null;
+        if (!start) return;
+        if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < 4) return;
+        const a = NS.flow?.screenToFlow?.(start.x, start.y);
+        const b = NS.flow?.screenToFlow?.(event.clientX, event.clientY);
+        if (!a || !b) return;
+        const left = Math.min(a.x, b.x), right = Math.max(a.x, b.x);
+        const top = Math.min(a.y, b.y), bottom = Math.max(a.y, b.y);
+        const picked = state.groups.value.filter((group) =>
+          group.x <= right && group.x + group.w >= left &&
+          group.y <= bottom && group.y + group.h >= top).map((group) => group.id);
+        if (picked.length) {
+          /* A Ctrl+drag that started and ended on the pane still emits Vue
+             Flow's pane-click, which would immediately clear the groups the
+             marquee just picked. Ignore that one follow-up click. */
+          marqueePickedAt = performance.now();
+          state.selectedGroupIds.value = Array.from(
+            new Set(state.selectedGroupIds.value.concat(picked)));
+        }
+      };
+      /* A real pane click (outside every group) deselects groups as well. */
       const onPaneClick = () => {
         if (suppressPaneClick) { suppressPaneClick = false; return; }
-        state.selectedGroupId.value = null;
+        if (performance.now() - marqueePickedAt < 150) return;
+        state.selectedGroupIds.value = [];
       };
-      onMounted(() => document.addEventListener("pointerdown", onGroupPointerDown, true));
-      onBeforeUnmount(() => document.removeEventListener("pointerdown", onGroupPointerDown, true));
+      onMounted(() => {
+        document.addEventListener("pointerdown", onGroupPointerDown, true);
+        document.addEventListener("pointerdown", onMarqueePointerDown, true);
+        document.addEventListener("pointerup", onMarqueePointerUp, true);
+      });
+      onBeforeUnmount(() => {
+        document.removeEventListener("pointerdown", onGroupPointerDown, true);
+        document.removeEventListener("pointerdown", onMarqueePointerDown, true);
+        document.removeEventListener("pointerup", onMarqueePointerUp, true);
+      });
 
       /* Group title editing mirrors ComfyUI's TitleEditor.vue: double-click
        the title strip to edit in place, Enter or blur commits a trimmed
-       non-empty value, Escape cancels. A renamed title is user data and is
-       never passed through the translator again. */
+       non-empty value, Escape cancels. The default title is stored as the
+       Chinese key "分组" (same convention as node titles) and translated on
+       display; an explicitly renamed title stays user data, untouched by
+       the translator. */
+      const groupDisplayTitle = (title) =>
+        (title === "分组" || title === "Group") ? t("分组") : title;
+      const canonicalGroupTitle = (title) =>
+        (title === "Group" || title === "分组") ? "分组" : title;
       const startGroupRename = (group) => {
-        state.groupEditing.value = { id: group.id, value: group.title };
+        state.groupEditing.value = { id: group.id, value: groupDisplayTitle(group.title) };
         nextTick(() => {
           const input = document.querySelector(".ic-group-title-input");
           if (!input) return;
@@ -6194,9 +6297,10 @@ import {
         if (!edit) return;
         const value = String(edit.value || "").trim();
         if (value) {
+          const title = canonicalGroupTitle(value);
           const target = state.groups.value.find((group) => group.id === edit.id);
-          if (target && target.title !== value) {
-            target.title = value;
+          if (target && target.title !== title) {
+            target.title = title;
             NS.api?.markDirty?.();
             NS.flow?.history?.schedule?.();
           }
@@ -6207,16 +6311,19 @@ import {
 
       /* ComfyUI's group "Remove" deletes the group rectangle only — the
        nodes it contained stay exactly where they are. */
-      const deleteGroup = (id) => {
+      const deleteGroups = (ids) => {
+        const gone = new Set(Array.isArray(ids) ? ids : [ids]);
         const before = state.groups.value.length;
-        state.groups.value = state.groups.value.filter((group) => group.id !== id);
+        state.groups.value = state.groups.value.filter((group) => !gone.has(group.id));
         if (state.groups.value.length === before) return;
         state.groupEditing.value = null;
-        if (state.selectedGroupId.value === id) state.selectedGroupId.value = null;
+        state.selectedGroupIds.value = state.selectedGroupIds.value.filter((id) => !gone.has(id));
         NS.api?.markDirty?.();
         NS.flow?.history?.schedule?.();
-        NS.api?.toast?.("success", t("已删除分组"));
+        NS.api?.toast?.("success", gone.size > 1
+          ? t("已删除 {count} 个分组", { count: gone.size }) : t("已删除分组"));
       };
+      const deleteGroup = (id) => deleteGroups([id]);
 
       /* Right-clicking the title strip exposes the two group actions from
        LGraphGroup.getMenuOptions(): Title (rename) and Remove (delete group). */
@@ -6227,7 +6334,7 @@ import {
         ]);
       };
       /* Let core.js's single keydown handler reuse this setup-scoped action. */
-      state.groupActions = { createGroup, deleteGroup, selectGroup };
+      state.groupActions = { createGroup, deleteGroup, deleteGroups, selectGroup };
       onBeforeUnmount(() => { state.groupActions = null; });
 
       /* Re-fit a group's rectangle around its members' CURRENT positions.
@@ -6401,15 +6508,25 @@ import {
 
       const batchDelete = () => {
         const ids = state.selectedIds.value.slice();
-        if (ids.length < 2) return;
+        const groupIds = state.selectedGroupIds.value.slice();
+        if (ids.length + groupIds.length < 2) return;
         const gone = new Set(ids);
+        const goneGroups = new Set(groupIds);
         state.groups.value = state.groups.value.filter((group) =>
-          !Array.isArray(group.nodes) || group.nodes.some((id) => !gone.has(id)));
-        NS.flow?.selectNodes?.([]);
-        NS.flow?.removeNodes?.(ids);
+          !goneGroups.has(group.id) &&
+          (!Array.isArray(group.nodes) || group.nodes.some((id) => !gone.has(id))));
+        state.selectedGroupIds.value = state.selectedGroupIds.value.filter((id) => !goneGroups.has(id));
+        if (ids.length) {
+          NS.flow?.selectNodes?.([]);
+          NS.flow?.removeNodes?.(ids);
+        }
         NS.api?.markDirty?.();
         NS.flow?.history?.schedule?.();
-        NS.api?.toast?.("success", t("已删除 {count} 个节点", { count: ids.length }));
+        const label = ids.length && groupIds.length
+          ? t("已删除 {count} 项", { count: ids.length + groupIds.length })
+          : ids.length ? t("已删除 {count} 个节点", { count: ids.length })
+            : t("已删除 {count} 个分组", { count: groupIds.length });
+        NS.api?.toast?.("success", label);
       };
 
       /* Groups and the toolbox live in VueFlow's transformation pane, so all
@@ -6438,7 +6555,7 @@ import {
       };
 
       return {
-        mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupId,
+        mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupIds, groupDisplayTitle,
         groups, createGroup, selectGroup, onPaneClick, GROUP_CORNERS,
         startGroupRename, commitGroupRename, cancelGroupRename, startGroupDrag, startGroupResize,
         openGroupMenu, openArrangeMenu, batchFavorite, batchDelete,
@@ -6492,23 +6609,24 @@ import {
              backdrop is below the nodes; only the strip/grips/toolbar take
              pointers (the pane itself is pointer-events:none). -->
         <template #zoom-pane>
-          <div v-for="group in groups" :key="group.id" class="ic-group"
-               :class="{ 'is-selected': selectedGroupId === group.id }" :style="groupStyle(group)"></div>
-          <div v-for="group in groups" :key="'ui-' + group.id" class="ic-group-ui"
-               :class="{ 'is-selected': selectedGroupId === group.id }" :style="groupStyle(group)">
+          <div v-for="group in groups" :key="group.id" class="ic-group" :data-id="group.id"
+               :class="{ 'is-selected': selectedGroupIds.includes(group.id) }" :style="groupStyle(group)"></div>
+          <div v-for="group in groups" :key="'ui-' + group.id" class="ic-group-ui" :data-id="group.id"
+               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-multi': multiSelect }"
+               :style="groupStyle(group)">
             <div class="ic-group-tools" @pointerdown.stop @mousedown.stop
                  @click.stop @dblclick.stop @wheel.stop @contextmenu.stop>
               <button type="button" :title="$t('排列')" @click="openGroupArrangeMenu($event, group)">
-                <i class="icon-[lucide--layout-grid]"></i><span>{{ $t('排列') }}</span>
+                <IcIcon name="layout-dashboard" :size="14" /><span>{{ $t('排列') }}</span>
               </button>
               <button type="button" :title="$t('批量添加到收藏')" @click="favoriteGroup(group)">
-                <i class="icon-[lucide--bookmark]"></i><span>{{ $t('批量添加到收藏') }}</span>
+                <IcIcon name="bookmark" :size="14" /><span>{{ $t('批量添加到收藏') }}</span>
               </button>
               <button type="button" :title="$t('整组执行')" @click="runGroup(group)">
                 <i class="icon-[lucide--play]"></i><span>{{ $t('整组执行') }}</span>
               </button>
               <button type="button" :title="$t('解组')" @click="ungroup(group.id)">
-                <i class="icon-[lucide--ungroup]"></i><span>{{ $t('解组') }}</span>
+                <IcIcon name="grid-3x3-off" :size="14" /><span>{{ $t('解组') }}</span>
               </button>
             </div>
             <input v-if="groupEditing && groupEditing.id === group.id"
@@ -6519,7 +6637,7 @@ import {
             <div v-else class="ic-group-title nopan nodrag" :title="$t('双击标题改名')"
                  @pointerdown="startGroupDrag($event, group)" @mousedown.stop
                  @dblclick.stop.prevent="startGroupRename(group)"
-                 @contextmenu.prevent.stop="openGroupMenu($event, group)">{{ group.title }}</div>
+                 @contextmenu.prevent.stop="openGroupMenu($event, group)">{{ groupDisplayTitle(group.title) }}</div>
             <div v-for="corner in GROUP_CORNERS" :key="corner" class="ic-group__rz nopan nodrag"
                  :class="'ic-group__rz--' + corner"
                  @pointerdown="startGroupResize($event, group, corner)" @mousedown.stop>
@@ -6529,13 +6647,13 @@ import {
           <div v-if="selectionRect && multiSelect" class="ic-selection-tools" :style="toolStyle()"
                @pointerdown.stop @mousedown.stop @click.stop @dblclick.stop @wheel.stop>
             <button type="button" :title="$t('打组')" @click="createGroup">
-              <i class="icon-[lucide--frame]"></i><span>{{ $t('打组') }}</span>
+              <IcIcon name="grid-3x3" :size="14" /><span>{{ $t('打组') }}</span>
             </button>
             <button type="button" :title="$t('排列')" @click="openArrangeMenu">
-              <i class="icon-[lucide--layout-grid]"></i><span>{{ $t('排列') }}</span>
+              <IcIcon name="layout-dashboard" :size="14" /><span>{{ $t('排列') }}</span>
             </button>
             <button type="button" :title="$t('批量添加到收藏')" @click="batchFavorite">
-              <i class="icon-[lucide--bookmark]"></i><span>{{ $t('批量添加到收藏') }}</span>
+              <IcIcon name="bookmark" :size="14" /><span>{{ $t('批量添加到收藏') }}</span>
             </button>
             <button type="button" :title="$t('批量删除')" @click="batchDelete">
               <i class="icon-[lucide--trash-2]"></i><span>{{ $t('批量删除') }}</span>
@@ -6745,7 +6863,7 @@ import {
     load(doc) {
       state.nodes.value = doc.nodes || [];
       state.groups.value = Array.isArray(doc.groups) ? doc.groups : [];
-      state.selectedGroupId.value = null;
+      state.selectedGroupIds.value = [];
       /* Collapse any duplicate source→target wires already present in an old
          save so every downstream count sees one connection per node pair. */
       state.edges.value = dedupeEdges(doc.edges);
@@ -6986,7 +7104,7 @@ import {
     selectedNodes() { return state.flow?.getSelectedNodes?.value || []; },
     /* Selection lives in Vue Flow's own store, so go through its API instead of
        flipping `node.selected` on our plain objects (they are not the same). */
-    selectNodes(ids) {
+    selectNodes(ids, keepGroups = false) {
       const api = state.flow;
       if (!api) return;
       try {
@@ -6995,7 +7113,9 @@ import {
         const nodes = ids.map((id) => api.findNode(id)).filter(Boolean);
         if (nodes.length) {
           api.addSelectedNodes(nodes);
-          state.selectedGroupId.value = null;
+          /* A single node is a replacement selection, just like a plain click;
+             a bulk select keeps any groups already in the shared selection. */
+          if (nodes.length === 1 && !keepGroups) state.selectedGroupIds.value = [];
         }
         /* Mirror immediately so the edge highlight does not wait a tick. */
         state.selectedIds.value = nodes.map((node) => node.id);

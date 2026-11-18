@@ -95,6 +95,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 import zipfile
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode
@@ -164,6 +165,10 @@ MEDIA_PICK_ROUTE = "/xcat/media/folder/pick"
 # Node / group / selection "添加到收藏": copy the asset bytes into the
 # user-chosen 收藏 folder, sorted into text/image/video/audio sub-folders.
 FAVORITES_ADD_ROUTE = "/xcat/favorites/add"
+# Sidebar 提示词 panel: a per-account list of saved {title, text} snippets,
+# stored in one JSON file under the user's Cat-Nodes data dir.
+PROMPTS_FILE = "prompts.json"
+PROMPTS_ROUTE = "/xcat/prompts"
 # Folder names are the four Chinese category labels the user listed; the
 # 收藏 panel lists everything under the chosen root recursively anyway.
 _FAVORITES_KIND_DIR = {
@@ -909,6 +914,141 @@ async def _h_favorites_add(request: web.Request) -> web.Response:
     except OSError as exc:
         return web.json_response({"error": str(exc)}, status=500)
     return web.json_response({"ok": True, **saved})
+
+
+# ----------------------------------------------------------- 提示词收藏
+# A saved-prompt is {id, title, text, created}. All of one account's prompts
+# live in a single JSON file under user/<account>/Cat-Nodes/prompts.json, which
+# keeps them isolated per account exactly like canvases and media_folder.json.
+
+def _prompts_path() -> str:
+    try:
+        from ..server_routes import PLUGIN_DATA_DIR, _user_root
+
+        root = _user_root()
+    except Exception:  # pragma: no cover - loaded outside the package
+        import folder_paths
+
+        root = folder_paths.get_user_directory()
+        PLUGIN_DATA_DIR = "Cat-Nodes"
+    return os.path.join(root, PLUGIN_DATA_DIR, PROMPTS_FILE)
+
+
+def _load_prompts() -> List[dict]:
+    try:
+        with open(_prompts_path(), "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    # Keep only well-formed entries so a hand-edited file cannot break the UI.
+    return [
+        {
+            "id": str(item.get("id") or ""),
+            "title": str(item.get("title") or ""),
+            "text": str(item.get("text") or ""),
+            "created": float(item.get("created") or 0),
+        }
+        for item in data
+        if isinstance(item, dict) and item.get("id")
+    ]
+
+
+def _save_prompts(items: List[dict]) -> None:
+    path = _prompts_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(items, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+async def _h_prompts_list(request: web.Request) -> web.Response:
+    user = _request_user(request)
+    if _multi_user_enabled() and not user:
+        return web.json_response({"error": "unknown user"}, status=401)
+    return web.json_response({"items": await asyncio.to_thread(_load_prompts)})
+
+
+async def _h_prompts_add(request: web.Request) -> web.Response:
+    user = _request_user(request)
+    if _multi_user_enabled() and not user:
+        return web.json_response({"error": "unknown user"}, status=401)
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid body"}, status=400)
+    payload = payload or {}
+    title = str(payload.get("title") or "").strip()
+    text = str(payload.get("text") or "")
+    if not title and not text.strip():
+        return web.json_response({"error": "empty prompt"}, status=400)
+    item = {
+        "id": uuid.uuid4().hex,
+        "title": title[:200],
+        "text": text[:100000],
+        "created": time.time(),
+    }
+    try:
+        items = await asyncio.to_thread(_load_prompts)
+        items.insert(0, item)  # newest first
+        await asyncio.to_thread(_save_prompts, items)
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"ok": True, "item": item})
+
+
+async def _h_prompts_delete(request: web.Request) -> web.Response:
+    user = _request_user(request)
+    if _multi_user_enabled() and not user:
+        return web.json_response({"error": "unknown user"}, status=401)
+    item_id = str(request.query.get("id") or "")
+    if not item_id:
+        return web.json_response({"error": "missing id"}, status=400)
+    items = await asyncio.to_thread(_load_prompts)
+    kept = [item for item in items if item.get("id") != item_id]
+    if len(kept) == len(items):
+        return web.json_response({"error": "not found"}, status=404)
+    try:
+        await asyncio.to_thread(_save_prompts, kept)
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"ok": True, "id": item_id})
+
+
+async def _h_prompts_update(request: web.Request) -> web.Response:
+    """Edit an existing saved prompt in place (id + new title/text)."""
+    user = _request_user(request)
+    if _multi_user_enabled() and not user:
+        return web.json_response({"error": "unknown user"}, status=401)
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid body"}, status=400)
+    payload = payload or {}
+    item_id = str(payload.get("id") or "")
+    if not item_id:
+        return web.json_response({"error": "missing id"}, status=400)
+    title = str(payload.get("title") or "").strip()
+    text = str(payload.get("text") or "")
+    if not title and not text.strip():
+        return web.json_response({"error": "empty prompt"}, status=400)
+    items = await asyncio.to_thread(_load_prompts)
+    updated = None
+    for item in items:
+        if item.get("id") == item_id:
+            item["title"] = title[:200]
+            item["text"] = text[:100000]
+            updated = item
+            break
+    if updated is None:
+        return web.json_response({"error": "not found"}, status=404)
+    try:
+        await asyncio.to_thread(_save_prompts, items)
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"ok": True, "item": updated})
 
 
 # ---------------------------------------------------------------- handlers
@@ -1933,6 +2073,10 @@ def _attach(server_instance) -> None:
             app.router.add_route("POST", prefix + MEDIA_FOLDER_ROUTE, _h_media_folder_set)
             app.router.add_route("POST", prefix + MEDIA_PICK_ROUTE, _h_media_pick)
             app.router.add_route("POST", prefix + FAVORITES_ADD_ROUTE, _h_favorites_add)
+            app.router.add_route("GET", prefix + PROMPTS_ROUTE, _h_prompts_list)
+            app.router.add_route("POST", prefix + PROMPTS_ROUTE, _h_prompts_add)
+            app.router.add_route("PUT", prefix + PROMPTS_ROUTE, _h_prompts_update)
+            app.router.add_route("DELETE", prefix + PROMPTS_ROUTE, _h_prompts_delete)
         _ROUTES_DONE = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("[XXXXXLCat] could not add history gallery routes: %s", exc)

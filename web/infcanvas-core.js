@@ -332,6 +332,40 @@
     return result;
   }
 
+  /* 提示词收藏: per-account {title,text} snippets stored as one JSON file
+     under the user's Cat-Nodes dir. All calls go through api.fetchApi so the
+     /api prefix and the multi-user Comfy-User header are attached for us. */
+  async function promptRequest(path, options = {}) {
+    const response = await API().fetchApi("/xcat/prompts" + path, options);
+    if (!response.ok) {
+      let message = "HTTP " + response.status;
+      try { const body = await response.json(); if (body?.error) message = body.error; }
+      catch (error) { /* keep the status */ }
+      throw new Error(message);
+    }
+    return await response.json();
+  }
+  async function listPrompts() {
+    return await promptRequest("");
+  }
+  async function addPrompt(title, text) {
+    return await promptRequest("", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, text }),
+    });
+  }
+  async function removePrompt(id) {
+    return await promptRequest("?id=" + encodeURIComponent(id), { method: "DELETE" });
+  }
+  async function updatePrompt(id, title, text) {
+    return await promptRequest("", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, title, text }),
+    });
+  }
+
   /* ------------------------------- state ------------------------------- */
 
   const state = NS.state = {
@@ -1914,19 +1948,15 @@
       /* Hand mode is ComfyUI's read_only canvas: it blocks every mutation. */
       if (NS.flow?.state?.mode?.value === "drag") return;
       const selected = flow()?.selectedNodes?.() || [];
-      if (selected.length) {
+      /* Groups share the selection with nodes: Delete removes both, while a
+         group's member nodes stay exactly where they are (ComfyUI's
+         selected-LGraphGroup behaviour). */
+      const groupIds = (flow()?.state?.selectedGroupIds?.value || []).slice();
+      if (selected.length || groupIds.length) {
         event.preventDefault(); event.stopImmediatePropagation();
-        if (flow()?.state?.selectedGroupId) flow().state.selectedGroupId.value = null;
-        flow().removeNodes(selected.map((node) => node.id));
+        if (selected.length) flow().removeNodes(selected.map((node) => node.id));
+        if (groupIds.length) flow()?.state?.groupActions?.deleteGroups?.(groupIds);
         markDirty();
-        return;
-      }
-      /* A selected group behaves like ComfyUI's selected LGraphGroup: Delete
-         removes the rectangle and keeps its nodes exactly where they are. */
-      const groupId = flow()?.state?.selectedGroupId?.value;
-      if (groupId) {
-        event.preventDefault(); event.stopImmediatePropagation();
-        flow()?.state?.groupActions?.deleteGroup?.(groupId);
         return;
       }
       /* No node or group selected: a highlighted link is what Delete removes. */
@@ -2018,7 +2048,7 @@
     renameDoc, duplicateDoc, switchDoc,
     renameCanvas, duplicateCanvas, isBookmarked, toggleBookmark,
     addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile,
-    addToFavorites, loraNames,
+    addToFavorites, loraNames, listPrompts, addPrompt, removePrompt, updatePrompt,
     docs: () => state.docs, activeId: () => state.activeId,
     isActive: () => state.active,
     /** @deprecated kept for extensions written against the LiteGraph build. */
