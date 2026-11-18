@@ -45,6 +45,9 @@
        It opens the dialog in js/infcanvas-api-config.js, NOT a drawer panel.
        icon-[lucide--panels-top-left] is ComfyUI's own Apps icon class. */
     { key: "api", icon: "icon-[lucide--panels-top-left]", label: "配置", tip: "配置" },
+    /* 画布设置：可扩展的设置面板（infcanvas-settings.js）。点开是独立弹窗，
+       不是抽屉面板；以后新设置往该模块的 SETTINGS 注册表里加即可。 */
+    { key: "settings", icon: "icon-[lucide--settings]", label: "设置", tip: "设置" },
   ];
   const PANEL_TITLES = {
     gallery: "资产", nodes: "添加节点", media: "收藏", prompts: "提示词收藏", canvases: "画布管理",
@@ -111,8 +114,16 @@
     lora: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L3 7.5l8.17 5.32a2 2 0 0 0 1.66 0L21 7.5 12.83 2.18Z"/>'
       + '<path d="m3 12.5 8.17 5.32a2 2 0 0 0 1.66 0L21 12.5"/>'
       + '<path d="m3 17.5 8.17 5.32a2 2 0 0 0 1.66 0L21 17.5"/>',
+    /* lucide zap — a bolt for the one-click cleanup pills. */
+    cleanup: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    /* lucide upload — the 添加资源 / 上传 action in the add-node menu. */
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
+      + '<path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
   };
-  const GLYPH_OF = { text: "text-pen", image: "image", video: "video", audio: "audio-lines", lora: "lora" };
+  const GLYPH_OF = {
+    text: "text-pen", image: "image", video: "video", audio: "audio-lines", lora: "lora",
+    cleanup_vram: "cleanup", cleanup_ram: "cleanup", cleanup_both: "cleanup",
+  };
   const menuGlyphSvg = (name) => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"'
     + ' stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'
     + (NODE_GLYPHS[name] || "") + '</svg>';
@@ -299,6 +310,7 @@
         /* Reference: the library tab opens the workflow dialog. The API entry
            opens our ported FloatingWindow instead of switching the drawer. */
         if (item.key === "api") { NS.apiConfig?.open?.(); return; }
+        if (item.key === "settings") { NS.settings?.open?.(); return; }
         setPanel(st().panelKey === item.key ? null : item.key);
       });
       group.appendChild(button);
@@ -419,6 +431,11 @@
     body.append(sidebar, panel, resizeHandle, stage);
     root.appendChild(body);
     document.body.appendChild(root);
+    /* Canvas-mode system monitor: the ComfyUI menu-bar status strip (fig. 2)
+       + active-job count (fig. 3), mirrored inside the canvas. Mounted after
+       the root is in the document so its absolute top-left placement and
+       first telemetry fetch see a live DOM. */
+    try { NS.canvasMonitor?.mount?.(root); } catch (error) { console.warn("[InfCanvas] monitor mount failed", error); }
 
     const shell = {
       root, tabbar, sidebar, buttons, sideRefs, langButton,
@@ -439,6 +456,7 @@
 
   function unmountShell() {
     document.querySelectorAll(".ic-menu").forEach((menu) => menu.remove());
+    try { NS.canvasMonitor?.unmount?.(); } catch (error) { /* optional */ }
     if (galleryCleanup) { galleryCleanup(); galleryCleanup = null; }
     const shell = st().shell;
     try { shell?.destroyResizer?.(); } catch (error) { /* optional */ }
@@ -623,7 +641,7 @@
        is 添加节点 (or the caller's own title on the wire-release menu), then
        文本 / 图像 / 视频 / 音频 in that fixed order, with the matching
        lucide glyphs. */
-    const ORDER = ["text", "image", "video", "audio", "lora"];
+    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both"];
     const specs = (NS.SPECS || [])
       .filter((entry) => !allowed || allowed.has(entry.type))
       .slice()
@@ -638,8 +656,10 @@
       button.append(iconWrap, node("span", "ic-menu-label", t(spec.title)));
       button.addEventListener("click", (clickEvent) => {
         clickEvent.stopPropagation();
-        closeMenu();
-        if (options.onPick) { options.onPick(spec); return; }
+        /* A pick hands off to a placement flow (ghost follows the pointer), so
+           DON'T dismiss the frozen wire here — only real cancellation does. */
+        closeMenu(false);
+        if (options.onPick) { options.onPick(spec, clickEvent); return; }
         // Same contract as the drop path: node.pos is the top-left corner.
         api().addNodeByType(spec.type, anchor.world);
       });
@@ -647,6 +667,27 @@
     }
     if (!menu.querySelector(".ic-menu-item")) {
       menu.appendChild(node("div", "ic-menu-empty", t("没有可接入的节点")));
+    }
+
+    /* Double-click "添加节点" only: a 添加资源 section with one 上传 action.
+       Clicking opens the native file picker; picked files are uploaded and
+       turned into nodes at the menu's world position (same path as drop). */
+    if (options.withAssets) {
+      menu.appendChild(node("div", "ic-menu-sep"));
+      menu.appendChild(node("div", "ic-menu-section", t("添加资源")));
+      const upload = node("button", "ic-menu-item");
+      upload.type = "button";
+      upload.setAttribute("role", "menuitem");
+      const upIcon = node("span", "ic-menu-icon");
+      upIcon.innerHTML = menuGlyphSvg("upload");
+      upload.append(upIcon, node("span", "ic-menu-label", t("上传")));
+      upload.addEventListener("click", (clickEvent) => {
+        clickEvent.stopPropagation();
+        closeMenu();
+        const w = anchor.world || [0, 0];
+        api()?.pickFiles?.({ x: w[0], y: w[1] });
+      });
+      menu.appendChild(upload);
     }
 
     const root = st().shell?.root || document.body;
@@ -657,11 +698,12 @@
     menu.style.left = Math.max(4, Math.min(x, window.innerWidth - rect.width - 4)) + "px";
     menu.style.top = Math.max(4, Math.min(y, window.innerHeight - rect.height - 4)) + "px";
 
-    function closeMenu() {
+    function closeMenu(dismiss = true) {
       menu.remove();
       document.removeEventListener("pointerdown", onOutside, true);
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("wheel", closeMenu, true);
+      if (dismiss && options.onDismiss) options.onDismiss();
     }
     function onOutside(event) {
       if (!menu.contains(event.target)) closeMenu();
@@ -682,7 +724,7 @@
 
   /* Double-click on empty canvas: every node type, at the pointer. */
   function showAddNodeMenu(anchor) {
-    return showNodePickMenu(anchor, {});
+    return showNodePickMenu(anchor, { withAssets: true });
   }
   /* Wire released over empty canvas: only the types that can take it. The
      candidate list and the "create + connect" step both live in
@@ -694,6 +736,7 @@
       title: t("接入新节点"),
       specs: anchor.specs || [],
       onPick: anchor.onPick,
+      onDismiss: anchor.onDismiss,
     });
   }
 
@@ -812,6 +855,7 @@
   /* Repaint every native-DOM string in the shell when language changes.
      Vue-driven nodes react on their own through the shared lang ref. */
   function repaintLocale() {
+    try { NS.canvasMonitor?.repaintLocale?.(); } catch (error) { /* optional */ }
     const shell = st().shell;
     if (!shell) return;
     for (const [key, ref] of shell.sideRefs) {
@@ -1036,7 +1080,7 @@
        the drawer is just four rows in the fixed 文本 / 图像 / 视频 / 音频
        order, matching the double-click menu (showNodePickMenu) — including
        the same four lucide glyphs. */
-    const ORDER = ["text", "image", "video", "audio", "lora"];
+    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both"];
     const list = node("div", "ic-list");
     for (const kind of ORDER) {
       const spec = (NS.SPECS || []).find((entry) => entry.kind === kind);

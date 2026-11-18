@@ -78,6 +78,12 @@
        loras ride along in data.loras and are injected into the workflow by
        buildPrompt() at run time (LoraLoaderModelOnly chain on the MODEL input). */
     { type: "infcanvas/lora_stack", role: "lora", kind: "lora", title: "LoRA 栈", desc: "叠加多个 LoRA 到生成模型", icon: "pi pi-sliders-h", size: [480, 270] },
+    /* Cleanup pills: pass-through nodes rendered as a 30px bar. Wire them
+       between two nodes; when generation flows through, they reclaim resources
+       before the job is submitted. `cleanupMode` (== kind) selects the job. */
+    { type: "infcanvas/cleanup_vram", role: "cleanup", kind: "cleanup_vram", title: "清理显存", desc: "一键释放显存", icon: "pi pi-bolt", size: [160, 30] },
+    { type: "infcanvas/cleanup_ram", role: "cleanup", kind: "cleanup_ram", title: "清理内存", desc: "一键回收内存", icon: "pi pi-bolt", size: [160, 30] },
+    { type: "infcanvas/cleanup_both", role: "cleanup", kind: "cleanup_both", title: "清理显存和内存", desc: "一键释放显存并回收内存", icon: "pi pi-bolt", size: [160, 30] },
   ];
   const TYPE_BY_KIND = {
     image: "infcanvas/media_image",
@@ -85,6 +91,9 @@
     audio: "infcanvas/media_audio",
     text: "infcanvas/asset_text",
     lora: "infcanvas/lora_stack",
+    cleanup_vram: "infcanvas/cleanup_vram",
+    cleanup_ram: "infcanvas/cleanup_ram",
+    cleanup_both: "infcanvas/cleanup_both",
   };
   const SPEC_BY_TYPE = Object.fromEntries(SPECS.map((spec) => [spec.type, spec]));
   /* Every type ever written to disk points at the merged type now; the role
@@ -437,8 +446,16 @@
 
   const flow = () => NS.flow;
   const activeDoc = () => state.docs.find((doc) => doc.id === state.activeId) || null;
-  const autoSaveEnabled = () => {
-    try { return EXT()?.setting?.get("InfCanvas.AutoSave") !== false; } catch (error) { return true; }
+  // 画布自动保存（侧栏「设置」面板）——统一从 localStorage 读，默认关闭。
+  // 设置面板把值写成 JSON，与 storageRead/storageWrite 同格式。
+  const AUTO_SAVE_KEY = "InfCanvas.Setting.AutoSave";
+  const AUTO_SAVE_DELAY_KEY = "InfCanvas.Setting.AutoSaveDelay";
+  const autoSaveEnabled = () => storageRead(AUTO_SAVE_KEY) === true;
+  /* 自动保存间隔（毫秒）。设置面板以「秒」为单位存，这里 ×1000；
+     非法/缺省回退 3000ms。 */
+  const autoSaveDelay = () => {
+    const sec = Number(storageRead(AUTO_SAVE_DELAY_KEY));
+    return Number.isFinite(sec) && sec > 0 ? sec * 1000 : 3000;
   };
 
   /* ------------------------- document <-> nodes ------------------------- */
@@ -459,6 +476,8 @@
          lora_name values from /object_info/LoraLoaderModelOnly. Only enabled
          entries with a name are injected into the generated workflow. */
       loras: [],
+      /* Cleanup pill action: "vram" | "ram" | "both" (empty for every other node). */
+      cleanupMode: spec.role === "cleanup" ? String(spec.kind).replace(/^cleanup_/, "") : "",
       seed: 0, steps: 20, width: 512, height: 512,
       workflow: spec.workflow || "",
       status: "idle", error: "", result: null,
@@ -693,9 +712,10 @@
     clearTimeout(state.autosaveTimer);
     state.autosaveTimer = setTimeout(async () => {
       if (!state.active || !target.saved || !autoSaveEnabled()) return;
-      try { await saveActive(false, target); }
+      /* silent=true：自动保存不弹 toast（手动点保存仍会提示）。 */
+      try { await saveActive(false, target, true); }
       catch (error) { console.warn("[InfCanvas] autosave failed", error); }
-    }, 3000);
+    }, autoSaveDelay());
   }
 
   /* Keep the in-memory doc in sync with what the user sees, so switching tabs
@@ -722,7 +742,7 @@
     NS.ui?.refreshPanels();
   }
 
-  async function saveActive(askName = false, docOverride = null) {
+  async function saveActive(askName = false, docOverride = null, silent = false) {
     const doc = docOverride || activeDoc();
     if (!doc) return false;
     let name = doc.name;
@@ -748,7 +768,8 @@
     persistTabs();
     NS.ui?.renderTabs();
     NS.ui?.refreshPanels();
-    toast("success", tr("画布已保存"), name);
+    /* 自动保存静默执行，不打扰用户；手动保存才提示。 */
+    if (!silent) toast("success", tr("画布已保存"), name);
     return true;
   }
 
@@ -1209,6 +1230,24 @@
     }
   }
 
+  /* Open the native file picker and import every chosen file as a canvas node.
+     Backs the double-click menu's 添加资源 / 上传 action. `point` is {x,y} in
+     flow coordinates; falls back to the viewport centre. */
+  function pickFiles(point) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = "image/*,video/*,audio/*,.txt,.text,.md,.markdown,.mdown,.mkd,.mdx";
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+      const files = Array.from(input.files || []);
+      if (files.length) handleFiles(files, point || centerPos());
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
   function onPaste(event) {
     if (!state.active || event.defaultPrevented) return;
     /* Let text fields paste normally (node editor, rename box). */
@@ -1244,21 +1283,73 @@
 
   /* Edges carry the connection order; a generate node has four typed inputs, so
      the handle id is what tells us which kind of asset arrived. */
+  /* A cleanup pill is a pass-through link: A -> cleanup -> B must deliver A's
+     material to B, unchanged. Follow cleanup nodes upstream until we reach a
+     node that actually carries material/text. Returns null if the chain has no
+     material behind it (e.g. a lone cleanup with nothing wired into it). */
+  function resolveThroughCleanups(sourceNode, visited) {
+    visited = visited || new Set();
+    if (!sourceNode) return null;
+    if (sourceNode.data?.role !== "cleanup") return sourceNode;
+    if (visited.has(sourceNode.id)) return null;
+    visited.add(sourceNode.id);
+    const nodes = flow()?.nodesOf?.() || [];
+    for (const edge of flow()?.edgesOf?.() || []) {
+      if (edge.target !== sourceNode.id) continue;
+      const up = nodes.find((entry) => entry.id === edge.source);
+      const resolved = resolveThroughCleanups(up, visited);
+      if (resolved && (resolved.data?.asset || resolved.data?.result || resolved.data?.role === "text")) {
+        return resolved;
+      }
+    }
+    return null;
+  }
+
+  /* Cleanup pills sitting on the upstream paths of `node`, in wire order. A
+     generator run submits these jobs BEFORE its own prompt; the native ComfyUI
+     queue is FIFO, so memory is cleared first and generation continues after. */
+  function collectUpstreamCleanups(node) {
+    const found = [];
+    const visited = new Set();
+    const nodes = flow()?.nodesOf?.() || [];
+    const walk = (current) => {
+      for (const edge of flow()?.edgesOf?.() || []) {
+        if (edge.target !== current.id) continue;
+        const up = nodes.find((entry) => entry.id === edge.source);
+        if (!up || visited.has(up.id)) continue;
+        visited.add(up.id);
+        if (up.data?.role === "cleanup") found.push(up);
+        /* Traverse through every upstream node so cleanups nested behind a
+           material/generator node are caught too. */
+        walk(up);
+      }
+    };
+    walk(node);
+    /* DFS from the generator finds the pill nearest B first; reverse so the
+       jobs are submitted in data-flow order (source → B). */
+    return found.reverse();
+  }
+
   function collectInputs(node) {
     const result = [];
     /* A single source wired into this node more than once is ONE input. Dedupe
-       by source id so a text node dragged twice contributes its prompt once,
-       and a media node wired twice yields one asset. */
+       by RESOLVED source id so A direct + A-through-cleanup count as one. */
     const seenSources = new Set();
+    const nodes = flow()?.nodesOf?.() || [];
     for (const edge of flow()?.edgesOf?.() || []) {
       if (edge.target !== node.id) continue;
-      if (seenSources.has(edge.source)) continue;
-      seenSources.add(edge.source);
-      const source = (flow()?.nodesOf?.() || []).find((entry) => entry.id === edge.source);
+      const raw = nodes.find((entry) => entry.id === edge.source);
+      /* Cleanup in the middle: skip the pill, use the material behind it.
+         The slot still comes from THIS edge's targetHandle on the generator. */
+      const source = raw?.data?.role === "cleanup"
+        ? resolveThroughCleanups(raw)
+        : raw;
+      if (!source || seenSources.has(source.id)) continue;
+      seenSources.add(source.id);
       /* 生成器把结果回显在自己身上（data.result），没有独立的结果节点；它
          照样能作为素材接到下一个生成节点，所以这里两种都认。 */
-      const asset = source?.data?.asset || source?.data?.result;
-      const kind = source?.data?.kind || asset?.kind || (source?.data?.role === "text" ? "text" : null);
+      const asset = source.data?.asset || source.data?.result;
+      const kind = source.data?.kind || asset?.kind || (source.data?.role === "text" ? "text" : null);
       /* A text node is a PROMPT input, not an asset — it legitimately has no
          asset, so don't drop it. Media nodes still require an asset. */
       if (!asset && kind !== "text") continue;
@@ -1494,7 +1585,15 @@
       const inner = JSON.stringify(String(value)).slice(1, -1);
       raw = raw.split("{{" + key + "}}").join(inner);
     }
-    if (raw.includes("{{")) throw new Error("模板中存在未识别的占位符");
+    /* Only a bare `{{identifier}}` token is a placeholder. A template's own
+       text may legitimately contain literal double braces — e.g. MINIMAX H3
+       IMAGE's system prompt embeds a {{"expanded_caption":...,"aspect_ratio":...}}
+       JSON example — which are data, not placeholders. Match only the token
+       form so those examples survive, and name any truly unknown token. */
+    const unknownTokens = raw.match(/\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}/g);
+    if (unknownTokens && unknownTokens.length) {
+      throw new Error("模板中存在未识别的占位符：" + [...new Set(unknownTokens)].join("、"));
+    }
     const prompt = JSON.parse(raw);
     /* Audio panel values beat the template's own defaults. Applied AFTER the
        placeholder pass so the user's own text is never scanned for {{tokens}}
@@ -1536,11 +1635,25 @@
         }
       }
     }
+    /* 预览文本开关（侧栏「设置」→「显示预览文本」，默认关闭）。
+       像 MINIMAX H3 IMAGE 这类工作流会先用文本模型把提示词扩写成 caption，
+       再交给生图节点；PreviewAny 把这段 caption 当 text 输出。它只是中间产物，
+       不该抢占图像节点的画面。默认把它剥离，只回显媒体；用户显式开启后才显示。
+       注意：若整次运行只有文本产物（文生文本/LLM 节点），则全部保留，
+       否则过滤后会变成空结果、误报「没有可用输出」。 */
+    const showPreviewText = storageRead("InfCanvas.ShowPreviewText") === true;
+    if (!showPreviewText) {
+      const hasMedia = result.some((a) => a.kind !== "text");
+      if (hasMedia) return result.filter((a) => a.kind !== "text");
+    }
     return result;
   }
 
-  async function pollHistory(promptId) {
+  const CANCEL_SENTINEL = new Error("cancelled by user");
+
+  async function pollHistory(promptId, shouldStop) {
     for (let attempt = 0; attempt < 720; attempt += 1) {
+      if (shouldStop && shouldStop()) throw CANCEL_SENTINEL;
       const data = await backend.history(promptId);
       const entry = data?.[promptId];
       if (entry) {
@@ -1667,19 +1780,252 @@
     },
   };
 
+  /* ------------------------------------------------------------------------
+     Generation progress bridge.
+
+     ComfyUI pushes live execution events over its native WebSocket. The
+     canvas generation runs through the SAME native api (NS.generate below
+     uses API().queuePrompt), so we can subscribe to those events and mirror
+     value/max/preview onto the generating node's own data. Nothing here
+     invents a transport — every listener is the host api's addEventListener
+     and is removed as soon as the job settles.
+
+     Routing by prompt_id is essential: several canvas nodes may be running
+     at once, and every event carries prompt_id EXCEPT bare b_preview (older
+     backends). For that one we fall back to the most recently started job.
+     ------------------------------------------------------------------------ */
+  const genProgress = (() => {
+    /* promptId -> { nodeId, node, listeners:[[type,fn]], previewUrl, lastTs } */
+    const jobs = new Map();
+    let apiBound = null;
+    let activePromptId = null;
+
+    function api() { return API(); }
+
+    const phaseText = (phase) => {
+      if (phase === "queued") return tr("排队中");
+      if (phase === "running") return tr("生成中");
+      if (phase === "sampling") return tr("采样中");
+      if (phase === "done") return tr("生成完成");
+      if (phase === "error") return tr("生成失败");
+      return "";
+    };
+
+    function writeNode(job, fields) {
+      if (!job) return;
+      /* Re-resolve by id on every event: updateNodeData swaps data objects,
+         so a captured `job.node` reference can go stale between events. */
+      NS.flow?.updateNodeData?.(job.nodeId, fields);
+    }
+
+    function cleanup(promptId) {
+      const job = jobs.get(promptId);
+      if (!job) return;
+      const a = api();
+      for (const [type, fn] of job.listeners) {
+        try { a?.removeEventListener?.(type, fn); } catch (e) { /* no-op */ }
+      }
+      if (job.previewUrl) {
+        try { URL.revokeObjectURL(job.previewUrl); } catch (e) { /* no-op */ }
+      }
+      jobs.delete(promptId);
+      if (activePromptId === promptId) activePromptId = null;
+    }
+
+    function listen(job, type, fn) {
+      const a = api();
+      if (!a || typeof a.addEventListener !== "function") return;
+      /* Native api wraps listeners to guard errors; removing with the SAME
+         function reference works because ComfyApi.addEventListener maps it. */
+      a.addEventListener(type, fn);
+      job.listeners.push([type, fn]);
+    }
+
+    function begin(promptId, nodeId, prompt) {
+      /* Defensive: a previous job with the same id (shouldn't happen) — clear. */
+      if (jobs.has(promptId)) cleanup(promptId);
+      /* Map execution node id -> friendly title so the text row can show the
+         SAME name ComfyUI's queue overlay shows (_meta.title ?? class_type).
+         Total node count is the number of nodes in the submitted prompt. */
+      const nodeTitles = Object.fromEntries(
+        Object.entries(prompt || {}).map(([id, n]) => [
+          String(id), n?._meta?.title || n?.class_type || String(id),
+        ])
+      );
+      const job = {
+        nodeId, node: null, listeners: [], previewUrl: null, lastTs: 0,
+        nodeTitles, totalNodes: Object.keys(prompt || {}).length, executedSet: new Set(),
+      };
+      jobs.set(promptId, job);
+      activePromptId = promptId;
+      writeNode(job, {
+        genPhase: "queued", genPhaseText: phaseText("queued"), genProgress: 0,
+        genTotalProgress: 0, genCurrentNodeProgress: 0, genCurrentNodeName: "",
+      });
+
+      listen(job, "execution_start", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        writeNode(job, { genPhase: "running", genPhaseText: phaseText("running") });
+      });
+
+      listen(job, "progress", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        const max = Number(d.max) || 0;
+        const value = Number(d.value) || 0;
+        const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+        const nodeName = job.nodeTitles[String(d.node)] || String(d.node || "");
+        writeNode(job, {
+          genPhase: "sampling",
+          genPhaseText: phaseText("sampling"),
+          genProgress: pct,
+          genCurrentNodeProgress: pct,
+          genCurrentNodeName: nodeName,
+          genStep: value,
+          genSteps: max,
+        });
+      });
+
+      /* "全部" progress mirrors ComfyUI's executionProgress: distinct nodes
+         reported by `executed` over the total nodes in the submitted prompt.
+         Cached nodes also count (execution_cached), same as the native store. */
+      const markExecuted = (id) => {
+        if (id == null) return;
+        job.executedSet.add(String(id));
+        const total = job.totalNodes || 0;
+        writeNode(job, {
+          genTotalProgress: total > 0
+            ? Math.min(1, job.executedSet.size / total) : 0,
+        });
+      };
+      listen(job, "executed", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        markExecuted(d.node);
+      });
+      listen(job, "execution_cached", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        for (const id of d.nodes || []) markExecuted(id);
+      });
+
+      /* progress_text carries a localised/explicit stage string from custom
+         nodes that call send_progress_text (e.g. "VAE 解码/第 2 阶段"). */
+      listen(job, "progress_text", (e) => {
+        const d = e?.detail;
+        if (!d) return;
+        /* New backend includes prompt_id in metadata; old one doesn't — accept
+           only when it matches, or when there's no id and this is the active job. */
+        if (d.prompt_id && d.prompt_id !== promptId) return;
+        if (!d.prompt_id && promptId !== activePromptId) return;
+        if (d.text) writeNode(job, { genPhaseText: String(d.text).slice(0, 60) });
+      });
+
+      const onPreview = (blob) => {
+        if (!(blob instanceof Blob)) return;
+        if (promptId !== activePromptId) return; /* bare preview: active job only */
+        try {
+          if (job.previewUrl) URL.revokeObjectURL(job.previewUrl);
+          job.previewUrl = URL.createObjectURL(blob);
+          writeNode(job, { genPreviewUrl: job.previewUrl });
+        } catch (e) { /* no-op */ }
+      };
+      /* Preferred: metadata event carries jobId === prompt_id for exact routing. */
+      listen(job, "b_preview_with_metadata", (e) => {
+        const d = e?.detail;
+        if (!d || (d.jobId && d.jobId !== promptId)) return;
+        onPreview(d.blob);
+      });
+      /* Fallback for backends that only emit bare b_preview. */
+      listen(job, "b_preview", (e) => onPreview(e?.detail));
+
+      listen(job, "execution_success", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        writeNode(job, {
+          genPhase: "done", genPhaseText: phaseText("done"), genProgress: 1,
+          genTotalProgress: 1, genCurrentNodeProgress: 1,
+        });
+      });
+      listen(job, "execution_error", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        writeNode(job, { genPhase: "error", genPhaseText: phaseText("error") });
+      });
+      listen(job, "execution_interrupted", (e) => {
+        const d = e?.detail;
+        if (!d || d.prompt_id !== promptId) return;
+        writeNode(job, { genPhase: "error", genPhaseText: tr("已中断") });
+      });
+
+      return job;
+    }
+
+    function finish(promptId) {
+      const job = jobs.get(promptId);
+      if (!job) return;
+      const previewUrl = job.previewUrl;
+      /* Clear transient progress display, keep nothing stale on the node.
+         The real result is attached separately by attachResults(). */
+      NS.flow?.updateNodeData?.(job.nodeId, {
+        genPreviewUrl: "",
+        genPreviewing: false,
+      });
+      cleanup(promptId);
+      if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch (e) { /* no-op */ } }
+    }
+
+    return { begin, finish };
+  })();
+  NS.genProgress = genProgress;
+
+  /* promptIds the user has cancelled. pollHistory is told to bail out as soon
+     as its id lands here, so cancelling a QUEUED job never waits for the full
+     500ms polling loop (and never surfaces a false "生成失败" toast). */
+  const cancelledJobs = new Set();
+
   NS.generate = {
-    async run(nodeId) {
+    async cancel(nodeId) {
+      const node = (flow()?.nodesOf?.() || []).find((entry) => entry.id === nodeId);
+      const promptId = node?.data?.genPromptId;
+      if (!promptId) { toast("info", tr("没有可取消的任务")); return; }
+      cancelledJobs.add(promptId);
+      try {
+        /* Native ComfyUI cancel: handles both queued and running jobs. */
+        await API().cancelJob(promptId);
+        NS.flow?.updateNodeData?.(nodeId, {
+          status: "idle", error: "", genPromptId: "",
+          genPhase: "", genPhaseText: "", genProgress: 0,
+          genTotalProgress: 0, genCurrentNodeProgress: 0, genCurrentNodeName: "",
+          genPreviewUrl: "",
+        });
+        markDirty();
+        NS.flow?.history?.absorb?.();
+        NS.ui?.refreshPanels?.();
+        toast("info", tr("已取消"));
+      } catch (error) {
+        cancelledJobs.delete(promptId);
+        toast("error", tr("取消失败"), String(error));
+      }
+    },
+
+    async run(nodeId, opts = {}) {
+      /* silent: group runs suppress the per-node toasts and report one summary
+         instead, so a whole group queueing at once does not spam notifications. */
+      const silent = !!opts.silent;
+      const note = silent ? () => {} : (...args) => toast(...args);
       const node = (flow()?.nodesOf?.() || []).find((entry) => entry.id === nodeId);
       if (!node) return;
       const data = node.data;
-      if (data.status === "running") { toast("info", tr("该节点正在生成")); return; }
+      if (data.status === "running") { note("info", tr("该节点正在生成")); return; }
       const kind = data.kind;
       const templateName = data.workflow || kind;
       let template;
       try { template = await backend.workflow(templateName); }
-      catch (error) { toast("error", tr("读取生成模板失败"), String(error)); return; }
+      catch (error) { note("error", tr("读取生成模板失败"), String(error)); return; }
       if (template?._requires_config) {
-        toast("warning", tr("请先配置生成模板"), template.hint || `workflows/${templateName}.json`);
+        note("warning", tr("请先配置生成模板"), template.hint || `workflows/${templateName}.json`);
         return;
       }
       let prompt;
@@ -1687,27 +2033,69 @@
          data object (data has no id — passing it silently yielded zero
          wired inputs, so {{image}}/{{text}}/{{audio}} were always empty). */
       try { prompt = await buildPrompt(kind, template, data, collectInputs(node), collectLoras(node)); }
-      catch (error) { toast("error", tr("构建工作流失败"), String(error)); return; }
+      catch (error) { note("error", tr("构建工作流失败"), String(error)); return; }
+      /* Cleanup pills wired upstream run BEFORE generation: submit their jobs to
+         the native queue first (FIFO → memory reclaimed, then generation runs),
+         and flash each pill so the pass-through is visible. Failure is non-fatal. */
+      try {
+        for (const pill of collectUpstreamCleanups(node)) {
+          for (const el of document.querySelectorAll(".vue-flow__node")) {
+            if (el.getAttribute("data-id") !== String(pill.id)) continue;
+            const bar = el.querySelector(".icn--cleanup");
+            if (bar) {
+              bar.classList.add("is-cleaning");
+              setTimeout(() => bar.classList.remove("is-cleaning"), 900);
+            }
+          }
+          await NS.canvasMonitor?.runCleanup?.(pill.data?.cleanupMode || "vram");
+        }
+      } catch (error) { note("warning", tr("清理失败"), String(error)); }
       data.status = "running";
       data.error = "";
+      /* Show 等待中... from the moment we flip to running — even before
+         queuePrompt() returns and genProgress.begin() writes genPhase. */
+      data.genPhase = "queued";
+      data.genPhaseText = tr("排队中");
       markDirty();
       /* A status flip is runtime state, not an edit: keep it out of undo. */
       NS.flow?.history?.absorb?.();
+      let promptId = null;
       try {
         const queued = await API().queuePrompt(0, { output: prompt, workflow: {} });
         if (!queued?.prompt_id) throw new Error("提交任务失败，未返回 prompt_id");
+        promptId = queued.prompt_id;
+        /* Persist the id on the node so the left-hand 取消 button can cancel
+           THIS job (queued or running) via native api.cancelJob(promptId). */
+        data.genPromptId = promptId;
+        /* Subscribe to native WS progress events and mirror them onto this
+           node, routed strictly by prompt_id (see genProgress above). */
+        genProgress.begin(promptId, nodeId, prompt);
         /* Comfy.WidgetControlMode defaults to "after": the seed advances once the
            prompt is queued, so this run keeps the value it was submitted with. */
         NS.fieldControl.applyAfterQueue(node);
-        const outputs = await pollHistory(queued.prompt_id);
+        const outputs = await pollHistory(promptId, () => cancelledJobs.has(promptId));
+        if (cancelledJobs.has(promptId)) return;
         if (!outputs.length) throw new Error("任务完成但没有返回可用输出");
         attachResults(node, outputs);
         data.status = "done";
-        toast("success", tr("生成完成"), tr("{n} 个结果已回显到节点", { n: outputs.length }));
+        note("success", tr("生成完成"), tr("{n} 个结果已回显到节点", { n: outputs.length }));
       } catch (error) {
-        data.status = "error";
-        data.error = String(error);
-        toast("error", tr("生成失败"), String(error));
+        if (promptId && cancelledJobs.has(promptId)) {
+          /* cancel() already reset the node to idle — swallow the abort and
+             the backend's cancelled error so no false 「生成失败」 toast. */
+        } else {
+          data.status = "error";
+          data.error = String(error);
+          note("error", tr("生成失败"), String(error));
+        }
+      } finally {
+        /* Always detach listeners and revoke the preview blob URL, on success
+           and failure alike — otherwise a long session leaks WS handlers. */
+        if (promptId) {
+          genProgress.finish(promptId);
+          cancelledJobs.delete(promptId);
+          data.genPromptId = "";
+        }
       }
       markDirty();
       NS.flow?.history?.absorb?.();
@@ -2047,7 +2435,7 @@
     markDirty, saveActive, closeDoc, closeDocsAt, openByName, newCanvas,
     renameDoc, duplicateDoc, switchDoc,
     renameCanvas, duplicateCanvas, isBookmarked, toggleBookmark,
-    addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile,
+    addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile, pickFiles,
     addToFavorites, loraNames, listPrompts, addPrompt, removePrompt, updatePrompt,
     docs: () => state.docs, activeId: () => state.activeId,
     isActive: () => state.active,
