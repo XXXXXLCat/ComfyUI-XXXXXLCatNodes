@@ -1,4 +1,4 @@
-/* Extension entry point. Registers the topbar/menu entry and boots the UI. */
+/* Extension entry point. Registers menu commands/keybindings and boots the UI. */
 import { app } from "../../scripts/app.js";
 
 // Share the exact same namespace object with the other modules, regardless
@@ -44,15 +44,6 @@ app.registerExtension({
 
   keybindings: [
     { commandId: "InfCanvas.Open", combo: { key: "i", ctrl: true, shift: true } },
-  ],
-
-  actionBarButtons: [
-    {
-      icon: "pi pi-th-large",
-      label: "无限画布",
-      tooltip: "打开无限画布 (Ctrl+Shift+I)",
-      onClick: toggleCanvas,
-    },
   ],
 
   settings: [

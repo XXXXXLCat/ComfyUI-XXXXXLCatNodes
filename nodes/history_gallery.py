@@ -25,6 +25,18 @@ renders them with the native media-asset layout:
     is served as a normal range-capable response, which is what the audio
     player, the lightbox and downloads need.
 
+``GET /xcat/gallery/prompt?source=&path=&token=``
+    Reads the prompt/parameter fields ComfyUI embeds in generated images and
+    audio/video containers. Returns ``{found, models, prompts, params, count}``
+with each field ``{node, class, key, value, kind}``. Only three groups surface:
+``models`` (CheckPoint/UNet/LoRA selectors), ``prompts`` (the positive prompt
+only — system/task/negative text is dropped) and ``params`` (seed only, resolved
+from the sampler's active input path).
+Every other literal in the graph is dropped —
+    the strip is a short summary, not a workflow dump. Imported files and media
+    without metadata return ``found: false``. Derived from the embedded graph,
+    not the in-memory history, so it survives restarts.
+
 ``POST /xcat/gallery/zip``
     Packs the requested files into a ZIP (stored, not deflated — media is
     already compressed) and returns it in one response.
@@ -41,6 +53,14 @@ renders them with the native media-asset layout:
     ``output/`` (or in a sub-folder) is hard-linked — or copied, when linking is
     not possible — into the account's input root. The reply names the file the
     caller should put into the node's widget.
+
+``GET/POST /xcat/media/folder`` and ``POST /xcat/media/folder/pick``
+    The sidebar 媒体 panel lets the user pick an arbitrary local directory as
+    the save target for node content. It is stored per account next to
+    api_settings.json and exposed to the gallery as the ``media`` source, so
+    previews/downloads reuse the signed file route. The picker runs a tiny
+    tkinter helper with a system Python, because ComfyUI's embedded Python
+    has no tkinter and headless COM dialogs could stay invisible.
 
 Identity and isolation
 ----------------------
@@ -67,10 +87,13 @@ import ctypes
 import hashlib
 import hmac
 import io
+import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
+import subprocess
 import time
 import zipfile
 from typing import Dict, List, Optional, Tuple
@@ -128,9 +151,80 @@ MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024
 
 LIST_ROUTE = "/xcat/gallery"
 FILE_ROUTE = "/xcat/gallery/file"
+PROMPT_ROUTE = "/xcat/gallery/prompt"
 ZIP_ROUTE = "/xcat/gallery/zip"
 DELETE_ROUTE = "/xcat/gallery/delete"
 INSERT_ROUTE = "/xcat/gallery/insert"
+# Sidebar 媒体 panel: the user-chosen folder is exposed as a third gallery
+# source, so previews/downloads/inserts reuse the exact same pipeline.
+MEDIA_SOURCE = "media"
+MEDIA_FOLDER_FILE = "media_folder.json"
+MEDIA_FOLDER_ROUTE = "/xcat/media/folder"
+MEDIA_PICK_ROUTE = "/xcat/media/folder/pick"
+# Node / group / selection "添加到收藏": copy the asset bytes into the
+# user-chosen 收藏 folder, sorted into text/image/video/audio sub-folders.
+FAVORITES_ADD_ROUTE = "/xcat/favorites/add"
+# Folder names are the four Chinese category labels the user listed; the
+# 收藏 panel lists everything under the chosen root recursively anyway.
+_FAVORITES_KIND_DIR = {
+    "text": "文本",
+    "image": "图像",
+    "video": "视频",
+    "audio": "音频",
+}
+
+# Only a deliberately small set of widget values is surfaced in the lightbox:
+# the model/LoRA choices, the prompt text, and the four sampling knobs. Every
+# other literal in the graph (image paths, resize modes, dtype, custom-node
+# toggles, ...) is intentionally dropped — the info strip is a summary, not a
+# dump of the whole workflow.
+#
+# Text widgets. `value` is shared with booleans/numbers, so it only counts on a
+# node whose class name says text/string/prompt/caption/lyrics.
+_PROMPT_INPUT_KEYS = ("text", "caption", "lyrics", "prompt", "positive", "negative")
+_TEXT_NODE_HINTS = ("text", "string", "prompt", "caption", "lyrics", "note")
+# Only the positive prompt is worth showing. System-prep prompts (the "you are
+# a prompt engineer" strings), negative prompts and captions/lyrics are all
+# dropped here rather than cluttering the lightbox with a second wall of text.
+_PROMPT_DENY_HINTS = (
+    "system", "系统",
+    "task_prompt", "task prompt", "taskprompt", "任务提示",
+    "negative", "neg_", "negprompt", "负面", "反向",
+)
+_PROMPT_POSITIVE_HINTS = ("positive", "正向", "正面", "主提示", "提示词", "prompt")
+# Titles are missing on many API-format graphs, so names alone cannot decide.
+# These are the raw widget keys a positive prompt can sit in, including the
+# fragments of a composed prompt (Switch / StringConcatenate nodes).
+_PROMPT_FRAGMENT_KEYS = ("string_a", "string_b", "on_false", "on_true")
+# System prompts are recognisable by their opening boilerplate even when the
+# node has no title at all. Checked before the length heuristics.
+_SYSTEM_TEXT_MARKERS = (
+    "you are ", "your task", "think step by step", "reason in the thinking",
+    "first \u2014", "first -", "expert prompt engineer", "prompt engineer",
+    "system prompt", "the visible final", "instructions:", "detailed description",
+    # MiniMax H3 ships a long "prompt writing guide" as a separate text node.
+    "prompt writing guide", "视频提示词编写指南", "edit propagation:",
+)
+# Model/LoRA selectors. LoRAs come in three shapes in the wild:
+#   LoraLoaderModelOnly: lora_name / strength_model
+#   LoadLoraModel (list): loras.N.lora_name / loras.N.strength / loras.N.enabled
+#   🐈‍⬛StackLoras:        lora_NN / strength_NN / on_NN
+_MODEL_CLASS_HINTS = ("checkpointloader", "unetloader", "lora")
+_MODEL_KEY_HINTS = ("checkpoint_name", "unet_name", "lora_name", "lora_", "strength", "model_strength")
+# A LoRA entry is only real when its companion enable flag says so. The flags
+# ship inside the same API node for list-style loaders (``loras.N.enabled``)
+# and stack nodes (``on_NN``); a whole UI node can additionally be muted or
+# bypassed via ``mode``, which the ``workflow`` chunk records.
+_LORA_OFF_VALUES = {"", "0", "false", "off", "no", "none", "null"}
+_LORA_NAME_PLACEHOLDERS = {"", "none", "null", "undefined", "无"}
+# Only the seed is worth showing now, and only via a sampler's input port.
+# ``SamplerCustomAdvanced.noise`` leads to ``RandomNoise.noise_seed``;
+# ``KSampler.seed``/generator ``seed`` leads to a SeedNode/PrimitiveInt or
+# is a literal. ``steps``/``cfg`` and text-generation knobs are not surfaced.
+_SEED_INPUT_PORTS = ("noise", "seed")
+_SEED_SOURCE_KEYS = ("seed", "noise_seed")
+# Max characters returned for one prompt field — a lightbox caption, not a dump.
+_MAX_PROMPT_CHARS = 8000
 
 # kind -> (node type, widget the filename goes into). Only core loaders: they
 # resolve through get_annotated_filepath(), i.e. the input directory.
@@ -184,14 +278,93 @@ def _multi_user_enabled() -> bool:
     return bool(getattr(args, "multi_user", False))
 
 
-def _global_roots() -> Dict[str, str]:
-    """The un-scoped ``output`` / ``input`` directories, whatever the mode."""
+def _user_root_for(uid: str) -> str:
+    """User root for an EXPLICIT account id, mirroring server_routes._user_root.
+
+    The context-based ``_user_root()`` reads the current request's identity,
+    which is absent for header-free <img> loads of a signed media URL. Signed
+    media links carry their owner in ``u`` so we can rebuild the same path.
+    """
     import folder_paths
 
-    return {
+    getter = getattr(folder_paths, "get_public_user_directory", None)
+    if callable(getter):
+        try:
+            path = getter(uid)
+            if path:
+                return path
+        except Exception:
+            pass
+    return os.path.join(folder_paths.get_user_directory(), uid)
+
+
+def _media_settings_path(user: Optional[str] = None) -> str:
+    """Per-account JSON holding the 媒体 folder, next to api_settings.json.
+
+    With ``user`` given (from a signed URL's owner), read that account's
+    settings even when the request carries no identity header — needed for
+    <img>/<video> previews, which cannot send Comfy-User.
+    """
+    try:
+        from ..server_routes import PLUGIN_DATA_DIR
+
+        if user:
+            root = _user_root_for(user)
+        else:
+            from ..server_routes import _user_root
+
+            root = _user_root()
+    except Exception:  # pragma: no cover - loaded outside the package
+        import folder_paths
+
+        root = _user_root_for(user) if user else folder_paths.get_user_directory()
+        PLUGIN_DATA_DIR = "Cat-Nodes"
+    return os.path.join(root, PLUGIN_DATA_DIR, MEDIA_FOLDER_FILE)
+
+
+def _load_media_folder(user: Optional[str] = None) -> str:
+    try:
+        with open(_media_settings_path(user), "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return ""
+    if isinstance(data, dict):
+        return str(data.get("folder") or "")
+    return str(data) if isinstance(data, str) else ""
+
+
+def _save_media_folder(folder: str) -> str:
+    """Validate and persist an absolute directory; return its normalised path."""
+    value = os.path.abspath(os.path.expanduser(str(folder).strip()))
+    if not value or not os.path.isdir(value):
+        raise ValueError("folder does not exist")
+    path = _media_settings_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"folder": value}, handle, ensure_ascii=False, indent=2)
+    return value
+
+
+def _media_root(user: Optional[str] = None) -> Optional[str]:
+    folder = _load_media_folder(user)
+    if not folder:
+        return None
+    folder = os.path.abspath(folder)
+    return folder if os.path.isdir(folder) else None
+
+
+def _global_roots(user: Optional[str] = None) -> Dict[str, str]:
+    """Un-scoped roots: ``output`` / ``input`` plus the chosen 媒体 folder."""
+    import folder_paths
+
+    roots = {
         "output": os.path.abspath(folder_paths.output_directory),
         "input": os.path.abspath(folder_paths.input_directory),
     }
+    media = _media_root(user)
+    if media:
+        roots[MEDIA_SOURCE] = media
+    return roots
 
 
 def _current_user() -> Optional[str]:
@@ -230,17 +403,22 @@ def _token_bucket() -> int:
     return int(time.time()) // _TOKEN_WINDOW
 
 
-def _sign(source: str, path: str, bucket: int) -> str:
-    payload = f"{bucket}|{source}|{path}".encode("utf-8")
-    return hmac.new(_TOKEN_SECRET, payload, hashlib.sha256).hexdigest()[:24]
+def _sign(source: str, path: str, bucket: int, owner: str = "") -> str:
+    # A media folder is per-account absolute state with no user segment in the
+    # path, so bind the owner into the signature. `<img>`/`<video>` cannot send
+    # Comfy-User; the signed `u` is the only safe way to locate the right folder.
+    payload = f"{bucket}|{source}|{path}"
+    if owner:
+        payload += f"|{owner}"
+    return hmac.new(_TOKEN_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()[:24]
 
 
-def _make_token(source: str, path: str) -> str:
+def _make_token(source: str, path: str, owner: str = "") -> str:
     bucket = _token_bucket()
-    return f"{bucket:x}.{_sign(source, path, bucket)}"
+    return f"{bucket:x}.{_sign(source, path, bucket, owner)}"
 
 
-def _check_token(token: str, source: str, path: str) -> bool:
+def _check_token(token: str, source: str, path: str, owner: str = "") -> bool:
     try:
         raw_bucket, signature = (token or "").split(".", 1)
         bucket = int(raw_bucket, 16)
@@ -248,14 +426,41 @@ def _check_token(token: str, source: str, path: str) -> bool:
         return False
     if bucket not in (_token_bucket(), _token_bucket() - 1):
         return False
-    return hmac.compare_digest(signature, _sign(source, path, bucket))
+    # The owner (when present) is HMAC-bound: changing `u` in a signed media URL
+    # invalidates the signature, so a forged owner cannot resolve another
+    # account's 收藏 folder.
+    expected = _sign(source, path, bucket, owner)
+    return hmac.compare_digest(signature, expected)
 
 
-def _file_url(source: str, path: str, preview: bool) -> str:
+def _verify_signed_url(
+    token: str, source: str, path: str, owner: str, user: Optional[str]
+) -> tuple:
+    """Return ``(trusted, resolve_owner)`` for a signed gallery URL.
+
+    ``owner`` (the URL's ``u`` param) is HMAC-bound — if present it MUST verify,
+    so a tampered value can never point at another account's 收藏 folder. When
+    the URL has no ``u`` but the caller carries an identity, a media URL minted
+    with that owner still verifies using ``user``; the legacy no-owner signature
+    is accepted last so pre-upgrade URLs keep working for their owner only.
+    """
+    if owner:
+        return (_check_token(token, source, path, owner), owner)
+    # No `u` in the URL: rely on the request identity if any.
+    candidates = [user, ""] if user else [""]
+    for candidate in candidates:
+        if _check_token(token, source, path, candidate or ""):
+            return (True, candidate or "")
+    return (False, "")
+
+
+def _file_url(source: str, path: str, preview: bool, owner: str = "") -> str:
     params = {"source": source, "path": path}
     if preview:
         params["preview"] = "1"
-    params["token"] = _make_token(source, path)
+    if owner:
+        params["u"] = owner
+    params["token"] = _make_token(source, path, owner)
     return f"{FILE_ROUTE}?{urlencode(params)}"
 
 
@@ -270,20 +475,29 @@ def _split_path(path: str) -> Optional[List[str]]:
 
 
 def _resolve(
-    source: str, path: str, user: Optional[str], require_user: bool = True
+    source: str, path: str, user: Optional[str], require_user: bool = True,
+    owner: str = "",
 ) -> Optional[str]:
-    """Map a request back to a real file, refusing anything outside its root."""
+    """Map a request back to a real file, refusing anything outside its root.
+
+    ``owner`` is the account id carried (and HMAC-signed) in a media URL; when
+    the request has no identity header (plain <img>), it is the only way to
+    find that account's per-user 收藏 folder.
+    """
     parts = _split_path(path)
     if not parts:
         return None
 
-    roots = _global_roots()
+    # For media, prefer the signed owner so a header-free preview resolves the
+    # correct per-account folder. output/input roots are global.
+    roots = _global_roots(owner or user) if source == MEDIA_SOURCE else _global_roots()
     base = roots.get(source)
     if not base:
         return None
 
-    # In multi-user mode every scoped path starts with the account directory.
-    if require_user and user:
+    # In multi-user mode every output/input path starts with the account
+    # directory. The hand-picked 媒体 folder is global and has no such segment.
+    if source != MEDIA_SOURCE and require_user and user:
         if len(parts) < 2 or parts[0] != user:
             return None
 
@@ -297,10 +511,12 @@ def _resolve(
 
 def _collect(roots: Dict[str, str], user: Optional[str]) -> List[dict]:
     """Walk every root and return one manifest entry per file."""
-    prefix = f"{user}/" if user else ""
     entries: List[dict] = []
 
     for source, root in roots.items():
+        # The 媒体 folder is a user-picked absolute path, not ComfyUI's
+        # account-scoped output/input tree — never prefix it with the user id.
+        prefix = "" if source == MEDIA_SOURCE else (f"{user}/" if user else "")
         if not os.path.isdir(root):
             continue
         for dirpath, dirnames, filenames in os.walk(root):
@@ -330,9 +546,17 @@ def _collect(roots: Dict[str, str], user: Optional[str]) -> List[dict]:
                         "kind": kind,
                         "size": stat.st_size,
                         "mtime": stat.st_mtime,
-                        "url": _file_url(source, path, False),
+                        # Media files live in a per-account folder; bind the
+                        # owner so header-free previews can resolve it later.
+                        "url": _file_url(
+                            source, path, False,
+                            (user or "") if source == MEDIA_SOURCE else "",
+                        ),
                         "preview_url": (
-                            _file_url(source, path, True)
+                            _file_url(
+                                source, path, True,
+                                (user or "") if source == MEDIA_SOURCE else "",
+                            )
                             if kind in ("image", "video", "text")
                             else None
                         ),
@@ -501,6 +725,192 @@ def _build_zip(members: List[Tuple[str, str]]) -> bytes:
     return buf.getvalue()
 
 
+# ------------------------------------------------------ 媒体存放文件夹 -----
+
+async def _h_media_folder(request: web.Request) -> web.Response:
+    """Current user-chosen folder (empty string means not configured yet)."""
+    folder = _load_media_folder()
+    return web.json_response(
+        {"folder": folder, "exists": bool(folder and os.path.isdir(folder))},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _h_media_folder_set(request: web.Request) -> web.Response:
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid body"}, status=400)
+    folder = str((payload or {}).get("folder") or "").strip()
+    if not folder:
+        return web.json_response({"error": "empty folder"}, status=400)
+    try:
+        saved = await asyncio.to_thread(_save_media_folder, folder)
+    except ValueError:
+        return web.json_response({"error": "folder does not exist"}, status=400)
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"folder": saved})
+
+
+_TK_PYTHON: Optional[str] = None
+_PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PICK_SCRIPT = os.path.join(_PLUGIN_ROOT, "pick_folder_tk.py")
+
+
+def _system_tk_python() -> str:
+    """Find a system Python that can show a native tkinter folder dialog.
+
+    ComfyUI's bundled Python deliberately omits tkinter.  A hidden PowerShell
+    WinForms dialog and a direct ``SHBrowseForFolderW`` call both stayed
+    invisible when the server itself had no visible window, so the chooser is
+    delegated to a normal Python process; its Tk window is visible even when
+    the launcher console is hidden.  The result is cached per server process.
+    """
+    global _TK_PYTHON
+    if _TK_PYTHON is not None:
+        return _TK_PYTHON
+
+    local = os.environ.get("LOCALAPPDATA", "")
+    program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    candidates: List[str] = []
+    versions = ("Python314", "Python313", "Python312", "Python311", "Python310")
+    for version in versions:
+        candidates.append(os.path.join(local, "Programs", "Python", version, "python.exe"))
+        candidates.append(os.path.join(program_files, version, "python.exe"))
+        candidates.append(os.path.join("C:\\", version, "python.exe"))
+    candidates.append(os.path.join(local, "Python", "bin", "python.exe"))
+    on_path = shutil.which("python.exe")
+    if on_path:
+        candidates.append(on_path)
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    seen = set()
+    for exe in candidates:
+        key = os.path.normcase(os.path.abspath(exe))
+        if key in seen or not os.path.isfile(exe):
+            continue
+        seen.add(key)
+        try:
+            probe = subprocess.run(
+                [exe, "-c", "import tkinter"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=3, creationflags=flags,
+            )
+        except Exception:
+            continue
+        if probe.returncode == 0:
+            _TK_PYTHON = exe
+            return exe
+
+    _TK_PYTHON = ""
+    return ""
+
+
+def _pick_folder_blocking() -> str:
+    """Native Windows folder dialog; returns '' when the user cancels."""
+    if os.name != "nt":
+        raise RuntimeError("folder picker requires Windows")
+    if not os.path.isfile(_PICK_SCRIPT):
+        raise RuntimeError("folder picker helper is missing: " + _PICK_SCRIPT)
+
+    exe = _system_tk_python()
+    if not exe:
+        raise RuntimeError("no system Python with tkinter was found")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.run(
+        [exe, _PICK_SCRIPT, _load_media_folder()],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=300, creationflags=flags,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or "").strip() or "folder dialog failed")
+    lines = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+async def _h_media_pick(request: web.Request) -> web.Response:
+    try:
+        folder = await asyncio.to_thread(_pick_folder_blocking)
+    except subprocess.TimeoutExpired:
+        return web.json_response({"error": "folder picker timed out"}, status=504)
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"folder": folder})
+
+
+def _save_favorite_blocking(root: str, category: str, filename: str, payload: bytes) -> dict:
+    """Write one asset into ``root/<category>/`` with collision dedup.
+
+    Same bytes already stored -> report ``reused`` without writing a copy;
+    a different file with the same name gets ``_1`` / ``_2`` ... appended.
+    """
+    folder = os.path.join(root, category)
+    os.makedirs(folder, exist_ok=True)
+    stem, ext = os.path.splitext(filename)
+    candidate = filename
+    index = 1
+    while True:
+        dest = os.path.join(folder, candidate)
+        if not os.path.exists(dest):
+            break
+        # Avoid piling up byte-identical copies of the same asset.
+        try:
+            if os.path.getsize(dest) == len(payload):
+                with open(dest, "rb") as handle:
+                    if handle.read() == payload:
+                        return {"filename": candidate, "category": category,
+                                "path": dest, "reused": True}
+        except OSError:
+            pass
+        if index > 999:
+            raise OSError("too many same-named files in 收藏 folder")
+        candidate = f"{stem}_{index}{ext}"
+        index += 1
+    with open(dest, "wb") as handle:
+        handle.write(payload)
+    return {"filename": candidate, "category": category, "path": dest, "reused": False}
+
+
+async def _h_favorites_add(request: web.Request) -> web.Response:
+    """Save a canvas asset into the user's chosen 收藏 folder by media kind."""
+    root = _media_root()
+    if not root:
+        return web.json_response({"error": "收藏文件夹尚未设置"}, status=409)
+    # kind comes from the node (authoritative); fall back to the file name.
+    kind = str(request.query.get("kind", "") or "").strip().lower()
+    reader = await request.multipart()
+    field = None
+    async for part in reader:
+        if part.name == "file" and part.filename:
+            field = part
+            break
+    if field is None:
+        return web.json_response({"error": "missing file field"}, status=400)
+    filename = os.path.basename(str(field.filename).replace("\\", "/"))
+    if not filename or filename.startswith("."):
+        return web.json_response({"error": "invalid filename"}, status=400)
+    if kind not in _FAVORITES_KIND_DIR:
+        kind = _kind(filename)
+    if kind not in _FAVORITES_KIND_DIR:
+        return web.json_response({"error": "unsupported media type"}, status=400)
+    payload = await field.read()
+    if not payload:
+        return web.json_response({"error": "empty file"}, status=400)
+    if len(payload) > MAX_ZIP_BYTES:
+        raise web.HTTPRequestEntityTooLarge(
+            max_size=MAX_ZIP_BYTES, actual_size=len(payload)
+        )
+    category = _FAVORITES_KIND_DIR[kind]
+    try:
+        saved = await asyncio.to_thread(
+            _save_favorite_blocking, root, category, filename, payload
+        )
+    except OSError as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    return web.json_response({"ok": True, **saved})
+
+
 # ---------------------------------------------------------------- handlers
 
 async def _h_list(request: web.Request) -> web.Response:
@@ -512,7 +922,10 @@ async def _h_list(request: web.Request) -> web.Response:
 
     roots = _global_roots()
     if user:
-        roots = {k: os.path.abspath(os.path.join(v, user)) for k, v in roots.items()}
+        roots = {
+            k: (v if k == MEDIA_SOURCE else os.path.abspath(os.path.join(v, user)))
+            for k, v in roots.items()
+        }
 
     # Big trees take a while to stat — keep the event loop free. Roots and the
     # account id are resolved here (request context) and passed down, because a
@@ -531,6 +944,7 @@ async def _h_list(request: web.Request) -> web.Response:
             "truncated": truncated,
             "user": user,
             "multi_user": _multi_user_enabled(),
+            "media_folder": _load_media_folder() or "",
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -540,13 +954,24 @@ async def _h_file(request: web.Request) -> web.Response:
     source = request.query.get("source", "output")
     path = request.query.get("path", "")
     token = request.query.get("token", "")
+    owner = str(request.query.get("u", "") or "")
     user = _request_user(request)
 
-    if _check_token(token, source, path):
+    # A signed media URL carries its HMAC-bound owner. Trust it only when the
+    # signature verifies for that exact owner — a tampered `u` cannot resolve
+    # another account's 收藏 folder.
+    signed_ok, resolve_owner = _verify_signed_url(token, source, path, owner, user)
+
+    if signed_ok:
         # Server-issued URL (thumbnails, downloads, media the browser fetches
         # without any header). Still held to the caller's own tree when the
         # request happens to carry an identity.
-        target = _resolve(source, path, user, require_user=True)
+        target = _resolve(source, path, user, require_user=True, owner=resolve_owner)
+    elif owner:
+        # A URL that CLAIMS an owner but fails signature verification is forged;
+        # never fall through to the request identity (that would let a tampered
+        # `u` resolve another account's folder in single-user/global setups).
+        target = None
     elif user:
         target = _resolve(source, path, user, require_user=True)
     else:
@@ -590,6 +1015,582 @@ async def _h_file(request: web.Request) -> web.Response:
     )
 
 
+def _looks_like_system_prompt(text: str) -> bool:
+    """Catch instruction-style system prompts without relying on node titles."""
+    lowered = text.strip().lower()
+    if lowered.startswith(tuple(_SYSTEM_TEXT_MARKERS)):
+        return True
+    if len(text.strip()) > 1200 and any(marker in lowered for marker in _SYSTEM_TEXT_MARKERS):
+        return True
+    return False
+
+
+def _is_positive_by_content(key: str, text: str) -> bool:
+    """Fallback when the node has no usable title/positive marker.
+
+    Field names never mention "system"/"task"/"negative" for a positive
+    prompt, and system prompts announce themselves with boilerplate text.
+    """
+    lower_key = str(key).lower()
+    if any(hint in lower_key for hint in _PROMPT_DENY_HINTS):
+        return False
+    min_len = 12 if lower_key in _PROMPT_FRAGMENT_KEYS else 4
+    if len(text.strip()) < min_len:
+        return False
+    return not _looks_like_system_prompt(text)
+
+
+def _is_positive_prompt(node: str, class_type: str, key: str) -> bool:
+    """Keep only the user's positive prompt; drop system/negative/caption text."""
+    combined = f"{node} {class_type} {key}".lower()
+    if any(hint in combined for hint in _PROMPT_DENY_HINTS):
+        return False
+    if any(hint in combined for hint in _PROMPT_POSITIVE_HINTS):
+        return True
+    # An untitled CLIPTextEncode "text" widget is ComfyUI's first, positive
+    # prompt node; anything else without a positive marker stays hidden.
+    return "cliptextencode" in class_type.lower() and str(key).lower() == "text"
+
+
+# Prompt text is classified by *where it is wired*, not by how it reads. A
+# string fed into a node's ``system_prompt``/``negative`` input is a system or
+# negative prompt no matter what its node is titled; one fed through a
+# ``prompt``/``positive`` chain is the user's generation prompt. Walks start at
+# every link-bearing prompt-ish port and follow links upstream, carrying the
+# branch kind; plain text widgets in the two sets are then unambiguous.
+_PROMPT_EDGE_POS_PORTS = ("prompt", "positive", "conditioning", "caption", "lyrics")
+_PROMPT_EDGE_SYS_PORTS = (
+    "system_prompt", "system", "negative", "task_prompt", "task prompt",
+    "taskprompt", "任务提示", "负面", "反向",
+)
+_PROMPT_EDGE_TEXT_KEYS = _PROMPT_INPUT_KEYS + ("value",) + _PROMPT_FRAGMENT_KEYS
+
+
+def _prompt_edge_sets(graph: dict) -> Tuple[set, set]:
+    """Return ``(positive, system)`` sets of ``(node_id, key)`` text widgets.
+
+    Follows the API graph's links backwards from prompt-bearing inputs. A text
+    widget reached through a ``system_prompt``/``negative`` branch lands in the
+    system set even when its node is untitled; one on the positive chain lands
+    in the positive set. Nodes with no links keep the caller's title/text
+    fallback instead of being forced either way.
+    """
+    positive: set = set()
+    system: set = set()
+    seeds = []
+    for node_id, node in graph.items():
+        if not isinstance(node, dict):
+            continue
+        for key, value in (node.get("inputs") or {}).items():
+            if not (isinstance(value, list) and len(value) == 2):
+                continue
+            lower = str(key).lower()
+            if any(h in lower for h in _PROMPT_EDGE_SYS_PORTS):
+                seeds.append((str(value[0]), True))
+            elif any(h in lower for h in _PROMPT_EDGE_POS_PORTS):
+                seeds.append((str(value[0]), False))
+
+    visited = set()
+    queue = list(seeds)
+    while queue:
+        node_id, is_system = queue.pop(0)
+        state = (node_id, is_system)
+        if state in visited:
+            continue
+        visited.add(state)
+        node = graph.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        for key, value in (node.get("inputs") or {}).items():
+            lower = str(key).lower()
+            branch = is_system
+            if any(h in lower for h in _PROMPT_EDGE_SYS_PORTS):
+                branch = True
+            elif any(h in lower for h in _PROMPT_EDGE_POS_PORTS):
+                branch = False
+            if isinstance(value, str) and value.strip():
+                if lower in _PROMPT_EDGE_TEXT_KEYS:
+                    (system if branch else positive).add((node_id, str(key)))
+            elif isinstance(value, list) and len(value) == 2 and isinstance(value[0], (str, int)):
+                queue.append((str(value[0]), branch))
+    return positive, system
+
+
+# ---------------------------------------------------------------- LoRA state
+# ComfyUI stores API-format graphs in the image metadata, so a disabled LoRA
+# still leaves its name/strength/flag widgets behind. Showing only the names
+# would claim a LoRA was applied when it was not. These helpers read the flag
+# that belongs to the SAME entry, not just the same node: a single LoadLoraModel
+# node can carry eight independent rows.
+def _flag_is_off(value) -> bool:
+    """Absent means enabled; only an explicit false-like value disables."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value == 0
+    return str(value).strip().lower() in _LORA_OFF_VALUES
+
+
+def _lora_group(key: str) -> str:
+    """Index token shared by a LoRA name, its strength and its enable flag."""
+    lower = str(key).lower()
+    match = re.search(r"loras?[._-](\d+)", lower)
+    if not match:
+        match = re.search(r"(?:name|strength|on|enabled?)[._-](\d+)", lower)
+    if not match:
+        match = re.search(r"\b(\d+)\b", lower)
+        if match and not any(hint in lower for hint in ("lora", "strength", "on_")):
+            match = None
+    return "i" + match.group(1) if match else "single"
+
+
+def _is_lora_name_key(key_lower: str) -> bool:
+    """True for a widget that carries a LoRA filename (not its strength/flag)."""
+    if any(hint in key_lower for hint in ("strength", "enable", "active", "on_")):
+        return False
+    return key_lower.endswith("lora_name") or key_lower.startswith("lora_")
+
+
+def _lora_flag_keys(group: str, key_lower: str) -> set:
+    """Candidate enable-flag widget names for one LoRA entry."""
+    if group == "single":
+        return {"enabled", "enable", "on", "active", "lora_enabled", "lora_enable", "lora_on"}
+    token = group[1:]
+    return {
+        f"loras.{token}.enabled", f"loras.{token}.enable", f"loras.{token}.on",
+        f"lora_{token}_enabled", f"lora_{token}_enable", f"lora_{token}_on",
+        f"on_{token}", f"enabled_{token}", f"enable_{token}", f"active_{token}",
+    }
+
+
+def _lora_entry_off(inputs: dict, key: str) -> bool:
+    group = _lora_group(key)
+    for flag in _lora_flag_keys(group, str(key).lower()):
+        if flag in inputs and _flag_is_off(inputs[flag]):
+            return True
+    return False
+
+
+def _workflow_node_off(node: dict) -> bool:
+    """UI-graph mute/bypass state for one node id.
+
+    Litegraph uses ``0`` for always-on; any other ``mode`` (2 = bypass, 4 =
+    mute, 1 = never) means the node did not contribute to the result.
+    """
+    mode = node.get("mode")
+    if mode not in (None, 0, "0", "always"):
+        return True
+    flags = node.get("flags")
+    flags = flags if isinstance(flags, dict) else {}
+    for name in ("disabled", "bypassed", "mute", "muted"):
+        if node.get(name) is True or flags.get(name) is True:
+            return True
+    return False
+
+
+def _is_graph_link(value) -> bool:
+    """API-format link reference: ``[source_node_id, output_slot]``."""
+    return (
+        isinstance(value, (list, tuple)) and len(value) == 2
+        and isinstance(value[0], (str, int)) and isinstance(value[1], int)
+    )
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _active_link_target(graph: dict, value, disabled_ids: set,
+                        seen: Optional[set] = None):
+    """Node id actually feeding a link, following switch nodes by state.
+
+    Video workflows often switch between ``BasicScheduler`` and
+    ``ManualSigmas``. Reading parameters off both branches would report a
+    step count that was not used, so only the selected branch is followed.
+    """
+    if not _is_graph_link(value):
+        return None
+    seen = set() if seen is None else seen
+    node_id = str(value[0])
+    if node_id in disabled_ids or node_id in seen:
+        return None
+    seen.add(node_id)
+    node = graph.get(node_id)
+    if not isinstance(node, dict):
+        return None
+    inputs = node.get("inputs") or {}
+    class_lower = str(node.get("class_type") or "").lower()
+    if "switch" in class_lower and isinstance(inputs, dict):
+        chosen = inputs.get("on_true") if _truthy(inputs.get("switch")) else inputs.get("on_false")
+        if not _is_graph_link(chosen):
+            return None
+        return _active_link_target(graph, chosen, disabled_ids, seen)
+    return node_id
+
+
+def _scalar_from_node(graph: dict, node_id, keys, disabled_ids: set,
+                      seen: Optional[set] = None):
+    """Find the first scalar behind a primitive/seed/sampler source node."""
+    if node_id is None:
+        return None
+    node_id = str(node_id)
+    if node_id in disabled_ids:
+        return None
+    node = graph.get(node_id)
+    if not isinstance(node, dict):
+        return None
+    inputs = node.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        return None
+    seen = set() if seen is None else seen
+    if node_id in seen:
+        return None
+    seen.add(node_id)
+    search_keys = tuple(dict.fromkeys(tuple(keys) + ("value", "seed", "noise_seed")))
+    for key in search_keys:
+        candidate = inputs.get(key)
+        if isinstance(candidate, (str, int, float, bool)):
+            if str(candidate).strip():
+                return candidate
+        elif _is_graph_link(candidate):
+            target = _active_link_target(graph, candidate, disabled_ids)
+            if target is not None:
+                found = _scalar_from_node(graph, target, keys, disabled_ids, set(seen))
+                if found is not None:
+                    return found
+    return None
+
+
+# Nodes that consume a seed. Sources (noise/seed/primitive/switch nodes) are
+# only followed from one of these consumers, never reported on their own.
+_PARAM_ROOT_HINTS = ("sampler", "generatemusic", "generateabc", "generateaudio")
+
+
+def _sampler_fields(graph: dict, disabled_ids: set) -> List[dict]:
+    """Resolve the seed from a sampler's *active* input path."""
+    fields: List[dict] = []
+    seen = set()
+
+    def add(label: str, value, node_id: str, title: str, class_type: str):
+        if value is None:
+            return
+        text = str(value).strip()
+        if not text:
+            return
+        identity = (label, text)
+        if identity in seen:
+            return
+        seen.add(identity)
+        fields.append({
+            "node": title,
+            "id": str(node_id),
+            "group": "",
+            "class": class_type,
+            "key": label,
+            "value": text,
+            "kind": "param",
+        })
+
+    for node_id, node in graph.items():
+        if not isinstance(node, dict) or str(node_id) in disabled_ids:
+            continue
+        class_type = str(node.get("class_type") or "")
+        class_lower = class_type.lower()
+        inputs = node.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            continue
+        title = str((node.get("_meta") or {}).get("title") or class_type or node_id)
+        has_seed_port = any(port in inputs for port in _SEED_INPUT_PORTS)
+        is_root = (
+            (any(hint in class_lower for hint in _PARAM_ROOT_HINTS) and "select" not in class_lower)
+            or has_seed_port
+        )
+        if not is_root:
+            continue
+
+        # Seed is read only from the sampler's own input ports, then followed
+        # upstream through the active branch — never from a loose widget with
+        # a matching name elsewhere in the graph.
+        for port in _SEED_INPUT_PORTS:
+            value = inputs.get(port)
+            if value is None:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                add("seed", value, node_id, title, class_type)
+            elif _is_graph_link(value):
+                target = _active_link_target(graph, value, disabled_ids)
+                add("seed", _scalar_from_node(graph, target, _SEED_SOURCE_KEYS, disabled_ids),
+                    node_id, title, class_type)
+
+    return fields
+
+
+def _prompt_fields(graph: dict, titles: Optional[Dict[str, str]] = None,
+                   disabled_ids: Optional[set] = None) -> List[dict]:
+    """Pick the few fields worth showing from an API-format prompt graph.
+
+    ComfyUI embeds this graph in generated PNGs under ``prompt``. Model/LoRA
+    and prompt widgets are literals; the seed may be wired to a primitive node
+    or reached through a switch, so it is resolved from the sampler's active
+    input path instead. We keep only three groups — model/LoRA, the positive
+    prompt, and the seed — and drop everything else. Node titles come from
+    ``_meta.title``, then the ``workflow`` graph, then the class type.
+    """
+    fields: List[dict] = []
+    titles = titles or {}
+    disabled_ids = disabled_ids or set()
+    param_fields = _sampler_fields(graph, disabled_ids)
+    edge_positive, edge_system = _prompt_edge_sets(graph)
+    for node_id, node in graph.items():
+        if not isinstance(node, dict):
+            continue
+        if str(node_id) in disabled_ids:
+            continue
+        class_type = str(node.get("class_type") or "")
+        class_lower = class_type.lower()
+        title = str(
+            (node.get("_meta") or {}).get("title")
+            or titles.get(str(node_id))
+            or class_type
+            or node_id
+        )
+        inputs = node.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            continue
+        is_text_node = any(h in class_lower for h in _TEXT_NODE_HINTS)
+        is_model_node = any(h in class_lower for h in _MODEL_CLASS_HINTS)
+        # Placeholder rows ("None") carry a strength widget too; dropping only
+        # the filename would leave an orphan "强度" badge behind.
+        placeholder_groups = set()
+        if is_model_node:
+            for widget, widget_value in inputs.items():
+                if (_is_lora_name_key(str(widget).lower())
+                        and str(widget_value).strip().lower() in _LORA_NAME_PLACEHOLDERS):
+                    placeholder_groups.add(_lora_group(widget))
+        for key, value in inputs.items():
+            key_lower = str(key).lower()
+            # Links and nested structures are graph plumbing, not parameters.
+            if not isinstance(value, (str, int, float, bool)):
+                continue
+            text = str(value)
+            if not text.strip():
+                continue
+
+            kind: Optional[str] = None
+            label = str(key)
+            group = ""
+
+            if is_model_node:
+                # Only model/LoRA selectors on a model node. Skip the node's
+                # unrelated knobs (weight_dtype, enabled flags, etc.).
+                if any(h in key_lower for h in _MODEL_KEY_HINTS):
+                    name_key = _is_lora_name_key(key_lower)
+                    strength_key = "strength" in key_lower
+                    if name_key or strength_key:
+                        group = _lora_group(key_lower)
+                        # An off row must not contribute either its filename
+                        # or its strength, or the next row would borrow it.
+                        if _lora_entry_off(inputs, key):
+                            continue
+                        if name_key and text.strip().lower() in _LORA_NAME_PLACEHOLDERS:
+                            continue
+                        if strength_key and group in placeholder_groups:
+                            continue
+                    kind = "model"
+                    if name_key:
+                        label = "LoRA"
+                    elif "checkpoint" in key_lower:
+                        label = "Checkpoint"
+                    elif "unet" in key_lower:
+                        label = "UNet"
+                    elif strength_key:
+                        label = "强度"
+            elif is_text_node:
+                if key_lower in _PROMPT_INPUT_KEYS or key_lower == "value":
+                    kind = "prompt"
+            elif key_lower in _PROMPT_INPUT_KEYS:
+                kind = "prompt"
+            elif key_lower in _PROMPT_FRAGMENT_KEYS:
+                # Switch / StringConcatenate fragments: these nodes often have
+                # no title, so the text itself decides below.
+                kind = "prompt"
+
+            if kind is None:
+                continue
+            if kind == "prompt":
+                slot = (str(node_id), str(key))
+                # Two independent guards, system always wins:
+                #  1. Text shape — instruction boilerplate ("you are ...",
+                #     "edit propagation:", a prompt-writing guide) is a system
+                #     instruction even when its widget is literally named
+                #     "prompt" and is wired as a literal (no link to trace).
+                #  2. Wiring — a widget reached from a system_prompt/negative
+                #     branch is out regardless of title or length.
+                if slot in edge_system or _looks_like_system_prompt(text):
+                    continue
+                if slot in edge_positive:
+                    pass
+                elif not _is_positive_prompt(title, class_type, key) and not _is_positive_by_content(key, text):
+                    # Fallback for widgets with no usable link (older/flat
+                    # graphs): let the node title / field name decide.
+                    continue
+            if len(text) > _MAX_PROMPT_CHARS:
+                text = text[:_MAX_PROMPT_CHARS] + "…"
+            fields.append({
+                "node": title,
+                "id": str(node_id),
+                "group": group,
+                "class": class_type,
+                "key": label,
+                "value": text,
+                "kind": kind,
+            })
+
+    # One workflow can feed the same seed to several samplers (e.g. YuE2).
+    # Show each distinct value once instead of stacking identical badges.
+    deduped: List[dict] = []
+    seen_params = set()
+    for field in fields + param_fields:
+        if field["kind"] == "param":
+            identity = (field["key"], field["value"])
+            if identity in seen_params:
+                continue
+            seen_params.add(identity)
+        deduped.append(field)
+    return deduped
+
+
+# ComfyUI writes the API graph into image text chunks, and into the container
+# metadata of videos/audio saved through SaveVideo / SaveAudio*. Both use the
+# same two keys: ``prompt`` (API graph) and ``workflow`` (UI graph titles).
+_IMAGE_META_EXTS = (".png", ".webp", ".jpg", ".jpeg")
+_AV_META_EXTS = (
+    ".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v",
+    ".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac",
+)
+
+
+def _extract_metadata(target: str) -> Optional[dict]:
+    """Read prompt/parameter fields from a generated file's embedded metadata.
+
+    Returns ``None`` when the file carries no metadata (imported files, files
+    saved with ``--disable-metadata``, text/unknown kinds). Images expose the
+    ComfyUI text chunks through PIL; videos and audio expose the same keys
+    through PyAV container metadata.
+    """
+    ext = os.path.splitext(target)[1].lower()
+    try:
+        if ext in _IMAGE_META_EXTS:
+            from PIL import Image
+
+            with Image.open(target) as image:
+                info = dict(image.info or {})
+        elif ext in _AV_META_EXTS:
+            import av
+
+            with av.open(target) as container:
+                info = dict(container.metadata or {})
+        else:
+            return None
+    except Exception:
+        return None
+
+    raw_prompt = info.get("prompt")
+    if not raw_prompt:
+        return None
+    try:
+        graph = json.loads(raw_prompt) if isinstance(raw_prompt, str) else raw_prompt
+    except Exception:
+        return None
+    if not isinstance(graph, dict) or not graph:
+        return None
+
+    # Workflow titles enrich the bare API graph: match node id -> title. The
+    # same nodes carry their mute/bypass mode, so a disabled branch is skipped
+    # even when an older file still embedded its widgets in the prompt graph.
+    raw_workflow = info.get("workflow")
+    titles: Dict[str, str] = {}
+    disabled_ids: set = set()
+    if raw_workflow:
+        try:
+            workflow = json.loads(raw_workflow) if isinstance(raw_workflow, str) else raw_workflow
+            for node in (workflow.get("nodes") or []):
+                nid = str(node.get("id"))
+                if not nid:
+                    continue
+                title = node.get("title") or node.get("type") or ""
+                if title:
+                    titles[nid] = str(title)
+                if _workflow_node_off(node):
+                    disabled_ids.add(nid)
+        except Exception:
+            titles = {}
+            disabled_ids = set()
+
+    fields = _prompt_fields(graph, titles, disabled_ids)
+    if not fields:
+        return None
+
+    models = [f for f in fields if f["kind"] == "model"]
+    prompts = []
+    seen_prompts = set()
+    for field in fields:
+        if field["kind"] != "prompt":
+            continue
+        # A composed graph often exposes the same text twice: once through a
+        # Switch/StringConcatenate fragment and once through the text generator.
+        if field["value"] in seen_prompts:
+            continue
+        seen_prompts.add(field["value"])
+        prompts.append(field)
+    params = [f for f in fields if f["kind"] == "param"]
+    return {
+        "models": models,
+        "prompts": prompts,
+        "params": params,
+        "count": len(fields),
+    }
+
+
+async def _h_prompt(request: web.Request) -> web.Response:
+    """Return prompt/parameter fields embedded in a generated file."""
+    source = request.query.get("source", "output")
+    path = request.query.get("path", "")
+    token = request.query.get("token", "")
+    owner = str(request.query.get("u", "") or "")
+    user = _request_user(request)
+
+    signed_ok, resolve_owner = _verify_signed_url(token, source, path, owner, user)
+
+    if signed_ok:
+        target = _resolve(source, path, user, require_user=True, owner=resolve_owner)
+    elif owner:
+        target = None  # forged owner — never fall through to request identity
+    elif user:
+        target = _resolve(source, path, user, require_user=True)
+    else:
+        target = None
+    if target is None:
+        return web.Response(status=404)
+
+    try:
+        data = await asyncio.to_thread(_extract_metadata, target)
+    except Exception:
+        data = None
+    if data is None:
+        return web.json_response({"found": False, "models": [], "prompts": [], "params": [], "count": 0})
+    return web.json_response(
+        {"found": True, **data},
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 async def _h_zip(request: web.Request) -> web.Response:
     user = _request_user(request)
     if _multi_user_enabled() and not user:
@@ -616,7 +1617,10 @@ async def _h_zip(request: web.Request) -> web.Response:
             total += os.path.getsize(target)
         except OSError:
             continue
-        members.append((target, _zip_name(item["path"], user)))
+        members.append((
+            target,
+            _zip_name(item["path"], None if item["source"] == MEDIA_SOURCE else user),
+        ))
 
     if not members:
         return web.json_response({"error": "no readable files"}, status=404)
@@ -921,9 +1925,14 @@ def _attach(server_instance) -> None:
         for prefix in ("", "/api"):
             app.router.add_route("GET", prefix + LIST_ROUTE, _h_list)
             app.router.add_route("GET", prefix + FILE_ROUTE, _h_file)
+            app.router.add_route("GET", prefix + PROMPT_ROUTE, _h_prompt)
             app.router.add_route("POST", prefix + ZIP_ROUTE, _h_zip)
             app.router.add_route("POST", prefix + DELETE_ROUTE, _h_delete)
             app.router.add_route("POST", prefix + INSERT_ROUTE, _h_insert)
+            app.router.add_route("GET", prefix + MEDIA_FOLDER_ROUTE, _h_media_folder)
+            app.router.add_route("POST", prefix + MEDIA_FOLDER_ROUTE, _h_media_folder_set)
+            app.router.add_route("POST", prefix + MEDIA_PICK_ROUTE, _h_media_pick)
+            app.router.add_route("POST", prefix + FAVORITES_ADD_ROUTE, _h_favorites_add)
         _ROUTES_DONE = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("[XXXXXLCat] could not add history gallery routes: %s", exc)

@@ -54,11 +54,14 @@
 /* ---------------- graph preview ---------------- */
 .ac-preview { position:relative; flex:1 1 auto; min-height:0; overflow:hidden; }
 .ac-viewport { position:absolute; inset:0; overflow:hidden; cursor:grab;
-  background-color:#1d1d1d;
+  background-color:#0F0F0F;
   background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px);
   background-size:18px 18px; }
 .ac-viewport.is-panning { cursor:grabbing; }
-.ac-scene { position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; }
+/* No will-change here: promoting the scaled scene to a compositor layer makes
+   the browser rasterise text at 1x then stretch it, so zoomed nodes look
+   blurry. Without it, text is re-rasterised at the current scale. */
+.ac-scene { position:absolute; left:0; top:0; transform-origin:0 0; }
 .ac-edges { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; z-index:0; }
 .ac-edge { fill:none; stroke:#8a8a8a; stroke-width:1.2; opacity:.55; }
 .ac-node { position:absolute; z-index:1; width:168px; padding:6px 9px;
@@ -66,13 +69,20 @@
   background:var(--card, #262729); box-shadow:0 4px 12px rgba(0,0,0,.45);
   cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease; }
 .ac-node:hover { border-color:hsl(var(--n-hue) 55% 70%); }
-.ac-node.is-configurable { border-color:var(--primary, #0b8ce9); }
+/* Configured nodes: just a thicker white edge; no glow. Unconfigured nodes
+   keep their original type hue. */
+.ac-node.is-configurable { border:2px solid #ffffff; }
+.ac-node.is-configurable:hover { border-color:#ffffff; }
 .ac-node-title { display:flex; align-items:baseline; justify-content:space-between; gap:6px;
   font-size:11px; font-weight:600; color:var(--text-color, #fff); white-space:nowrap; overflow:hidden; }
 .ac-node-id { flex:0 0 auto; font-weight:400; font-size:10px; color:hsl(var(--n-hue) 55% 72%); }
 .ac-node-type { display:flex; align-items:center; gap:4px; margin-top:2px; font-size:10px;
   color:var(--muted-foreground, #8a8a8a); white-space:nowrap; overflow:hidden; }
 .ac-node-count { margin-left:auto; flex:0 0 auto; color:var(--primary, #0b8ce9); }
+/* Option B: "N 已用" as a solid blue pill with white text. */
+.ac-exposed { display:inline-flex; align-items:center; padding:0 5px; border-radius:9999px;
+  background:var(--primary, #0b8ce9); color:#ffffff; font-size:10px;
+  font-weight:600; line-height:14px; }
 .ac-handle { position:absolute; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:50%;
   background:hsl(var(--n-hue) 45% 60% / .7); }
 .ac-handle--in { left:-4px; }

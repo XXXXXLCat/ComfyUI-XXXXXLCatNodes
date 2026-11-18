@@ -5,7 +5,7 @@
 ComfyUI extension providing nine custom nodes and four interface features.
 
 - Nodes: Sweep VRAM, Reclaim RAM, H3 Image to Video, Any Switch, Group Control, Node Control, Resolution Selector, Fit Image to Size, Infinite Canvas Asset Loader.
-- Interface: menu-bar system status, history gallery sidebar tab, multi-user file isolation, embedded infinite canvas.
+- Interface: menu-bar system status, canvas-only history gallery, multi-user file isolation, embedded infinite canvas.
 
 No third-party dependencies and no external service. Labels follow ComfyUI's language setting; Chinese and English are provided.
 
@@ -187,7 +187,7 @@ Limits:
 
 ## History gallery
 
-A sidebar tab, placed above *Assets*. It lists every file that exists on disk under the account's `output/` and `input/` trees, not only the files produced in the current session.
+**Canvas-only** — it is no longer a separate ComfyUI main-UI sidebar tab. Enter the infinite canvas and open it from the "Gallery" entry just below "Exit Canvas" in the canvas rail; the panel renders in the canvas drawer. It lists every file that exists on disk under the account's `output/` and `input/` trees, not only the files produced in the current session.
 
 | Area | Content |
 | --- | --- |
@@ -206,11 +206,12 @@ Context menu:
 | Item | Description |
 | --- | --- |
 | Inspect asset | Opens the preview layer; video and audio play there, text shows the beginning of the file; the original can be opened or downloaded |
-| Insert as node in workflow | Places the file in the input directory, adds a loader node at the centre of the viewport and fills in the filename |
 | Download | Downloads the file |
 | Delete | Moves the file to the system Recycle Bin |
 
 Double-clicking a card is equivalent to *Inspect asset*.
+
+> Features that depend on the ComfyUI main-UI node system ("Insert as node in workflow" and dragging a card onto a node) are unavailable inside the canvas and have been removed.
 
 Limitations:
 
@@ -232,7 +233,7 @@ Active when ComfyUI is started with `--multi-user`; a single-user launch is unaf
 
 Place the `ComfyUI-XXXXXLCatNodes` folder in `ComfyUI/custom_nodes/` and restart ComfyUI.
 
-The menu-bar status, the history gallery, multi-user isolation and the embedded infinite canvas activate automatically; no node has to be added to a graph. Press Ctrl+Shift+I (or View → 打开 / 退出无限画布) to enter the canvas.
+The menu-bar status, the history gallery (inside the canvas rail), multi-user isolation and the embedded infinite canvas activate automatically; no node has to be added to a graph. Press Ctrl+Shift+I (or View → 打开 / 退出无限画布) to enter the canvas, then open the gallery from the "Gallery" entry in the canvas rail.
 
 ## Requirements
 

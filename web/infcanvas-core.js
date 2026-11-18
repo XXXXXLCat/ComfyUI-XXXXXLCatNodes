@@ -69,15 +69,15 @@
      to get a generator back), so there is no separate role for the two states.
      Text stays its own role: it is never uploaded, only typed/pasted. */
   const SPECS = [
-    { type: "infcanvas/media_image", role: "media", kind: "image", title: "图像", desc: "图片素材，或调用 ComfyUI 生成图片", icon: "pi pi-image", workflow: "image", size: [320, 180] },
-    { type: "infcanvas/media_video", role: "media", kind: "video", title: "视频", desc: "视频素材，或调用 ComfyUI 生成视频", icon: "pi pi-video", workflow: "video", size: [320, 180] },
-    { type: "infcanvas/media_audio", role: "media", kind: "audio", title: "音频", desc: "音频素材，或调用 ComfyUI 生成音频", icon: "pi pi-volume-up", workflow: "audio", size: [320, 180] },
-    { type: "infcanvas/asset_text", role: "text", kind: "text", title: "文本", desc: "文本素材", icon: "pi pi-align-left", size: [320, 180] },
+    { type: "infcanvas/media_image", role: "media", kind: "image", title: "图像", desc: "图片素材，或调用 ComfyUI 生成图片", icon: "pi pi-image", workflow: "image", size: [480, 270] },
+    { type: "infcanvas/media_video", role: "media", kind: "video", title: "视频", desc: "视频素材，或调用 ComfyUI 生成视频", icon: "pi pi-video", workflow: "video", size: [480, 270] },
+    { type: "infcanvas/media_audio", role: "media", kind: "audio", title: "音频", desc: "音频素材，或调用 ComfyUI 生成音频", icon: "pi pi-volume-up", workflow: "audio", size: [480, 270] },
+    { type: "infcanvas/asset_text", role: "text", kind: "text", title: "文本", desc: "文本素材", icon: "pi pi-align-left", size: [480, 270] },
     /* LoRA stack: a pure configuration node. It is wired INTO a generator as a
        MODEL modifier — never carries media, never produces an output file. Its
        loras ride along in data.loras and are injected into the workflow by
        buildPrompt() at run time (LoraLoaderModelOnly chain on the MODEL input). */
-    { type: "infcanvas/lora_stack", role: "lora", kind: "lora", title: "LoRA 栈", desc: "叠加多个 LoRA 到生成模型", icon: "pi pi-sliders-h", size: [320, 180] },
+    { type: "infcanvas/lora_stack", role: "lora", kind: "lora", title: "LoRA 栈", desc: "叠加多个 LoRA 到生成模型", icon: "pi pi-sliders-h", size: [480, 270] },
   ];
   const TYPE_BY_KIND = {
     image: "infcanvas/media_image",
@@ -276,6 +276,62 @@
     },
   };
 
+  /* 添加到收藏: fetch the asset's bytes from its (possibly signed) URL and
+     hand them to the backend, which writes them into the user-chosen 收藏
+     folder under a kind sub-folder. Taking bytes rather than a disk path keeps
+     this working for generated results, gallery items and arbitrary URLs. */
+
+  async function addToFavorites(asset, options = {}) {
+    const kind = options.kind || asset?.kind || "text";
+    let name = options.name || asset?.filename || asset?.name || tr("素材");
+    if (kind === "text" && !/\.[a-z0-9]+$/i.test(name)) name += ".txt";
+    let blob;
+    /* Only text assets take their bytes from data.text. Image/video/audio nodes
+       also carry an (often empty) data.text; treating that empty string as the
+       payload produced a 0-byte Blob and the backend rejected it with
+       "empty file". For every non-text kind, read the real file from its URL. */
+    const textPayload = options.text != null ? String(options.text) : "";
+    if (kind === "text" && textPayload.length > 0) {
+      blob = new Blob([textPayload], { type: "text/plain;charset=utf-8" });
+    } else {
+      const raw = options.url || asset?.url || (asset && viewUrl(asset));
+      if (!raw) throw new Error(tr("没有可添加的素材"));
+      /* 本站地址（裸 /view、签名 /xcat/gallery/file 等）必须走 api.fetchApi：
+         它会自动带 Comfy-User 头，多用户下后端才知道去 input|output/<user>/
+         取文件。裸 fetch 不带身份，带子目录的资产（如 <user>/ming_tts/x.flac）
+         会 404。URL 保持原样——/view 需要 subfolder 里的用户段，后端会据请求
+         头去重，不会再造成 <user>/<user> 双重嵌套。blob / data / 外链本就自
+         带数据或无需身份，走原生 fetch 即可。 */
+      const source = String(raw);
+      const sameSite = source.startsWith("/") && !source.startsWith("//");
+      const response = await (sameSite
+        ? API().fetchApi(source)
+        : fetch(source));
+      if (!response.ok) throw new Error(tr("读取素材失败：HTTP") + " " + response.status);
+      blob = await response.blob();
+    }
+    const form = new FormData();
+    form.append("file", blob, name);
+    const api = API();
+    const saved = await api.fetchApi(
+      "/xcat/favorites/add?kind=" + encodeURIComponent(kind),
+      { method: "POST", body: form, timeoutMs: null }
+    );
+    if (!saved.ok) {
+      let message = tr("添加到收藏失败");
+      try { const body = await saved.json(); if (body?.error) message = body.error; }
+      catch (error) { /* keep the generic message */ }
+      throw new Error(message);
+    }
+    const result = await saved.json();
+    // The 收藏 sidebar (a separate gallery-panel mount) caches its file list.
+    // Announce the new asset so an open panel reloads without a manual refresh.
+    try {
+      document.dispatchEvent(new CustomEvent("xcat-favorites-changed", { detail: result }));
+    } catch (error) { /* non-browser context */ }
+    return result;
+  }
+
   /* ------------------------------- state ------------------------------- */
 
   const state = NS.state = {
@@ -402,7 +458,7 @@
         || SPEC_BY_TYPE[TYPE_BY_KIND.image];
       if (!spec) continue;
       const pos = Array.isArray(node.pos) ? node.pos : [node.pos?.[0] || 0, node.pos?.[1] || 0];
-      const size = Array.isArray(node.size) ? node.size : (spec.size || [320, 180]);
+      const size = Array.isArray(node.size) ? node.size : (spec.size || [480, 270]);
       const created = {
         id: String(node.id),
         type: "ic",
@@ -422,7 +478,7 @@
           status: props.status || "idle",
           error: props.error || "",
           result: props.result || null,
-          size: [Number(size[0]) || 320, Number(size[1]) || 180],
+          size: [Number(size[0]) || 480, Number(size[1]) || 270],
         },
       };
       /* Old labels were auto-composed ("图像 · a.png"). Keep a real user name,
@@ -1765,7 +1821,7 @@
       state.activeId = state.docs[wanted]?.id || state.docs[0].id;
     }
     switchDoc(state.activeId || state.docs[0].id);
-    toast("info", tr("已进入无限画布"), tr("拖入素材或点击左侧「添加节点」"));
+    toast("info", tr("已进入无限画布"), tr("拖入素材或点击左侧「节点」"));
   }
 
   async function exit() {
@@ -1962,7 +2018,7 @@
     renameDoc, duplicateDoc, switchDoc,
     renameCanvas, duplicateCanvas, isBookmarked, toggleBookmark,
     addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile,
-    loraNames,
+    addToFavorites, loraNames,
     docs: () => state.docs, activeId: () => state.activeId,
     isActive: () => state.active,
     /** @deprecated kept for extensions written against the LiteGraph build. */

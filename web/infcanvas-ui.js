@@ -15,27 +15,42 @@
   const api = () => NS.api;
   const backend = () => NS.backend;
   const esc = (value) => api()?.esc ? api().esc(value) : String(value ?? "");
+  /* The rail's top slot is the Infinite Canvas brand mark, not a control: the
+     same white/orange logo as the ComfyUI top-bar entry (canvas-logo.svg). */
+  const CANVAS_LOGO_URL = new URL("./canvas-logo.svg", import.meta.url).href;
 
   /* Icons come from ComfyUI 1.59.1 source:
      src/composables/sidebarTabs/useNodeLibrarySidebarTab.ts -> icon-[comfy--node]
-     .../useAssetsSidebarTab.ts  -> icon-[comfy--image-ai-edit]
+     .../useAssetsSidebarTab.ts -> icon-[comfy--image-ai-edit]
+     .../useNodeLibrarySidebarTab.ts -> icon-[comfy--node]
      .../useWorkflowsSidebarTab.ts -> icon-[comfy--workflow]
-     src/components/sidebar/SidebarLogoutIcon.vue -> pi pi-sign-out */
+     .../useModelLibrarySidebarTab.ts -> icon-[comfy--ai-model]
+     src/platform/workflow/management/composables/useAppsSidebarTab.ts
+       -> icon-[lucide--panels-top-left] (the ComfyUI Apps icon) */
   /* label/tip are i18n source keys (Chinese); resolved through t() at render
      and on every language change so the rail never shows a stale language. */
   const SIDEBAR_ITEMS = [
-    { key: "exit", icon: "pi pi-sign-out", label: "退出画布", tip: "退出画布，返回 ComfyUI" },
-    { key: "nodes", icon: "icon-[comfy--node]", label: "添加节点", tip: "添加节点" },
-    { key: "assets", icon: "icon-[comfy--image-ai-edit]", label: "资产库", tip: "资产库" },
+    /* Gallery — mounted straight below the canvas logo in the rail. The
+       panel itself is the same history-gallery builder used by ComfyUI's own
+       sidebar tab (infcanvas-ui.js setPanel -> NS.galleryPanel.mount). */
+    { key: "gallery", icon: "icon-[comfy--image-ai-edit]", label: "资产", tip: "资产" },
+    { key: "nodes", icon: "icon-[comfy--node]", label: "节点", tip: "节点" },
+    /* Placeholder rail button: no panel/action yet, just sits below 节点. */
+    { key: "media", icon: "icon-[comfy--ai-model]", label: "收藏", tip: "收藏" },
     { key: "canvases", icon: "icon-[comfy--workflow]", label: "画布", tip: "画布列表" },
     /* Reference: the "工作流配置" tab in the library dock (canvas-app.js:272)
        opens the WorkflowConfig FloatingWindow dialog. Here the same entry is
-       added to this rail, renamed 工作流配置 -> API 配置 / API Config.
+       added to this rail, renamed 工作流配置 -> 配置 / Config.
        It opens the dialog in js/infcanvas-api-config.js, NOT a drawer panel.
-       icon-[lucide--server] is ComfyUI's own CSS class (main-*.css). */
-    { key: "api", icon: "icon-[lucide--server]", label: "API 配置", tip: "API 配置" },
+       icon-[lucide--panels-top-left] is ComfyUI's own Apps icon class. */
+    { key: "api", icon: "icon-[lucide--panels-top-left]", label: "配置", tip: "配置" },
   ];
-  const PANEL_TITLES = { nodes: "添加节点", assets: "资产库", canvases: "画布" };
+  const PANEL_TITLES = {
+    gallery: "资产", nodes: "添加节点", media: "收藏", canvases: "画布管理",
+  };
+  /* Cleanup returned by NS.galleryPanel.mount — the gallery installs global
+     listeners and body-portaled popovers, so it must be torn down on switch. */
+  let galleryCleanup = null;
   /* Set when switching into the canvas panel so renderCanvasList can mirror
      BaseWorkflowsSidebarTab's onMounted search focus exactly once. */
   let focusCanvasSearch = false;
@@ -234,6 +249,17 @@
     const group = node("div",
       "sidebar-item-group flex shrink-0 flex-col items-center overflow-hidden border border-transparent");
     sidebar.appendChild(group);
+    /* Logo slot: plain <div>/<img>, never a <button>. No click, no tooltip,
+       no i18n label — it is branding only. 退出画布 stays available as the
+       white button at the far right of the tab bar. */
+    const logoSlot = node("div", "ic-side-logo");
+    logoSlot.setAttribute("aria-hidden", "true");
+    const logoImage = node("img");
+    logoImage.src = CANVAS_LOGO_URL;
+    logoImage.alt = "";
+    logoImage.draggable = false;
+    logoSlot.appendChild(logoImage);
+    group.appendChild(logoSlot);
     const buttons = new Map();
     const sideRefs = new Map();   // key -> { label, tip, item, button }
     const makeSideButton = (item) => {
@@ -269,7 +295,6 @@
       const button = makeSideButton(item);
       button.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (item.key === "exit") { api().exit(); return; }
         /* Reference: the library tab opens the workflow dialog. The API entry
            opens our ported FloatingWindow instead of switching the drawer. */
         if (item.key === "api") { NS.apiConfig?.open?.(); return; }
@@ -342,6 +367,10 @@
     panelRefresh.style.display = "none";
     toolButtons.appendChild(panelRefresh);
     actions.appendChild(toolButtons);
+    /* The gallery/媒体 panels move their file count + refresh button into this
+       slot so they sit in the title row, immediately left of the close X. */
+    const headSlot = node("div", "xog-head-slot");
+    actions.appendChild(headSlot);
     const panelClose = node("button",
       "relative inline-flex cursor-pointer touch-manipulation appearance-none " +
       "items-center justify-center gap-2 border-none font-inter text-sm " +
@@ -392,7 +421,7 @@
 
     const shell = {
       root, tabbar, sidebar, buttons, sideRefs, langButton,
-      panel, panelTitle, panelBody, panelRefresh, stage, resizeHandle,
+      panel, panelTitle, panelBody, panelRefresh, headSlot, stage, resizeHandle,
     };
     shell.destroyResizer = attachPanelResizer(shell, resizeHandle);
     st().shell = shell;
@@ -409,6 +438,7 @@
 
   function unmountShell() {
     document.querySelectorAll(".ic-menu").forEach((menu) => menu.remove());
+    if (galleryCleanup) { galleryCleanup(); galleryCleanup = null; }
     const shell = st().shell;
     try { shell?.destroyResizer?.(); } catch (error) { /* optional */ }
     if (shell?.root) shell.root.remove();
@@ -714,6 +744,16 @@
     add.title = t("新建画布");
     add.addEventListener("click", () => api().newCanvas());
     bar.appendChild(add);
+    /* Exit button pinned to the far right of the tab strip. White surface on
+       purpose so it reads as the primary escape action against the dark tabs.
+       Reuses the same i18n keys and exit handler as the rail's exit item. */
+    const exit = node("button", "ic-tab-exit");
+    exit.type = "button";
+    exit.innerHTML = '<span class="ic-tab-exit-label"></span>';
+    exit.querySelector(".ic-tab-exit-label").textContent = t("退出画布");
+    exit.title = t("退出画布，返回 ComfyUI");
+    exit.addEventListener("click", () => api().exit());
+    bar.appendChild(exit);
   }
 
   /* --------------------------- drawer panels ----------------------------- */
@@ -728,6 +768,11 @@
     const state = st();
     const shell = state.shell;
     if (!shell) return;
+    /* Gallery owns document/window listeners + body-portaled popovers. Tear the
+       previous instance down before its host is cleared (or before switching
+       to a different panel), otherwise those listeners pile up on every switch. */
+    if (galleryCleanup) { galleryCleanup(); galleryCleanup = null; }
+    shell.panelBody.classList.remove("ic-gallery-host");
     /* BaseWorkflowsSidebarTab's onMounted focuses the SearchInput. Mirror that
        once per switch into the canvas panel — not on every refreshPanels()
        re-render, which would yank the caret away while typing. */
@@ -744,10 +789,21 @@
     shell.panelTitle.textContent = key ? t(PANEL_TITLES[key] || "") : "";
     shell.panelRefresh.style.display = key === "canvases" ? "" : "none";
     shell.panelRefresh.onclick = null;
+    /* Gallery moved its count + refresh into the header slot; clear it on
+       every switch so they never leak into a different panel. */
+    shell.headSlot.replaceChildren();
     shell.panelBody.replaceChildren();
     if (!key) return;
-    if (key === "nodes") renderNodeLibrary(shell.panelBody);
-    else if (key === "assets") renderAssets(shell.panelBody);
+    if (key === "gallery" || key === "media") {
+      /* Both panels use the same builder; 媒体 only swaps the output/input
+         tabs for a folder chip (mode:media) and lists the chosen folder. Mark
+         the host so canvas CSS pins the header and scrolls only the grid. */
+      shell.panelBody.classList.add("ic-gallery-host");
+      galleryCleanup = NS.galleryPanel?.mount?.(
+          shell.panelBody,
+          { ...(key === "media" ? { mode: "media" } : {}), headSlot: shell.headSlot }
+      ) || null;
+    } else if (key === "nodes") renderNodeLibrary(shell.panelBody);
     else if (key === "canvases") renderCanvasList(shell.panelBody);
   }
 
@@ -770,6 +826,10 @@
     });
     const add = shell.tabbar?.querySelector(".ic-tab-add");
     if (add) add.title = t("新建画布");
+    const exitLabel = shell.tabbar?.querySelector(".ic-tab-exit-label");
+    if (exitLabel) exitLabel.textContent = t("退出画布");
+    const exit = shell.tabbar?.querySelector(".ic-tab-exit");
+    if (exit) exit.title = t("退出画布，返回 ComfyUI");
   }
 
   /* Panel chrome follows ComfyUI's SidebarTabTemplate.vue: the title lives in
@@ -801,89 +861,6 @@
     }
     panel.appendChild(list);
     container.replaceChildren(panel);
-  }
-
-  async function renderAssets(container) {
-    if (!isCurrent(container, "assets")) return;
-    const panel = panelHeader(null);
-    const controls = node("div", "ic-row");
-    const upload = node("label", "ic-btn");
-    upload.innerHTML = '<i class="pi pi-upload"></i> ' + t("上传素材");
-    const fileInput = node("input");
-    fileInput.type = "file";
-    fileInput.multiple = true;
-    fileInput.style.display = "none";
-    upload.appendChild(fileInput);
-    const refresh = node("button", "ic-btn");
-    refresh.type = "button";
-    refresh.innerHTML = '<i class="pi pi-refresh"></i> ' + t("刷新");
-    controls.append(upload, refresh);
-    panel.appendChild(controls);
-    const grid = node("div", "ic-grid");
-    grid.appendChild(node("div", "ic-empty", t("加载中…")));
-    panel.appendChild(grid);
-    panel.appendChild(node("div", "ic-hint", t("点击插入画布，或拖到画布上；列出 ComfyUI input/infcanvas 与 output 中的媒体文件。")));
-    container.replaceChildren(panel);
-
-    async function load() {
-      grid.replaceChildren();
-      try {
-        const { assets = [] } = await backend().assets();
-        if (!isCurrent(container, "assets")) return;
-        if (!assets.length) {
-          grid.appendChild(node("div", "ic-empty", t("暂无资产。拖入文件或点击「上传素材」。")));
-          return;
-        }
-        for (const asset of assets) {
-          const card = node("div", "ic-card");
-          card.draggable = true;
-          card.title = asset.name;
-          if (asset.kind === "image") {
-            const image = node("img", "ic-thumb");
-            image.src = api().viewUrl(asset);
-            image.alt = asset.name;
-            card.appendChild(image);
-          } else {
-            const icon = node("div", "ic-thumb-icon");
-            icon.innerHTML = `<i class="${asset.kind === "video" ? "pi pi-video" : asset.kind === "audio" ? "pi pi-volume-up" : "pi pi-align-left"}"></i>`;
-            card.appendChild(icon);
-          }
-          card.appendChild(node("span", "ic-card-label", asset.name));
-          card.addEventListener("click", () => {
-            const type = NS.TYPE_BY_KIND[asset.kind] || NS.TYPE_BY_KIND.text;
-            api().addNodeByType(type, null, asset);
-          });
-          card.addEventListener("dragstart", (event) => {
-            event.dataTransfer.setData("application/x-infcanvas-asset", JSON.stringify(asset));
-            event.dataTransfer.effectAllowed = "copy";
-          });
-          grid.appendChild(card);
-        }
-      } catch (error) {
-        if (!isCurrent(container, "assets")) return;
-        grid.appendChild(node("div", "ic-empty", t("加载失败：") + esc(error)));
-      }
-    }
-
-    refresh.addEventListener("click", load);
-    fileInput.addEventListener("change", async () => {
-      const files = Array.from(fileInput.files || []);
-      for (const file of files) {
-        const kind = api().kindFromFile(file.name);
-        if (!kind) { api().toast("warning", t("不支持的文件类型"), file.name); continue; }
-        try {
-          const asset = await backend().upload(file);
-          if (kind === "text") {
-            try { asset.text = (await (api().readTextFile || ((f) => f.text()))(file)).slice(0, 4000); } catch (error) { /* binary */ }
-          }
-          api().addNodeByType(NS.TYPE_BY_KIND[kind], null, asset);
-          api().toast("success", t("素材已添加"), file.name);
-        } catch (error) { api().toast("error", t("上传失败"), file.name + " · " + String(error)); }
-      }
-      fileInput.value = "";
-      await load();
-    });
-    await load();
   }
 
   async function renderCanvasList(container) {
@@ -1012,7 +989,6 @@
     try {
       if (!state.shell || !state.panelBody || !document.body.contains(state.panelBody)) return;
       if (state.panelKey === "canvases") renderCanvasList(state.panelBody);
-      else if (state.panelKey === "assets") renderAssets(state.panelBody);
     } catch (error) { console.warn("[InfCanvas] refreshPanels failed", error); }
   }
 
@@ -1023,7 +999,7 @@
 
   NS.ui = {
     injectStyles, mountShell, unmountShell, mountTabs, removeTabs, renderTabs,
-    setPanel, renderNodeLibrary, renderAssets, renderCanvasList, refreshPanels,
+    setPanel, renderNodeLibrary, renderCanvasList, refreshPanels,
     showAddNodeMenu, showConnectNodeMenu,
   };
 })();

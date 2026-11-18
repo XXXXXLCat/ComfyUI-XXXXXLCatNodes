@@ -26,9 +26,28 @@
    and above our root -- the dialogs ARE ComfyUI's, not a reimplementation.
    Dialogs that were already open before entering canvas mode are tagged with
    data-infcanvas-suppressed and stay hidden (see infcanvas-core.js). */
-html.infcanvas-mode body > div:not(#infcanvas-root):not(#splash-loader):not(.litemenu):not(.graphdialog):not(.litegraph-contextmenu):not(.z-overlay) {
+html.infcanvas-mode body > div:not(#infcanvas-root):not(#splash-loader):not(.litemenu):not(.graphdialog):not(.litegraph-contextmenu):not(.z-overlay):not(.xog-dlg):not(.xog-lb):not(.xog-ctx):not(.xog-selbar):not(.xog-marquee) {
   visibility: hidden !important;
   pointer-events: none !important;
+}
+/* History-gallery overlays are teleported to <body> (like ComfyUI's own
+   dialogs/menus) so they escape the sidebar's stacking context. Whitelist them
+   above, and lift them over the canvas root (#infcanvas-root z-index 20000). */
+html.infcanvas-mode body > div.xog-dlg,
+html.infcanvas-mode body > div.xog-lb,
+html.infcanvas-mode body > div.xog-ctx,
+html.infcanvas-mode body > div.xog-selbar {
+  visibility: visible !important;
+  pointer-events: auto !important;
+  z-index: 2147483000 !important;
+}
+/* The gallery marquee is a native z-overlay upstream; without lifting it over
+   #infcanvas-root (20000) the blue rectangle is painted behind the canvas and
+   the drag looks like it selects without drawing anything. Keep pointer-events
+   none — the rectangle must not swallow the drag it visualises. */
+html.infcanvas-mode body > div.xog-marquee {
+  visibility: visible !important;
+  z-index: 2147483000 !important;
 }
 html.infcanvas-mode body > div.z-overlay {
   visibility: visible !important;
@@ -38,10 +57,13 @@ html.infcanvas-mode body > div.z-overlay > [data-infcanvas-suppressed] {
   visibility: hidden !important;
   pointer-events: none !important;
 }
+/* Toast dock must outrank the gallery lightbox (.xog-lb) and every other
+   teleported overlay, otherwise "已复制" is painted behind the preview. */
 html.infcanvas-mode .z-toast {
   visibility: visible !important;
-  z-index: 2147483000 !important;
+  z-index: 2147483600 !important;
 }
+html.infcanvas-mode body > div.z-toast { z-index: 2147483600 !important; }
 html.infcanvas-mode .z-toast * { visibility: visible !important; }
 html.infcanvas-mode .litemenu,
 html.infcanvas-mode .graphdialog,
@@ -183,6 +205,20 @@ html.infcanvas-mode .litegraph-contextmenu {
 }
 .ic-tab-add i { font-size: 14px; }
 .ic-tab-add:hover { background: var(--ic-hover, #313235); color: var(--ic-text, #ffffff); }
+/* Exit-canvas button pinned to the far right of the tab bar. White surface on
+   purpose: it is the primary escape action and must stand out from the dark
+   tabs. Sizing follows .ic-tab-add (32px square-ish, 14px glyph). */
+.ic-tab-exit {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; margin-left: auto;
+  height: 32px; padding: 0 16px;
+  background: #ffffff; color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 7px;
+  font-family: Inter, sans-serif; font-size: 14px; font-weight: 500; line-height: 1;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color .1s cubic-bezier(.4, 0, .2, 1);
+}
+.ic-tab-exit:hover { background: #e6e6e6; }
 
 #infcanvas-body { display: flex; flex: 1 1 auto; min-height: 0; position: relative; }
 
@@ -201,6 +237,18 @@ html.infcanvas-mode .litegraph-contextmenu {
   overflow: hidden; z-index: 2;
 }
 .ic-side-btn { position: relative; }
+/* Brand mark at the top of the rail: deliberately a div, not a side-bar-button
+   — no hover, no tooltip, no click handler. Exit lives in the tab bar. */
+#infcanvas-sidebar .ic-side-logo {
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 var(--sidebar-item-height, 48px);
+  width: var(--sidebar-width, 56px);
+  height: var(--sidebar-item-height, 48px);
+  pointer-events: none; user-select: none;
+}
+#infcanvas-sidebar .ic-side-logo img {
+  display: block; width: 40px; height: 24px; object-fit: contain;
+}
 /* SidebarIcon.vue keeps its labels at leading-none line-clamp-2; with the
    longer "API Config" label the 10px line box clips descenders (the g).
    Keep the host classes but give the glyph a full line box and stop the
@@ -248,6 +296,30 @@ html.infcanvas-mode .litegraph-contextmenu {
 #infcanvas-panel > .sidebar-content-container { opacity: 0; }
 #infcanvas-root.has-panel #infcanvas-panel > .sidebar-content-container { opacity: 1; }
 #infcanvas-panel-body { min-height: 0; }
+
+/* Gallery in the canvas drawer: pin the header and scroll ONLY the card grid,
+   so the thin .xog scrollbar starts below the search row (ComfyUI native
+   media-assets behaviour) instead of spanning the whole drawer. Scoped to the
+   canvas host so ComfyUI's own gallery sidebar tab keeps its layout. */
+#infcanvas-panel-body.ic-gallery-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+/* NOTE: the gallery builder adds the xog class to the host itself, so the
+   host IS .xog here — .xog-bar / .xog-body are its DIRECT children. */
+#infcanvas-panel-body.ic-gallery-host.xog {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+#infcanvas-panel-body.ic-gallery-host > .xog-bar { flex: none; }
+#infcanvas-panel-body.ic-gallery-host > .xog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 /* SplitterResizeHandle.vue: 1px w-px line + 4px ::after hit area rendered by
    the host's own Tailwind classes. Hidden while no side panel is mounted,
@@ -326,16 +398,6 @@ html.infcanvas-mode .litegraph-contextmenu {
    inheriting the row's text colour so both surfaces look identical. */
 .ic-item > svg { flex: 0 0 auto; width: 16px; height: 16px; color: inherit; }
 .ic-item .ic-btn { margin-left: auto; }
-.ic-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px 16px 0; }
-.ic-card {
-  position: relative; border: 1px solid var(--ic-line, #494a50); border-radius: var(--ic-radius, 10px);
-  overflow: hidden; background: var(--ic-panel, #262729); cursor: grab;
-}
-.ic-card:hover { border-color: var(--ic-brand, #0b8ce9); }
-.ic-card .ic-thumb { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: var(--ic-input, #171718); }
-.ic-card .ic-thumb-icon { display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; font-size: 24px; color: var(--ic-soft, #8a8a8a); }
-.ic-card .ic-thumb-icon i { font-size: 24px; }
-.ic-card .ic-card-label { display: block; padding: 6px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ic-empty { padding: 24px 16px; color: var(--ic-soft, #8a8a8a); text-align: center; line-height: 1.6; font-size: 14px; }
 
 /* ---- canvas sidebar: ComfyUI workflow sidebar measured values ---------- */

@@ -686,8 +686,8 @@
   /* ------------------------------ grid snap ------------------------------ */
 
   /* Grid snap rounds node positions (Vue Flow's snapToGrid) and resize edges
-     to the nearest 10px cell -- exactly one square of the 100x100/10px canvas
-     background grid. The toggle is a persistent toolbar preference, kept in
+     to the nearest 10px cell -- half the 20px gap of the Vue Flow dot
+     background. The toggle is a persistent toolbar preference, kept in
      the flow engine so both the toolbar and the node components read one
      source of truth. */
   function snapEnabled() { return !!ui.snapOn; }
