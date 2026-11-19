@@ -35,9 +35,9 @@
        sidebar tab (infcanvas-ui.js setPanel -> NS.galleryPanel.mount). */
     { key: "gallery", icon: "icon-[comfy--image-ai-edit]", label: "资产", tip: "资产" },
     { key: "nodes", icon: "icon-[comfy--node]", label: "节点", tip: "节点" },
-    { key: "media", icon: "icon-[comfy--ai-model]", label: "收藏", tip: "收藏" },
-    /* Saved prompts: a small per-account snippet library in its own drawer. */
-    { key: "prompts", icon: "icon-[lucide--text]", label: "提示词", tip: "提示词收藏" },
+    /* LoRA 库：按 lora 目录的子文件夹自动分类，显示同名预览图；可拖到画布
+       新建 LoRA 节点、拖到 LoRA 栈节点追加。图标参考 ComfyUI 的「模型」。 */
+    { key: "lora", icon: "icon-[comfy--ai-model]", label: "LoRA", tip: "LoRA 模型库" },
     { key: "canvases", icon: "icon-[comfy--workflow]", label: "画布", tip: "画布列表" },
     /* Reference: the "工作流配置" tab in the library dock (canvas-app.js:272)
        opens the WorkflowConfig FloatingWindow dialog. Here the same entry is
@@ -45,12 +45,16 @@
        It opens the dialog in js/infcanvas-api-config.js, NOT a drawer panel.
        icon-[lucide--panels-top-left] is ComfyUI's own Apps icon class. */
     { key: "api", icon: "icon-[lucide--panels-top-left]", label: "配置", tip: "配置" },
-    /* 画布设置：可扩展的设置面板（infcanvas-settings.js）。点开是独立弹窗，
-       不是抽屉面板；以后新设置往该模块的 SETTINGS 注册表里加即可。 */
-    { key: "settings", icon: "icon-[lucide--settings]", label: "设置", tip: "设置" },
+    /* 收藏：图标参考 ComfyUI 的「模板」，放在配置下方。 */
+    { key: "media", icon: "icon-[comfy--template]", label: "收藏", tip: "收藏" },
+    /* Saved prompts: a small per-account snippet library in its own drawer,
+       placed right below 收藏. */
+    { key: "prompts", icon: "icon-[lucide--text]", label: "提示词", tip: "提示词收藏" },
+    /* 设置已移出主按钮组，单独构建后挂在贴底的 langGroup（中英切换下方）。 */
   ];
   const PANEL_TITLES = {
     gallery: "资产", nodes: "添加节点", media: "收藏", prompts: "提示词收藏", canvases: "画布管理",
+    lora: "LoRA 模型库",
   };
   /* Cleanup returned by NS.galleryPanel.mount — the gallery installs global
      listeners and body-portaled popovers, so it must be torn down on switch. */
@@ -114,6 +118,10 @@
     lora: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L3 7.5l8.17 5.32a2 2 0 0 0 1.66 0L21 7.5 12.83 2.18Z"/>'
       + '<path d="m3 12.5 8.17 5.32a2 2 0 0 0 1.66 0L21 12.5"/>'
       + '<path d="m3 17.5 8.17 5.32a2 2 0 0 0 1.66 0L21 17.5"/>',
+    /* lucide merge — exact paths from the supplied SVG. */
+    merge: '<path d="m8 6 4-4 4 4" stroke-width="2"/>'
+      + '<path d="M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22" stroke-width="2"/>'
+      + '<path d="m20 22-5-5" stroke-width="2"/>',
     /* lucide zap — a bolt for the one-click cleanup pills. */
     cleanup: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
     /* lucide upload — the 添加资源 / 上传 action in the add-node menu. */
@@ -122,6 +130,7 @@
   };
   const GLYPH_OF = {
     text: "text-pen", image: "image", video: "video", audio: "audio-lines", lora: "lora",
+    text_merge: "merge",
     cleanup_vram: "cleanup", cleanup_ram: "cleanup", cleanup_both: "cleanup",
   };
   const menuGlyphSvg = (name) => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"'
@@ -310,7 +319,6 @@
         /* Reference: the library tab opens the workflow dialog. The API entry
            opens our ported FloatingWindow instead of switching the drawer. */
         if (item.key === "api") { NS.apiConfig?.open?.(); return; }
-        if (item.key === "settings") { NS.settings?.open?.(); return; }
         setPanel(st().panelKey === item.key ? null : item.key);
       });
       group.appendChild(button);
@@ -337,6 +345,30 @@
       NS.i18n?.toggleLang?.();
     });
     langGroup.appendChild(langButton);
+
+    /* 控制台：参考 ComfyUI 侧栏底部的终端按钮（SidebarBottomPanelToggleButton,
+       icon-[ph--terminal-bold] / label 控制台 / tooltip 切换底部面板）。点击
+       toggle 画布内的原生风格日志底部面板（infcanvas-console.js），选中态用
+       宿主原生 .side-bar-button-selected，与宿主 Console 按钮完全一致。位置
+       按宿主 SideToolbar 的 bottomToolbar：控制台在设置上方。 */
+    const consoleItem = { key: "console", icon: "icon-[ph--terminal-bold]", label: "控制台", tip: "切换底部面板" };
+    const consoleButton = makeSideButton(consoleItem);
+    consoleButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      NS.consolePanel?.toggle?.();
+    });
+    langGroup.appendChild(consoleButton);
+
+    /* 设置：参考 ComfyUI，贴底工具栏里排在中英切换下方。单独构建（不再进
+       SIDEBAR_ITEMS / buttons map，因为它开的是独立弹窗而非抽屉面板），但仍
+       走 makeSideButton，所以 sideRefs 会在语言切换时正常重绘文案。 */
+    const settingsItem = { key: "settings", icon: "icon-[lucide--settings]", label: "设置", tip: "设置" };
+    const settingsButton = makeSideButton(settingsItem);
+    settingsButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      NS.settings?.open?.();
+    });
+    langGroup.appendChild(settingsButton);
 
     /* LiteGraphCanvasSplitterOverlay.vue + SidebarTabTemplate.vue +
        SidebarTabCloseButton.vue: the panel appears instantly (no width tween;
@@ -436,6 +468,9 @@
        the root is in the document so its absolute top-left placement and
        first telemetry fetch see a live DOM. */
     try { NS.canvasMonitor?.mount?.(root); } catch (error) { console.warn("[InfCanvas] monitor mount failed", error); }
+    /* ComfyUI console: native-style bottom logs panel (infcanvas-console.js).
+       Mounted under #infcanvas-root so it is removed with the shell on exit. */
+    try { NS.consolePanel?.mount?.(body); } catch (error) { console.warn("[InfCanvas] console mount failed", error); }
 
     const shell = {
       root, tabbar, sidebar, buttons, sideRefs, langButton,
@@ -457,6 +492,7 @@
   function unmountShell() {
     document.querySelectorAll(".ic-menu").forEach((menu) => menu.remove());
     try { NS.canvasMonitor?.unmount?.(); } catch (error) { /* optional */ }
+    try { NS.consolePanel?.unmount?.(); } catch (error) { /* optional */ }
     if (galleryCleanup) { galleryCleanup(); galleryCleanup = null; }
     const shell = st().shell;
     try { shell?.destroyResizer?.(); } catch (error) { /* optional */ }
@@ -641,13 +677,17 @@
        is 添加节点 (or the caller's own title on the wire-release menu), then
        文本 / 图像 / 视频 / 音频 in that fixed order, with the matching
        lucide glyphs. */
-    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both"];
+    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both", "text_merge"];
     const specs = (NS.SPECS || [])
       .filter((entry) => !allowed || allowed.has(entry.type))
       .slice()
       .sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
     menu.appendChild(node("div", "ic-menu-section", options.title || t("添加节点")));
     for (const spec of specs) {
+      /* First five rows are asset kinds; the last four are helper pills. */
+      if (spec.kind === "cleanup_vram" && menu.querySelector(".ic-menu-item")) {
+        menu.appendChild(node("div", "ic-menu-sep"));
+      }
       const button = node("button", "ic-menu-item");
       button.type = "button";
       button.setAttribute("role", "menuitem");
@@ -660,7 +700,14 @@
            DON'T dismiss the frozen wire here — only real cancellation does. */
         closeMenu(false);
         if (options.onPick) { options.onPick(spec, clickEvent); return; }
-        // Same contract as the drop path: node.pos is the top-left corner.
+        /* Menu picks now use the same live placement as a wire drop: the node
+           follows the pointer and the FINAL left click decides both position
+           and group membership. Fall back only if the flow bridge is absent. */
+        const begin = NS.flow?.state?.placementActions?.beginPlacement;
+        if (begin && Array.isArray(anchor.world)) {
+          begin(spec, null, { x: anchor.world[0], y: anchor.world[1] });
+          return;
+        }
         api().addNodeByType(spec.type, anchor.world);
       });
       menu.appendChild(button);
@@ -816,6 +863,8 @@
        previous instance down before its host is cleared (or before switching
        to a different panel), otherwise those listeners pile up on every switch. */
     if (galleryCleanup) { galleryCleanup(); galleryCleanup = null; }
+    closeLoraLightbox();
+    closeLoraFolderMenu();
     shell.panelBody.classList.remove("ic-gallery-host");
     /* BaseWorkflowsSidebarTab's onMounted focuses the SearchInput. Mirror that
        once per switch into the canvas panel — not on every refreshPanels()
@@ -848,6 +897,7 @@
           { ...(key === "media" ? { mode: "media" } : {}), headSlot: shell.headSlot }
       ) || null;
     } else if (key === "nodes") renderNodeLibrary(shell.panelBody);
+    else if (key === "lora") renderLoraLibrary(shell.panelBody);
     else if (key === "prompts") renderPrompts(shell.panelBody);
     else if (key === "canvases") renderCanvasList(shell.panelBody);
   }
@@ -856,6 +906,7 @@
      Vue-driven nodes react on their own through the shared lang ref. */
   function repaintLocale() {
     try { NS.canvasMonitor?.repaintLocale?.(); } catch (error) { /* optional */ }
+    try { NS.consolePanel?.repaintLocale?.(); } catch (error) { /* optional */ }
     const shell = st().shell;
     if (!shell) return;
     for (const [key, ref] of shell.sideRefs) {
@@ -1073,23 +1124,367 @@
     await load();
   }
 
+  /* ---- LoRA 模型库 --------------------------------------------------------
+     列出 ComfyUI 所有 lora 目录下的模型（走后端 folder_paths，含
+     extra_model_paths 共享库），按所在子文件夹自动分类，显示同名预览图。
+     点击卡片只弹出放大预览，不往画布添加任何节点。
+     后端 /infcanvas/loras 返回 items[{name,file,stem,subfolder,category,preview}]；
+     preview 是同名图片的相对路径，经 /infcanvas/lora/preview 代理读取。 */
+  /* Previews may be same-basename images OR videos (.mp4/.webm). The backend
+     already proxies both; the UI must pick the right media element or a video
+     fed to <img> shows as a broken image. */
+  function isLoraVideo(preview) {
+    return !!preview && /\.(mp4|webm)$/i.test(preview);
+  }
+  let loraLightbox = null;
+  function closeLoraLightbox() {
+    if (!loraLightbox) return;
+    loraLightbox.remove();
+    document.removeEventListener("keydown", loraLightbox._onKey, true);
+    loraLightbox = null;
+  }
+  /* Folder dropdown is portaled to #infcanvas-root (fixed) so the panel's
+     overflow never clips it. Track it module-wide so setPanel / lightbox can
+     tear it down (and unbind document listeners) on every panel switch. */
+  let loraFolderMenu = null;
+  function closeLoraFolderMenu() {
+    if (!loraFolderMenu) return;
+    const m = loraFolderMenu;
+    m.el.remove();
+    document.removeEventListener("pointerdown", m.onDown, true);
+    window.removeEventListener("keydown", m.onKey, true);
+    if (m.btn) { m.btn.setAttribute("aria-expanded", "false"); m.btn.dataset.state = "closed"; }
+    loraFolderMenu = null;
+  }
+  function openLoraLightbox(item) {
+    closeLoraFolderMenu();
+    closeLoraLightbox();
+    const overlay = node("div", "ic-lora-lb");
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    const card = node("div", "ic-lora-lb-card");
+    const close = node("button", "ic-lora-lb-close");
+    close.type = "button";
+    close.title = t("关闭");
+    close.innerHTML = '<i class="icon-[lucide--x] size-5"></i>';
+    close.addEventListener("click", closeLoraLightbox);
+    card.appendChild(close);
+    if (item.preview) {
+      const url = backend().loraPreviewUrl(item.preview);
+      if (isLoraVideo(item.preview)) {
+        const vid = node("video", "ic-lora-lb-img");
+        vid.src = url;
+        vid.controls = true;
+        vid.autoplay = true;
+        vid.loop = true;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.preload = "metadata";
+        card.appendChild(vid);
+      } else {
+        const img = node("img", "ic-lora-lb-img");
+        img.src = url;
+        img.alt = item.stem;
+        card.appendChild(img);
+      }
+    } else {
+      card.appendChild(node("div", "ic-lora-lb-noimg icon-[lucide--image-off]"));
+    }
+    const name = node("div", "ic-lora-lb-name", item.stem);
+    name.title = item.name;
+    card.appendChild(name);
+    const meta = node("div", "ic-lora-lb-meta", item.category);
+    card.appendChild(meta);
+    overlay.appendChild(card);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) closeLoraLightbox();
+    });
+    overlay._onKey = (event) => {
+      if (event.key === "Escape") { event.stopPropagation(); closeLoraLightbox(); }
+    };
+    document.addEventListener("keydown", overlay._onKey, true);
+    (document.getElementById("infcanvas-root") || document.body).appendChild(overlay);
+    loraLightbox = overlay;
+  }
+
+  async function renderLoraLibrary(container) {
+    if (!isCurrent(container, "lora")) return;
+    closeLoraLightbox();
+    const panel = panelHeader(null);
+    panel.classList.add("ic-panel--lora");
+    /* Folder Select — native SelectTrigger markup (text + chevron column),
+       opens a fixed menu of all lora folders in alphabetical order. First
+       entry 全部 clears the filter and shows every lora. */
+    const folderBtn = node("button",
+      "relative inline-flex cursor-pointer items-center rounded-lg border " +
+      "border-solid bg-transparent text-foreground transition-all " +
+      "duration-200 ease-in-out outline-none select-none hover:bg-accent " +
+      "h-8 border-border/50 w-full shrink data-[state=open]:border-border");
+    folderBtn.type = "button";
+    folderBtn.dataset.state = "closed";
+    folderBtn.title = t("选择 LoRA 文件夹");
+    folderBtn.setAttribute("aria-label", t("选择 LoRA 文件夹"));
+    folderBtn.setAttribute("aria-haspopup", "menu");
+    folderBtn.setAttribute("aria-expanded", "false");
+    const folderText = node("span", "flex flex-1 items-center overflow-hidden py-2 pl-2 whitespace-nowrap text-xs");
+    const folderLabel = node("span", "truncate", t("全部 LoRA"));
+    folderText.appendChild(folderLabel);
+    const folderChev = node("div", "flex shrink-0 cursor-pointer items-center justify-center pl-3");
+    folderChev.innerHTML = '<i class="flex size-4 items-center justify-center text-muted-foreground">' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></i>';
+    folderBtn.append(folderText, folderChev);
+    const folderWrap = node("div", "ic-lora-folder");
+    folderWrap.appendChild(folderBtn);
+    panel.appendChild(folderWrap);
+
+    /* Search box (below the folder Select) matches the native SearchInput. */
+    const search = node("div", "ic-search");
+    search.appendChild(node("i", "ic-search-glyph icon-[lucide--search] size-4"));
+    const searchInput = node("input", "ic-search-input");
+    searchInput.type = "text";
+    searchInput.placeholder = t("搜索 LoRA...");
+    searchInput.setAttribute("aria-label", t("搜索 LoRA"));
+    search.appendChild(searchInput);
+    panel.appendChild(search);
+
+    const listWrap = node("div", "ic-lora-list");
+    panel.appendChild(listWrap);
+    container.replaceChildren(panel);
+
+    let items = [];
+    let loading = true;
+    let loadingError = "";
+    let selectedFolder = "";   /* "" = 全部 */
+
+    function render() {
+      if (!isCurrent(container, "lora")) return;
+      listWrap.replaceChildren();
+      if (loading) {
+        listWrap.appendChild(node("div", "ic-empty", t("正在加载 LoRA 模型…")));
+        return;
+      }
+      if (loadingError) {
+        listWrap.appendChild(node("div", "ic-empty", loadingError));
+        return;
+      }
+      if (!items.length) {
+        listWrap.appendChild(node("div", "ic-empty", t("未找到 LoRA 模型。")));
+        return;
+      }
+      const query = (searchInput.value || "").trim().toLowerCase();
+      const matched = items.filter((it) =>
+        (!selectedFolder || it.category === selectedFolder)
+        && (!query
+          || it.stem.toLowerCase().includes(query)
+          || it.category.toLowerCase().includes(query)));
+      if (!matched.length) {
+        listWrap.appendChild(node("div", "ic-empty", t("没有匹配的 LoRA。")));
+        return;
+      }
+      /* One flat grid — the folder dropdown already provides the grouping,
+         so no per-group category heading/divider is shown above the cards. */
+      const grid = node("div", "ic-lora-grid");
+      for (const it of matched) {
+        const card = node("button", "ic-lora-card");
+        card.type = "button";
+        card.title = it.name;
+        /* Drag onto the canvas: an empty spot seeds a new LoRA stack with this
+           lora; dropping on an existing stack appends it. Uses the same MIME
+           drag contract as the asset cards (handled in infcanvas-core.js). */
+        card.draggable = true;
+        card.addEventListener("dragstart", (ev) => {
+          if (!ev.dataTransfer) return;
+          ev.dataTransfer.setData("application/x-infcanvas-lora", JSON.stringify({
+            name: it.name, stem: it.stem, category: it.category,
+          }));
+          ev.dataTransfer.effectAllowed = "copy";
+        });
+        const thumb = node("span", "ic-lora-thumb");
+        if (it.preview) {
+          const url = backend().loraPreviewUrl(it.preview);
+          if (isLoraVideo(it.preview)) {
+            /* Short clips: stay on a still first frame until hover, then play
+               on loop; leaving pauses and rewinds so the grid stays quiet. */
+            const vid = node("video", "ic-lora-thumb-img");
+            vid.src = url;
+            vid.draggable = false;
+            vid.muted = true;
+            vid.playsInline = true;
+            vid.loop = true;
+            vid.preload = "metadata";
+            vid._hoverPlaying = false;
+            const poster = () => { if (!vid._hoverPlaying) { try { vid.currentTime = 0.1; } catch (e) {} } };
+            vid.addEventListener("loadeddata", poster);
+            card.addEventListener("mouseenter", () => {
+              vid._hoverPlaying = true;
+              const p = vid.play();
+              if (p && typeof p.catch === "function") p.catch(() => {});
+            });
+            card.addEventListener("mouseleave", () => {
+              vid._hoverPlaying = false;
+              vid.pause();
+              poster();
+            });
+            thumb.appendChild(vid);
+            thumb.appendChild(node("i", "ic-lora-play-badge icon-[lucide--play]"));
+          } else {
+            const img = node("img", "ic-lora-thumb-img");
+            img.loading = "lazy";
+            img.src = url;
+            img.draggable = false;
+            img.alt = it.stem;
+            img.addEventListener("error", () => thumb.classList.add("is-broken"));
+            thumb.appendChild(img);
+          }
+        } else {
+          thumb.classList.add("is-empty");
+          thumb.appendChild(node("i", "icon-[lucide--image-off]"));
+        }
+        card.appendChild(thumb);
+        const label = node("span", "ic-lora-name", it.stem);
+        card.appendChild(label);
+        card.addEventListener("click", () => openLoraLightbox(it));
+        grid.appendChild(card);
+      }
+      listWrap.appendChild(grid);
+    }
+
+    searchInput.addEventListener("input", render);
+
+    async function load() {
+      loading = true;
+      loadingError = "";
+      render();
+      try {
+        const data = await backend().loras();
+        items = Array.isArray(data?.items) ? data.items : [];
+      } catch (error) {
+        items = [];
+        loadingError = t("加载 LoRA 失败：") + esc(error?.message || error);
+      }
+      loading = false;
+      render();
+    }
+
+    /* Build the fixed folder menu from whatever the latest load returned.
+       Folder names are sorted alphabetically (localeCompare); 全部 is first. */
+    const openFolderMenu = () => {
+      closeLoraFolderMenu();
+      const menu = node("div", "ic-lora-fmenu z-overlay rounded-lg p-2 bg-background " +
+        "text-foreground border border-solid shadow-md outline-none");
+      menu.setAttribute("role", "menu");
+      const entry = (label, value) => {
+        const active = selectedFolder === value;
+        const item = node("button", "relative flex w-full cursor-pointer items-center " +
+          "justify-between gap-3 rounded-sm border-0 px-2 py-3 text-left text-sm " +
+          "select-none outline-none focus:bg-accent " +
+          (active ? "bg-muted hover:bg-muted" : "bg-transparent hover:bg-accent"), label);
+        item.type = "button";
+        item.dataset.state = active ? "checked" : "unchecked";
+        item.setAttribute("role", "menuitem");
+        if (active) {
+          const check = node("i", "flex size-4 shrink-0 items-center justify-center text-foreground");
+          check.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" ' +
+            'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M20 6 9 17l-5-5"/></svg>';
+          item.appendChild(check);
+        }
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          closeLoraFolderMenu();
+          if (!active) {
+            selectedFolder = value;
+            folderLabel.textContent = value || t("全部 LoRA");
+            render();
+          }
+        });
+        menu.appendChild(item);
+      };
+      entry(t("全部 LoRA"), "");
+      const folders = [...new Set(items.map((it) => it.category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      for (const folder of folders) entry(folder, folder);
+      (document.getElementById("infcanvas-root") || document.body).appendChild(menu);
+      const onDown = (event) => {
+        if (menu.contains(event.target) || folderBtn.contains(event.target)) return;
+        closeLoraFolderMenu();
+      };
+      const onKey = (event) => { if (event.key === "Escape") { event.stopPropagation(); closeLoraFolderMenu(); } };
+      document.addEventListener("pointerdown", onDown, true);
+      window.addEventListener("keydown", onKey, true);
+      folderBtn.setAttribute("aria-expanded", "true");
+      folderBtn.dataset.state = "open";
+      loraFolderMenu = { el: menu, btn: folderBtn, onDown, onKey };
+      const r = folderBtn.getBoundingClientRect();
+      const w = Math.max(Math.round(r.width), 192);
+      const h = menu.offsetHeight;
+      menu.style.width = w + "px";
+      menu.style.left = Math.round(Math.min(Math.max(8, r.left), innerWidth - w - 8)) + "px";
+      menu.style.top = (r.bottom + h > innerHeight - 8
+        ? Math.max(8, Math.round(r.top - h - 6))
+        : Math.round(r.bottom + 6)) + "px";
+    };
+    folderBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (loraFolderMenu && loraFolderMenu.btn === folderBtn) closeLoraFolderMenu();
+      else openFolderMenu();
+    });
+
+    /* Header refresh immediately left of the native close X, matching the
+       资产 panel's refresh. Use the SHELL's native button classes (identical
+       to the close button) instead of .xog-* — the gallery stylesheet is only
+       injected once a gallery panel opens, so LoRA cannot rely on it. */
+    const shell = st().shell;
+    if (shell?.headSlot) {
+      const refresh = node("button",
+        "relative inline-flex cursor-pointer touch-manipulation appearance-none " +
+        "items-center justify-center gap-2 border-none font-inter text-sm " +
+        "font-medium whitespace-nowrap transition-colors focus-visible:ring-1 " +
+        "focus-visible:ring-ring focus-visible:outline-none " +
+        "disabled:pointer-events-none disabled:opacity-50 " +
+        "bg-transparent text-muted-foreground hover:bg-accent shrink-0 size-8 rounded-lg");
+      refresh.type = "button";
+      refresh.title = t("刷新 LoRA 列表");
+      refresh.setAttribute("aria-label", t("刷新 LoRA 列表"));
+      refresh.innerHTML = '<i class="icon-[lucide--refresh-cw] size-4"></i>';
+      refresh.addEventListener("click", () => { load(); });
+      shell.headSlot.replaceChildren(refresh);
+    }
+
+    await load();
+  }
+
   function renderNodeLibrary(container) {
     if (!isCurrent(container, "nodes")) return;
     const panel = panelHeader(null);
     /* One flat list, no role subheadings / row descriptions / footer hint:
-       the drawer is just four rows in the fixed 文本 / 图像 / 视频 / 音频
-       order, matching the double-click menu (showNodePickMenu) — including
-       the same four lucide glyphs. */
-    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both"];
+       the drawer follows the same fixed order and lucide glyphs as the
+       double-click menu (showNodePickMenu), with the same 5 / 4 divider. */
+    const ORDER = ["text", "image", "video", "audio", "lora", "cleanup_vram", "cleanup_ram", "cleanup_both", "text_merge"];
     const list = node("div", "ic-list");
     for (const kind of ORDER) {
       const spec = (NS.SPECS || []).find((entry) => entry.kind === kind);
       if (!spec) continue;
+      if (kind === "cleanup_vram" && list.childElementCount) {
+        list.appendChild(node("div", "ic-menu-sep"));
+      }
       const button = node("button", "ic-item");
       button.type = "button";
       button.innerHTML = menuGlyphSvg(GLYPH_OF[spec.kind] || "image")
         + `<span class="ic-item-title">${esc(t(spec.title))}</span>`;
-      button.addEventListener("click", () => api().addNodeByType(spec.type));
+      button.addEventListener("click", () => {
+        /* Same placement contract as the canvas menu: start at the last
+           canvas pointer (or viewport centre), then let the user move and
+           left-click to commit both the position and the group. */
+        const begin = NS.flow?.state?.placementActions?.beginPlacement;
+        if (begin) {
+          const p = api().pastePoint();
+          begin(spec, null, { x: p.x, y: p.y });
+          return;
+        }
+        api().addNodeByType(spec.type);
+      });
       list.appendChild(button);
     }
     panel.appendChild(list);

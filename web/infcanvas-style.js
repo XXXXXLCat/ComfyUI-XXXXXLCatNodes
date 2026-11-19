@@ -65,6 +65,14 @@ html.infcanvas-mode .z-toast {
 }
 html.infcanvas-mode body > div.z-toast { z-index: 2147483600 !important; }
 html.infcanvas-mode .z-toast * { visibility: visible !important; }
+/* Toast cards stay 100% ComfyUI-native (we only call the host toast store).
+   The host dock is an <ol class="z-toast ... fixed top-20 right-..."> anchored
+   to the TOP-right. Re-anchor that same dock to the BOTTOM-right in canvas
+   mode; the cards themselves keep their native classes untouched. */
+html.infcanvas-mode ol.z-toast {
+  top: auto !important;
+  bottom: 1.5rem !important;
+}
 html.infcanvas-mode .litemenu,
 html.infcanvas-mode .graphdialog,
 html.infcanvas-mode .litegraph-contextmenu {
@@ -300,6 +308,33 @@ html.infcanvas-mode .litegraph-contextmenu {
 #infcanvas-root.has-panel #infcanvas-panel > .sidebar-content-container { opacity: 1; }
 #infcanvas-panel-body { min-height: 0; }
 
+/* Unify every side-panel scrollbar with the 资产 panel's native .scrollbar-custom
+   (history_gallery.js): thin scrollbar-color + a 10px webkit bar whose thumb is
+   var(--muted) with a 2px transparent border (6px visual) and a pill radius.
+   Re-stated here because the .xog-* stylesheet is only injected once the
+   资产/收藏 panel opens — LORA and the other panels never see it.
+   scrollbar-color inherits from the root, but scrollbar-width does NOT compute
+   as inherited in Chrome, so it must be set on each scroll container directly
+   (same way the 资产 panel sets it on .xog-body). Webkit pseudo-elements are
+   matched on all descendants via the space before the selector. */
+#infcanvas-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted, var(--xog-muted)) transparent;
+}
+#infcanvas-panel .ic-list,
+#infcanvas-panel .ic-lora-list {
+  scrollbar-width: thin;
+}
+#infcanvas-panel ::-webkit-scrollbar { background-color: #0000; width: 10px; height: 10px; }
+#infcanvas-panel ::-webkit-scrollbar-track { background: transparent; }
+#infcanvas-panel ::-webkit-scrollbar-thumb {
+  background: var(--muted, var(--xog-muted));
+  border: 2px solid #0000;
+  border-radius: 9999px;
+}
+#infcanvas-panel ::-webkit-scrollbar-thumb:hover { background: var(--muted, var(--xog-muted)); }
+#infcanvas-panel ::-webkit-scrollbar-corner { background: transparent; }
+
 /* Gallery in the canvas drawer: pin the header and scroll ONLY the card grid,
    so the thin .xog scrollbar starts below the search row (ComfyUI native
    media-assets behaviour) instead of spanning the whole drawer. Scoped to the
@@ -467,6 +502,10 @@ html.infcanvas-mode .litegraph-contextmenu {
 #infcanvas-panel:focus-within .ic-tool-buttons { width: auto; opacity: 1; }
 /* Button variant=muted-textonly size=icon: size-8 rounded-lg, lucide 16px. */
 #infcanvas-panel [data-testid="workflows-refresh-button"] i { font-size: 16px; }
+/* Header slot (immediately left of the close X). gallery's own CSS defines
+   this too, but LORA doesn't inject that stylesheet — provide the same
+   display:contents here so its refresh button sits directly in the title row. */
+#infcanvas-panel .xog-head-slot { display: contents; }
 .ic-canvas-list { gap: 0; padding: 0 8px 16px; }
 /* TextDivider.vue: div.flex.items-center > span.mr-2.shrink-0 + div.grow
    .border-t.border-dashed.  MEASURED in the native panel: the label span has
@@ -564,6 +603,8 @@ html.infcanvas-mode .litegraph-contextmenu {
    stroke is baked into the path so it stays 16px at any canvas zoom. */
 .ic-menu-icon > svg:first-child { display: block; width: 16px; height: 16px; }
 .ic-menu-label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Right-aligned hint on an anchored menu row (e.g. the frame menu's time). */
+.ic-menu-value { flex: 0 0 auto; margin-left: 12px; color: var(--ic-soft, #8a8a8a); font-size: 12px; }
 .ic-menu-sep { height: 1px; margin: 4px 0; background: var(--ic-border-50); }
 /* Double-click node menu (#infcanvas-node-menu): MenuLabel.vue's caption --
    12px, muted, 500 weight, px-2 -- plus a narrower width than the tab menu. */
@@ -625,6 +666,190 @@ html.infcanvas-mode .litegraph-contextmenu {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
   overflow: hidden; line-height: 16px; max-height: 48px;
   white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* ---- LORA 模型库 drawer ----
+   Geometry only; colours/spacing tokens come from the host stylesheet. The
+   grid is two columns so each card reads as a preview poster + truncated name. */
+.ic-panel--lora { gap: 8px; padding: 8px 0 16px; height: 100%; min-height: 0; }
+/* Folder Select sits first (just under the title bar), search below it. */
+.ic-lora-folder { flex: 0 0 auto; margin: 0 16px; }
+/* Search box: neutralise the global .ic-search margin (8px) on both sides.
+   Folder above is spaced by the panel gap alone (8px); the list below gets an
+   extra 8px via margin-bottom so the grid does not crowd the search box. */
+.ic-panel--lora > .ic-search { margin: 0 16px 8px; }
+/* The opened folder menu is portaled + fixed, never clipped by the panel. */
+.ic-lora-fmenu { position: fixed; max-height: min(60vh, 460px); overflow-y: auto; z-index: 10007; }
+/* Match the 资产 grid's spacing stack: grid padding 8 + card padding 8 keeps
+   the first thumbnail 16px from the panel edge (aligned with the 16px search
+   box), while the card padding gives 24px between adjacent thumbnails
+   (8 right + 8 gap + 8 left) exactly like .xog-grid/.xog-card. */
+.ic-lora-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 0 8px 12px;
+}
+.ic-lora-divider { margin-top: 8px; }
+.ic-lora-count {
+  flex: 0 0 auto; margin-left: 8px; font-size: 12px; line-height: 16px;
+  color: var(--muted-foreground, #8a8a8a);
+}
+.ic-lora-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+}
+/* Card matches the 资产 panel's .xog-card: 8px padding + 8px gap between
+   thumbnail and name. Padding is what opens 24px between neighbouring
+   thumbnails (with the grid's 8px gap); without it they sit just 8px apart. */
+.ic-lora-card {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--foreground, #ffffff);
+  text-align: left; cursor: pointer;
+}
+.ic-lora-thumb {
+  position: relative; display: block; width: 100%; aspect-ratio: 1 / 1;
+  overflow: hidden; border-radius: 8px; background: var(--secondary-background, #262729);
+}
+.ic-lora-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Native card motion: images ease to 1.05 on hover (cropped by the thumb's
+   overflow:hidden), both directions; video previews stay still so their short
+   loop reads clean. */
+img.ic-lora-thumb-img { transition: transform 0.3s ease; }
+.ic-lora-card:hover img.ic-lora-thumb-img { transform: scale(1.05); }
+/* Video previews use the same <video> element in the grid; a small play badge
+   marks them as playable (the lightbox opens a controlling, looping player). */
+.ic-lora-play-badge {
+  position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px;
+  padding: 4px; border-radius: 9999px; color: var(--foreground, #ffffff);
+  background: rgba(0, 0, 0, .6);
+}
+.ic-lora-thumb.is-empty, .ic-lora-thumb.is-broken {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted-foreground, #8a8a8a);
+}
+.ic-lora-thumb.is-empty i, .ic-lora-thumb.is-broken i { width: 32px; height: 32px; }
+/* Name matches the 资产 panel's .xog-name: 14px/20px, single-line ellipsis,
+   same foreground token chain (xog vars are not injected for this panel). */
+.ic-lora-name {
+  display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 14px; line-height: 20px;
+  color: var(--text-primary, var(--fg-color, #e8e8e8));
+}
+/* Hover tint covers the whole card (thumbnail + name) like the 资产 panel's
+   .xog-card:hover. The xog variable is not injected here, so use its exact
+   underlying token chain (modal-card-background-hovered at 20% over transparent). */
+.ic-lora-card:hover {
+  background: color-mix(in oklab, var(--modal-card-background-hovered, var(--secondary-background-hover, #313235)) 20%, transparent);
+}
+
+/* Browse-only lightbox. Portaled under #infcanvas-root so it always stacks
+   above the drawer and the graph, and matches the canvas shell's z-scale. */
+.ic-lora-lb {
+  position: fixed; inset: 0; z-index: 30000; display: flex;
+  align-items: center; justify-content: center; padding: 40px;
+  background: rgba(0, 0, 0, .72);
+}
+.ic-lora-lb-card {
+  position: relative; display: flex; flex-direction: column; gap: 12px;
+  max-width: min(720px, 90vw); max-height: 90vh; padding: 16px;
+  border-radius: 12px; background: var(--comfy-menu-bg, var(--dialog-surface, #171718));
+  color: var(--foreground, #ffffff); box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+}
+.ic-lora-lb-img {
+  display: block; max-width: 100%; max-height: 72vh; object-fit: contain;
+  border-radius: 8px; background: var(--secondary-background, #262729);
+}
+.ic-lora-lb-noimg {
+  display: flex; align-items: center; justify-content: center;
+  width: 480px; max-width: 100%; height: 320px; border-radius: 8px;
+  background: var(--secondary-background, #262729);
+  color: var(--muted-foreground, #8a8a8a);
+}
+.ic-lora-lb-noimg::before { width: 48px; height: 48px; }
+.ic-lora-lb-name { font-size: 16px; font-weight: 600; line-height: 20px; word-break: break-all; }
+.ic-lora-lb-meta { font-size: 12px; line-height: 16px; color: var(--muted-foreground, #8a8a8a); }
+.ic-lora-lb-close {
+  position: absolute; top: 8px; right: 8px; display: inline-flex;
+  align-items: center; justify-content: center; width: 32px; height: 32px;
+  padding: 0; border: 0; border-radius: 8px; background: transparent;
+  color: var(--muted-foreground, #8a8a8a); cursor: pointer;
+}
+.ic-lora-lb-close:hover { background: var(--accent, #313235); color: var(--foreground, #ffffff); }
+
+
+/* ---- 11. ComfyUI console: bottom logs panel (infcanvas-console.js) -------
+   Mirrors the native BottomPanel -> LogsTerminal/xterm. Native classes:
+   BottomPanel.vue TabsList variant=panel (w-full shrink-0) + a LOGS trigger
+   uppercased; BaseTerminal.vue root is relative/size-full/overflow-hidden
+   bg-neutral-900 with inner p-2, xterm default palette. The panel sits at
+   the bottom of the graph area (right of the rail), above the stage, and is
+   shown only when .is-open is set by the side-toolbar console button. */
+#infcanvas-console {
+  position: absolute; left: var(--sidebar-width, 56px); right: 0; bottom: 0;
+  z-index: 900; display: none; flex-direction: column;
+  height: 260px; min-height: 120px; max-height: 70%;
+  background: var(--background, #171718);
+  border-top: 1px solid var(--ic-border-50);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, .35);
+  color: var(--ic-text, #ffffff);
+  font-family: inherit;
+}
+#infcanvas-console.is-open { display: flex; }
+/* The side panel is an overlay (has-panel on #infcanvas-root) that covers the
+   stage's left edge; shift the console right by the live panel width so it is
+   never hidden under the drawer. Both vars live on the root, inherited here. */
+#infcanvas-root.has-panel #infcanvas-console {
+  left: calc(var(--sidebar-width, 56px) + var(--infcanvas-panel-width, 312px));
+}
+/* TabsList variant="panel": thin bottom-bordered strip, uppercase triggers. */
+.ic-console-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  flex: 0 0 auto; height: 36px; padding: 0 8px 0 12px; gap: 8px;
+  border-bottom: 1px solid var(--ic-border-50);
+  background: var(--ic-panel, #262729);
+}
+.ic-console-tab {
+  display: inline-flex; align-items: center; height: 100%; padding: 0 4px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  color: var(--ic-text, #ffffff);
+  border-bottom: 2px solid var(--primary, #0b8ce9);
+}
+.ic-console-tab[data-state="inactive"] {
+  color: var(--ic-soft, #8a8a8a); border-bottom-color: transparent;
+}
+.ic-console-ops { display: flex; align-items: center; gap: 2px; }
+.ic-console-op {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; margin: 0;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--ic-soft, #8a8a8a); cursor: pointer;
+  font-size: 13px; line-height: 1;
+  transition: background .15s, color .15s;
+}
+.ic-console-op:hover { background: var(--ic-hover, rgba(60, 61, 66, .55)); color: var(--ic-text, #ffffff); }
+.ic-console-op .pi { font-size: 13px; }
+/* BaseTerminal.vue: bg-neutral-900 + p-2, xterm monospace text. */
+.ic-console-screen {
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+  padding: 8px;
+  background: #171717;
+  color: #cccccc;
+  font-family: "DejaVu Sans Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px; line-height: 1.45;
+  white-space: pre-wrap; overflow-wrap: break-word;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted, #3c3d42) transparent;
+}
+.ic-console-screen::-webkit-scrollbar { width: 10px; height: 10px; }
+.ic-console-screen::-webkit-scrollbar-track { background: transparent; }
+.ic-console-screen::-webkit-scrollbar-thumb {
+  background: var(--muted, #3c3d42); background-clip: padding-box;
+  border: 2px solid transparent; border-radius: 9999px;
+}
+/* The bottom-right floating controls (mouse/zoom/minimap/grid row) is pinned
+   with the Tailwind bottom-0 utility. Ride it above the open console too,
+   using the same --ic-console-h the console publishes on #infcanvas-body.
+   ID selector wins over the single-class utility regardless of sheet order. */
+#infcanvas-controls {
+  bottom: var(--ic-console-h, 0px);
 }
 `;
 })();
