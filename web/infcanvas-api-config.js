@@ -122,6 +122,13 @@
 .ac-params.is-sorting .ac-prow { cursor:grab; }
 .ac-prow.is-dragging { opacity:.45; }
 .ac-prow.is-drop { box-shadow:inset 0 0 0 1px var(--primary, #0b8ce9); }
+/* Standalone text boxes reorder alongside the card rows. The grip column is
+   reserved even when hidden so boxes don't shift when sort mode toggles. */
+.ac-prompt-row { display:flex; align-items:stretch; gap:0; }
+.ac-prompt-row > .icn__gpa-box { flex:1; min-width:0; }
+.ac-params.is-sorting .ac-prompt-row { cursor:grab; }
+.ac-prompt-row.is-dragging { opacity:.45; }
+.ac-prompt-row.is-drop .icn__gpa-box { box-shadow:inset 0 0 0 1px var(--primary, #0b8ce9); }
 /* Widget popups (field dropdown / value-control chooser). Skin is the node's
    OWN listbox / chooser (icn__gpa-fsel / icn__gpa-modes, see infcanvas-flow.js)
    so the menus are pixel-identical. Only re-anchored to the viewport because
@@ -516,6 +523,12 @@
     workflows: [], currentName: "", currentWorkflow: null,
     dragIndex: -1, dropIndex: -1,
     fields: [], fieldsDirty: false, inspecting: "",
+    /* Baseline copy of S.fields as last loaded/saved. The right-hand panel's
+       「保存为默认参数」stays disabled until the live fields differ from this
+       snapshot; 「取消」(the revert button, NOT the sort-mode cancel) restores
+       it. Deep-compared so every edit entry point (setFieldDefault, control
+       mode, inspector) is covered without a fragile per-entry dirty flag. */
+    paramSnapshot: null,
     /* Exposed-parameter order editing (right panel). */
     orderEditing: false, orderSnapshot: null, orderDrag: -1, orderDrop: -1,
     /* The 1:1 screenshot shows all 11 fields expanded ("隐藏高级输入" footer
@@ -842,10 +855,19 @@
     D.promptBox = el("div", "icn__gpa-inputs");
     D.promptBox.hidden = true;
 
-    /* Right-hand group of the toolbar: 保存为默认参数 + 调整顺序. In sort mode
-       these swap to 确定顺序 + 取消 (visibility driven by renderParamOrder()). */
+    /* Right-hand group of the toolbar: 取消修改(恢复参数) + 保存为默认参数 + 调整顺序.
+       取消修改 sits immediately LEFT of 保存为默认参数 and only appears once a
+       parameter has been edited; clicking it restores the saved baseline.
+       In sort mode these swap to 确定顺序 + 取消 (visibility driven by
+       syncParamActions() / renderParamOrder()). */
+    D.paramsRevert = el("button", BTN_SECONDARY, t("取消修改"));
+    D.paramsRevert.type = "button";
+    D.paramsRevert.hidden = true;
+    D.paramsRevert.title = t("恢复上次保存的默认参数");
+    D.paramsRevert.addEventListener("click", revertDefaultParams);
     D.paramsSave = el("button", BTN_SECONDARY, t("保存为默认参数"));
     D.paramsSave.type = "button";
+    D.paramsSave.disabled = true;
     D.paramsSave.addEventListener("click", saveDefaultParams);
     D.paramsEdit = el("button", BTN_SECONDARY, t("调整顺序"));
     D.paramsEdit.type = "button";
@@ -855,8 +877,9 @@
     D.paramsConfirm.addEventListener("click", confirmParamOrder);
     D.paramsCancel = el("button", BTN_SECONDARY, t("取消"));
     D.paramsCancel.type = "button";
+    D.paramsCancel.title = t("取消调整顺序");
     D.paramsCancel.addEventListener("click", cancelParamOrder);
-    actions.append(D.paramsSave, D.paramsEdit, D.paramsConfirm, D.paramsCancel);
+    actions.append(D.paramsRevert, D.paramsSave, D.paramsEdit, D.paramsConfirm, D.paramsCancel);
     D.params.append(D.paramsCard, D.promptBox);
     contentRow.appendChild(D.params);
 
@@ -1211,7 +1234,8 @@
        having to tick a dozen rows first. Nothing is written into apiValues, so
        a workflow that nobody edits keeps generating exactly as before. */
     const added = await detectFields();
-    if (!added.length || S.currentWorkflow !== workflow) return;
+    if (S.currentWorkflow !== workflow) return;   /* user switched mid-load */
+    if (!added.length) { snapshotParams(); return; }
     S.fields = [...S.fields, ...added];
     S.autoKeys = new Set(added.map((field) => fieldKey(field.nodeId, field.key)));
     try {
@@ -1226,6 +1250,9 @@
          user save them once the backend is up. */
       S.fieldsDirty = true;
     }
+    /* Baseline = freshly loaded (and possibly auto-saved) fields. Nothing in
+       here counts as a user edit, so 保存为默认参数 starts disabled. */
+    snapshotParams();
   }
 
   function renderHead() {
@@ -1353,6 +1380,9 @@
         jsonOptions("PUT", { fields: S.fields }));
       S.fields = data.fields || [];
       S.fieldsDirty = false;
+      /* Saved state becomes the new baseline: 保存为默认参数 disables again
+         and the left 取消(revert) hides until the next edit. */
+      snapshotParams();
       /* 默认值可能被后端夹进 min/max（或者解析成了别的写法），以落盘值为准
          回填，免得输入框还显示一个早就被改掉的数。 */
       for (const entry of entries) {
@@ -1589,6 +1619,38 @@
      only extra is the grip column, revealed while reordering. */
   const FIELD_VALUE = (field) => (field && field.default !== undefined && field.default !== null
     ? field.default : (field?.options?.[0] ?? ""));
+
+  /* ---- default-parameter baseline / dirty tracking --------------------
+     The right panel edits S.fields in place (default values, control modes,
+     label/type via the inspector). We keep a deep snapshot of the last
+     loaded/saved state so 「保存为默认参数」can stay disabled until something
+     actually changed, and 「取消」can restore the exact prior parameters.
+
+     Only the persisted field attributes matter for "changed"; React-style
+     render churn never enters S.fields, so a plain structural JSON compare is
+     both cheap (tens of rows) and exact. */
+  function snapshotParams() {
+    S.paramSnapshot = JSON.parse(JSON.stringify(S.fields));
+  }
+  function paramsChanged() {
+    if (!S.paramSnapshot) return false;
+    try {
+      return JSON.stringify(S.fields) !== JSON.stringify(S.paramSnapshot);
+    } catch (_) { return false; }
+  }
+  /* Restore the last loaded/saved parameter baseline. Returns true if a
+     snapshot existed (so callers know a revert actually happened). */
+  function revertDefaultParams() {
+    if (!S.paramSnapshot) return false;
+    S.fields = JSON.parse(JSON.stringify(S.paramSnapshot));
+    S.fieldsDirty = false;
+    /* renderHead() -> renderParamOrder() -> renderPromptArea() rebuilds every
+       control (including the prompt textarea) from the restored fields. */
+    renderHead();
+    updateExposedCounts();
+    return true;
+  }
+
   /* Mutating a field object in place would also mutate orderSnapshot's shallow
      copy (see toggleParamOrder) and lose the ability to cancel. So every edit
      REPLACES the array slot with a new object carrying the new default. */
@@ -1600,9 +1662,10 @@
     S.fields = next;
     S.fieldsDirty = true;
     /* The prompt textarea edits while typing — rebuilding the list here would
-       steal focus on every keystroke. Its value is already in the DOM. */
+       steal focus on every keystroke. Its value is already in the DOM; only the
+       action buttons need refreshing (save enabled, revert visible). */
     if (!silent) renderParamOrder();
-    else D.paramsSave && (D.paramsSave.disabled = false);
+    else syncParamActions();
   };
   /* Numeric controls step by the field's own step, clamped to min/max. */
   const stepFieldNum = (field, dir) => {
@@ -1889,36 +1952,56 @@
     ? field.advanced
     : !BASIC_LABELS.includes(String(field?.label || "").trim()));
 
-  /* The prompt is the node's OWN main text area, never a row in the API 参数
-     card. This is the exact mirror of infcanvas-flow.js's promptField(): it
-     matches the exposed field labelled 提示词/prompt (or a prompt-ish key),
-     excluding negative/系统 prompts. Returns the field with its S.fields index. */
-  function findPromptField() {
+  /* EVERY exposed multiline-text field gets its own large standalone box — we
+     no longer pick just one. Whatever the user exposes (by type text/textarea)
+     is rendered below the card, in S.fields order, each bound to its own index.
+     Names are irrelevant (no 提示词 lock), so 风格描述 / 歌词 / 描述 all work,
+     and re-ordering the boxes re-orders the underlying fields. Returns
+     [{ field, index }] for every text/textarea field.
+     NOTE: infcanvas-flow.js has its own promptField() with the old single-box
+     name lock; keep the two in sync if that one is changed too. */
+  function findPromptFields() {
     const isText = (f) => f?.type === "text" || f?.type === "textarea";
-    const texts = S.fields.map((field, index) => ({ field, index })).filter((e) => isText(e.field));
-    return texts.find((e) => /^(提示词|prompt)$/i.test(String(e.field.label || "").trim()))
-      || texts.find((e) => !/negative|负面|system|系统|task[\s_-]?prompt/i.test(String(e.field.label || ""))
-        && /^(prompt|positive|positive_prompt|prompt_text|caption|text)$/i.test(String(e.field.key || "")))
-      || null;
+    return S.fields.map((field, index) => ({ field, index })).filter((e) => isText(e.field));
   }
 
-  /* Standalone prompt textarea below the card, using the node panel's exact
-     classes (icn__gpa-inputs/box/label/area) so it is pixel-identical. */
+  /* Standalone textareas below the card, one per exposed text/textarea field,
+     using the node panel's exact classes (icn__gpa-inputs/box/label/area) so
+     each is pixel-identical. In sort mode each row grows a grip and joins the
+     SAME global-index drag reordering the card rows use. */
   function renderPromptArea() {
     if (!D.promptBox) return;
-    const hit = findPromptField();
+    const hits = findPromptFields();
     D.promptBox.replaceChildren();
-    if (!hit) { D.promptBox.hidden = true; return; }
+    if (!hits.length) { D.promptBox.hidden = true; return; }
     D.promptBox.hidden = false;
-    const box = el("label", "icn__gpa-box");
-    box.appendChild(el("span", "icn__gpa-label", hit.field.label || t("提示词")));
-    const area = el("textarea", "icn__gpa-area icn__gpa-area--a");
-    area.value = String(FIELD_VALUE(hit.field) ?? "");
-    area.spellcheck = false;
-    area.placeholder = t("描述你想要生成的内容…");
-    area.addEventListener("input", (event) => setFieldDefault(hit.index, event.target.value, true));
-    box.appendChild(area);
-    D.promptBox.appendChild(box);
+    const editing = S.orderEditing;
+    hits.forEach(({ field, index }) => {
+      const row = el("div", "ac-prompt-row"
+        + (!editing && S.orderDrag === index ? " is-dragging" : "")
+        + (editing && S.orderDrop === index && S.orderDrag !== index ? " is-drop" : ""));
+      row.dataset.index = String(index);
+      const grip = el("div", "ac-prow-grip");
+      grip.innerHTML = ICO.grip;
+      row.appendChild(grip);
+      const box = el("label", "icn__gpa-box");
+      box.appendChild(el("span", "icn__gpa-label", field.label || t("提示词")));
+      const area = el("textarea", "icn__gpa-area icn__gpa-area--a");
+      area.value = String(FIELD_VALUE(field) ?? "");
+      area.spellcheck = false;
+      area.placeholder = t("描述你想要生成的内容…");
+      area.addEventListener("input", (event) => setFieldDefault(index, event.target.value, true));
+      box.appendChild(area);
+      row.appendChild(box);
+      if (editing) {
+        row.draggable = true;
+        row.addEventListener("dragstart", (event) => onOrderDragStart(event, index));
+        row.addEventListener("dragover", (event) => onOrderDragOver(event, index));
+        row.addEventListener("drop", (event) => onOrderDrop(event, index));
+        row.addEventListener("dragend", onOrderDragEnd);
+      }
+      D.promptBox.appendChild(row);
+    });
   }
 
   function toggleParamsAdvanced() {
@@ -1926,30 +2009,44 @@
     renderParamOrder();
   }
 
+  /* Refresh just the parameter action buttons without rebuilding the field
+     rows (used on every keystroke of the prompt textarea, where a full render
+     would steal focus). Sort mode wins: while sorting only 确定顺序/取消顺序
+     are shown. Otherwise 保存为默认参数 is enabled only when params actually
+     differ from the baseline, and 取消(恢复参数) mirrors that state on its left. */
+  function syncParamActions() {
+    if (!D.paramsSave || !D.paramsRevert) return;
+    const editing = S.orderEditing;
+    const changed = paramsChanged() && !!S.fields.length;
+    D.paramsRevert.hidden = editing || !changed;
+    D.paramsSave.hidden = editing;
+    D.paramsSave.disabled = !changed;
+    D.paramsEdit.hidden = editing || !S.fields.length;
+    D.paramsEdit.disabled = !S.fields.length;
+    D.paramsConfirm.hidden = !editing;
+    D.paramsCancel.hidden = !editing;
+  }
+
   function renderParamOrder() {
     if (!D.paramsList) return;
     const editing = S.orderEditing;
     D.params.classList.toggle("is-sorting", editing);
 
-    /* The prompt is rendered as its own textarea below the card — never a
-       settings row. Exclude it everywhere in the card (list, badge, ordering),
-       exactly as the node's apiBarFields skips promptField. */
+    /* Every exposed text/textarea field is rendered as its own textarea below
+       the card — never a settings row. Exclude ALL of them from the card (list,
+       badge, ordering); they are handled by renderPromptArea instead. */
     renderPromptArea();
-    const promptHit = findPromptField();
-    const cardFields = promptHit ? S.fields.filter((f) => f !== promptHit.field) : S.fields;
+    const promptSet = new Set(findPromptFields().map((e) => e.field));
+    const cardFields = S.fields.filter((f) => !promptSet.has(f));
     /* Node's widget split: visible fields = all when expanded, else basics. */
     const advanced = cardFields.filter(isAdvancedField);
     const visible = S.paramsShowAdvanced ? cardFields : cardFields.filter((f) => !isAdvancedField(f));
     /* Badge shows the VISIBLE count, exactly like the node's popcnt. */
     D.paramsCount.textContent = visible.length ? String(visible.length) : "";
 
-    /* Normal mode: save defaults + reorder entry. Sort mode: confirm/cancel. */
-    D.paramsSave.hidden = editing;
-    D.paramsSave.disabled = !S.fields.length;
-    D.paramsConfirm.hidden = !editing;
-    D.paramsCancel.hidden = !editing;
-    D.paramsEdit.hidden = editing || !S.fields.length;
-    D.paramsEdit.disabled = !S.fields.length;
+    /* Normal mode: 保存为默认参数 (enabled only when params changed) + its left
+       取消(revert) + reorder entry. Sort mode: confirm/cancel. */
+    syncParamActions();
 
     /* NodeFooter band: only when there are advanced fields, and its label/icon
        mirror the node (隐藏/显示高级输入 + chevron-up / settings-2). */
@@ -2011,8 +2108,13 @@
   }
 
   function restoreOrderClasses() {
-    if (!D.paramsList) return;
-    D.paramsList.querySelectorAll(".ac-prow").forEach((row) => {
+    /* Both the card rows and the standalone text boxes share the same global
+       S.fields index, so highlight them together during a drag. */
+    const rows = [
+      ...(D.paramsList ? D.paramsList.querySelectorAll(".ac-prow") : []),
+      ...(D.promptBox ? D.promptBox.querySelectorAll(".ac-prompt-row") : [])
+    ];
+    rows.forEach((row) => {
       const index = Number(row.dataset.index);
       row.classList.toggle("is-dragging", S.orderDrag === index);
       row.classList.toggle("is-drop", S.orderDrop === index && S.orderDrag !== index);

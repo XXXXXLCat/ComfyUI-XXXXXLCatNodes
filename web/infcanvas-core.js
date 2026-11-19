@@ -84,6 +84,13 @@
     { type: "infcanvas/cleanup_vram", role: "cleanup", kind: "cleanup_vram", title: "清理显存", desc: "一键释放显存", icon: "pi pi-bolt", size: [160, 30] },
     { type: "infcanvas/cleanup_ram", role: "cleanup", kind: "cleanup_ram", title: "清理内存", desc: "一键回收内存", icon: "pi pi-bolt", size: [160, 30] },
     { type: "infcanvas/cleanup_both", role: "cleanup", kind: "cleanup_both", title: "清理显存和内存", desc: "一键释放显存并回收内存", icon: "pi pi-bolt", size: [160, 30] },
+    /* Text merge pill: a 30px bar like the cleanup pills. Wires several text
+       nodes into it and it emits all their text joined by newlines. The merged
+       result is written into data.text (as if typed), so every downstream
+       reader — generators via collectInputs, audio panels via audioWired —
+       sees it with no special case. `kind` is "text_merge" for the menu, but
+       assetKindOf()/collectInputs() advertise it as "text" at run time. */
+    { type: "infcanvas/text_merge", role: "text_merge", kind: "text_merge", title: "文本拼贴", desc: "将多个文本换行合并成一个", icon: "merge", size: [160, 30] },
   ];
   const TYPE_BY_KIND = {
     image: "infcanvas/media_image",
@@ -94,6 +101,7 @@
     cleanup_vram: "infcanvas/cleanup_vram",
     cleanup_ram: "infcanvas/cleanup_ram",
     cleanup_both: "infcanvas/cleanup_both",
+    text_merge: "infcanvas/text_merge",
   };
   const SPEC_BY_TYPE = Object.fromEntries(SPECS.map((spec) => [spec.type, spec]));
   /* Every type ever written to disk points at the merged type now; the role
@@ -122,15 +130,23 @@
 
   /* Host toast store (src/components/ui/toast/toastStore.ts):
        success/error/info/warning/loading(title, { description, duration })
-     `duration` MUST be passed -- the store defaults it to POSITIVE_INFINITY,
-     so a toast without it never closes on its own. */
-  function toast(kind, summary, detail = "", duration = 3000) {
+     duration is in ms. The store defaults it to POSITIVE_INFINITY, so a toast
+     without duration never closes on its own. Mirror ComfyUI's per-kind habits:
+     success/info 3s, warning 5s, error/loading stay until manually closed.
+     An explicit 4th argument always overrides the per-kind default. */
+  const TOAST_DURATION = { success: 3000, info: 3000, warning: 5000, error: 0, loading: 0 };
+  function toast(kind, summary, detail = "", duration = null) {
     const t = EXT()?.toast;
     if (!t) { console.log("[InfCanvas]", kind, summary, detail); return; }
+    const d = duration ?? TOAST_DURATION[kind] ?? 3000;
     try {
       if (typeof t[kind] === "function") {
-        t[kind](summary, { description: detail || undefined, duration });
-      } else if (typeof t.add === "function") t.add({ severity: kind, summary, detail, life: duration });
+        const opts = { description: detail || undefined };
+        if (d > 0) opts.duration = d;   // 0 => omit => store's POSITIVE_INFINITY
+        t[kind](summary, opts);
+      } else if (typeof t.add === "function") {
+        t.add({ severity: kind, summary, detail, life: d });  // life:0 = sticky (legacy)
+      }
     } catch (error) { console.warn("[InfCanvas] toast failed", error); }
   }
 
@@ -255,6 +271,12 @@
     }),
     remove: (name) => backend.call("/canvas?name=" + encodeURIComponent(name), { method: "DELETE" }),
     assets: () => backend.call("/assets"),
+    /* LORA 库：走 ComfyUI folder_paths（含 extra_model_paths），按子文件夹分类。
+       preview 是同名图片的相对路径，经 /infcanvas/lora/preview 代理读取。 */
+    loras: () => backend.call("/loras"),
+    loraPreviewUrl: (rel) => API().apiURL
+      ? API().apiURL("/infcanvas/lora/preview?file=" + encodeURIComponent(rel))
+      : "/api/infcanvas/lora/preview?file=" + encodeURIComponent(rel),
     workflows: () => backend.call("/workflows"),
     /* The generate node may point at ANY workflow file, including Chinese names
        such as 文生音乐：MiniMax Music 3. The legacy ?name= route validates with
@@ -1069,7 +1091,11 @@
     flow().setViewport({ x: vp.x - dx * zoom, y: vp.y - dy * zoom, zoom });
   }
 
-  function addNodeByType(type, pos = null, asset = null, title = null) {
+  /* Ctrl+V pasting grips 30px BELOW the card's top-left (x aligned to the left
+     edge) — distinct from the title-bar-centre grip used by drags/placement. */
+  const PASTE_ANCHOR_OFFSET = { x: 0, y: -30 };
+
+  function addNodeByType(type, pos = null, asset = null, title = null, anchor = null, anchorOffset = null) {
     const spec = specOf(type);
     if (!spec || !flow()) {
       toast("error", tr("无法创建节点"), tr("画布尚未就绪，请刷新页面后重试"));
@@ -1083,7 +1109,18 @@
        explicitly so the new node keeps the plain medium name. */
     if (title !== null) node.data.title = title;
     else if (asset) node.data.title = asset.name || asset.filename || spec.title;
-    flow().addNode(node);
+    /* `anchor` is the pointer's final release position for a drag-in. Group
+       membership follows that point; the pointer marks the centre of the
+       card's title bar, so the top-left sits half a width left / half a
+       header up from it (matching the wire-placement grip). */
+    if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      const off = anchorOffset || flow()?.createAnchorOffset?.(node) || { x: 0, y: 0 };
+      node.position = {
+        x: anchor.x + (Number(off.x) || 0),
+        y: anchor.y + (Number(off.y) || 0),
+      };
+    }
+    flow().addNode(node, anchor);
     flow().selectNodes([node.id]);
     markDirty();
     if (autoPlaced) revealNode(node);
@@ -1203,8 +1240,8 @@
   const isTypingTarget = (target) => !!target?.closest?.(
     "input, textarea, select, [contenteditable='true'], [contenteditable='']");
 
-  function createTextNode(text, point) {
-    const node = addNodeByType(TYPE_BY_KIND.text, [point.x, point.y], null);
+  function createTextNode(text, point, anchor = null, anchorOffset = null) {
+    const node = addNodeByType(TYPE_BY_KIND.text, [point.x, point.y], null, null, anchor, anchorOffset);
     if (!node) return null;
     node.data.text = String(text || "").slice(0, 4000);
     NS.flow?.updateNodeData?.(node.id, { text: node.data.text });
@@ -1213,7 +1250,8 @@
     return node;
   }
 
-  async function handleFiles(files, point) {
+  async function handleFiles(files, point, anchor = null, livePlace = false, anchorOffset = null) {
+    const createdIds = [];
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
       const kind = kindOfFile(file);
@@ -1223,10 +1261,18 @@
         if (kind === "text") {
           try { asset.text = (await readTextFile(file)).slice(0, 4000); } catch (error) { /* binary */ }
         }
-        addNodeByType(TYPE_BY_KIND[kind], [point.x + index * 24, point.y + index * 24], asset, file.name);
+        const node = addNodeByType(TYPE_BY_KIND[kind], [point.x + index * 24, point.y + index * 24], asset, file.name,
+          anchor ? { x: anchor.x + index * 24, y: anchor.y + index * 24 } : null, anchorOffset);
+        if (node) createdIds.push(node.id);
         NS.ui?.refreshPanels();
         toast("success", tr("素材已添加"), file.name);
       } catch (error) { toast("error", tr("上传失败"), file.name + " · " + String(error)); }
+    }
+    /* Menu 添加资源 / 上传 uses the same live placement as the node-creation
+       menu: the uploaded nodes follow the pointer and only settle on the
+       final left click. Drop point re-decides group; Esc removes them all. */
+    if (livePlace && createdIds.length) {
+      flow()?.state?.placementActions?.beginNodePlacement?.(createdIds, point);
     }
   }
 
@@ -1241,11 +1287,56 @@
     input.style.display = "none";
     input.addEventListener("change", () => {
       const files = Array.from(input.files || []);
-      if (files.length) handleFiles(files, point || centerPos());
+      if (files.length) handleFiles(files, point || centerPos(), null, true);
       input.remove();
     });
     document.body.appendChild(input);
     input.click();
+  }
+
+  const GRAPH_MIME = "application/x-infcanvas-graph";
+  const CLIPBOARD_TAG = '{"app":"InfCanvas.Clipboard"';
+  let lastGraphJson = "";
+  let pasteKeyAt = 0;
+
+  /* One writer for the native Ctrl+C event and the right-click Copy item. The
+     event path fills clipboardData directly; the menu path uses the async
+     Clipboard API and keeps an in-memory fallback if the host refuses it. */
+  function setGraphClipboard(payload, clipboardData) {
+    NS.clipboard = payload;
+    const json = JSON.stringify(payload);
+    lastGraphJson = json;
+    try {
+      if (clipboardData) {
+        clipboardData.setData(GRAPH_MIME, json);
+        clipboardData.setData("text/plain", json);
+      } else {
+        navigator.clipboard?.writeText?.(json)?.catch?.(() => {});
+      }
+    } catch (error) { /* the in-memory copy remains available */ }
+  }
+
+  function copyGraphSelection() {
+    const payload = flow()?.copySelection?.();
+    if (!payload) return false;
+    setGraphClipboard(payload, null);
+    return true;
+  }
+
+  /* Ctrl+C on a node/wire/group selection copies the graph subset instead of
+     the page text. Both the custom MIME (same-browser tabs) and a tagged
+     text/plain fallback (hosts that strip custom types on cross-tab paste)
+     carry it, plus an in-memory copy that survives canvas/doc switches. */
+  function onCopy(event) {
+    if (!state.active || event.defaultPrevented) return;
+    if (isTypingTarget(event.target)) return;
+    if (NS.tools?.isOpen?.()) return;
+    if (hostDialogOpen()) return;
+    const payload = flow()?.copySelection?.();
+    if (!payload) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setGraphClipboard(payload, event.clipboardData);
   }
 
   function onPaste(event) {
@@ -1256,27 +1347,101 @@
     if (document.querySelector('[data-reka-dialog-content][data-state="open"]')) return;
     const dt = event.clipboardData;
     if (!dt) return;
+    /* A graph paste must win over the plain-text node fallback, otherwise the
+       JSON representation would be pasted as a new text node. */
+    let raw = "";
+    try { raw = String(dt.getData(GRAPH_MIME) || ""); } catch (error) { raw = ""; }
+    if (!raw) {
+      try {
+        const plain = String(dt.getData("text/plain") || "");
+        if (plain.trimStart().startsWith(CLIPBOARD_TAG)) raw = plain;
+      } catch (error) { raw = ""; }
+    }
+    /* Right-click Copy writes via the async Clipboard API, which may not be
+       available on an insecure host. A Ctrl+V right after it falls back to the
+       in-memory copy, but only when the system clipboard still holds our JSON
+       (or nothing) — never hijack a later plain-text copy. */
+    if (!raw && Date.now() - pasteKeyAt < 800 && NS.clipboard && lastGraphJson) {
+      let plain = "";
+      try { plain = String(dt.getData("text/plain") || ""); } catch (error) { plain = ""; }
+      if (!plain || plain === lastGraphJson) raw = lastGraphJson;
+    }
+    if (raw) {
+      let payload = null;
+      try { payload = JSON.parse(raw); } catch (error) { payload = null; }
+      if (payload?.app === "InfCanvas.Clipboard" && Array.isArray(payload.nodes)) {
+        event.preventDefault();
+        event.stopPropagation();
+        NS.clipboard = payload;
+        flow()?.pasteGraph?.(payload, pastePoint());
+        return;
+      }
+    }
     const files = collectFiles(dt);
     let text = "";
     try { text = String(dt.getData("text/plain") || ""); } catch (error) { text = ""; }
     if (!files.length && !text.trim()) return;
     event.preventDefault();
     event.stopPropagation();
-    if (files.length) { handleFiles(files, pastePoint()); return; }
-    createTextNode(text, pastePoint());
+    /* Paste anchors on the current mouse position: the top-left corner sits
+       30px ABOVE the cursor (x aligned to its left edge). For a multi-file
+       paste the first file is that top-left anchor; the rest stair-step. */
+    const pp = pastePoint();
+    if (files.length) { handleFiles(files, pp, pp, false, PASTE_ANCHOR_OFFSET); return; }
+    createTextNode(text, pp, pp, PASTE_ANCHOR_OFFSET);
+  }
+
+  /* ---- LoRA library drag contract ----
+     A library card writes application/x-infcanvas-lora holding the exact
+     lora_name (the very value the node's dropdown offers). Dropped on empty
+     canvas it seeds a new LoRA stack; dropped on an existing LoRA stack it
+     appends to that stack's loras list. */
+  const LORA_MIME = "application/x-infcanvas-lora";
+  function loraFromTransfer(dt) {
+    try {
+      const raw = dt?.getData?.(LORA_MIME);
+      if (!raw) return null;
+      const item = JSON.parse(raw);
+      return item && typeof item.name === "string" && item.name ? item : null;
+    } catch (error) { return null; }
+  }
+  function hasLoraInTransfer(dt) {
+    try { return Array.from(dt?.types || []).includes(LORA_MIME); }
+    catch (error) { return false; }
+  }
+  function seedLoraNode(lora, point, anchor = null, anchorOffset = null) {
+    const node = addNodeByType(TYPE_BY_KIND.lora, [point.x, point.y], null, null, anchor, anchorOffset);
+    if (!node) return;
+    NS.flow?.updateNodeData?.(node.id, {
+      loras: [{ name: lora.name, strength: 1, enabled: true }],
+    });
+    markDirty();
+    toast("success", tr("已创建 LoRA 节点"), lora.stem || lora.name);
+  }
+  function appendLoraToNode(node, lora) {
+    const next = (Array.isArray(node.data.loras) ? node.data.loras : []).map((entry) => ({ ...entry }));
+    next.push({ name: lora.name, strength: 1, enabled: true });
+    NS.flow?.updateNodeData?.(node.id, { loras: next });
+    markDirty();
+    NS.ui?.refreshPanels?.();
+    toast("success", tr("已添加 LoRA"), lora.stem || lora.name);
   }
 
   async function onDrop(event) {
     const point = flow()?.screenToFlow?.(event.clientX, event.clientY) || { x: 0, y: 0 };
+    /* Sidebar drops use the same grip as a paste: the node's top-left corner
+       sits 30px ABOVE the release point (x aligned to the pointer). */
+    const lora = loraFromTransfer(event.dataTransfer);
+    if (lora) { seedLoraNode(lora, point, point, PASTE_ANCHOR_OFFSET); return; }
     const custom = event.dataTransfer?.getData("application/x-infcanvas-asset");
     if (custom) {
       try {
         const asset = JSON.parse(custom);
-        addNodeByType(TYPE_BY_KIND[asset.kind] || TYPE_BY_KIND.text, [point.x, point.y], asset);
+        addNodeByType(TYPE_BY_KIND[asset.kind] || TYPE_BY_KIND.text, [point.x, point.y], asset, null, point, PASTE_ANCHOR_OFFSET);
       } catch (error) { toast("error", tr("资产解析失败"), String(error)); }
       return;
     }
-    await handleFiles(collectFiles(event.dataTransfer), point);
+    await handleFiles(collectFiles(event.dataTransfer), point, point, false, PASTE_ANCHOR_OFFSET);
   }
 
   /* ---------------------------- generation ----------------------------- */
@@ -1349,7 +1514,11 @@
       /* 生成器把结果回显在自己身上（data.result），没有独立的结果节点；它
          照样能作为素材接到下一个生成节点，所以这里两种都认。 */
       const asset = source.data?.asset || source.data?.result;
-      const kind = source.data?.kind || asset?.kind || (source.data?.role === "text" ? "text" : null);
+      /* A text-merge pill carries its joined result in data.text just like a
+         normal text node — advertise it as "text" so generators read it via
+         the existing prompt path (no extra slot/branch needed). */
+      const kind = source.data?.role === "text_merge" ? "text"
+        : (source.data?.kind || asset?.kind || (source.data?.role === "text" ? "text" : null));
       /* A text node is a PROMPT input, not an asset — it legitimately has no
          asset, so don't drop it. Media nodes still require an asset. */
       if (!asset && kind !== "text") continue;
@@ -2161,6 +2330,31 @@
       }
       absorbFiles(target, collectFiles(event.dataTransfer));
     }, true);
+    /* A LoRA card dropped ON a LoRA stack appends it. Separate capture pair so
+       the media-node path above stays untouched; Vue Flow puts the node id on
+       the wrapper, so no DOM markers are needed. */
+    const loraTarget = (event) => {
+      const wrapper = event.target?.closest?.(".vue-flow__node");
+      const id = wrapper?.dataset?.id;
+      if (!id) return null;
+      const node = (flow()?.nodesOf?.() || []).find((entry) => String(entry.id) === String(id));
+      return node?.data?.role === "lora" ? node : null;
+    };
+    document.addEventListener("dragover", (event) => {
+      if (!state.active || !hasLoraInTransfer(event.dataTransfer)) return;
+      if (!loraTarget(event)) return;
+      event.preventDefault(); event.stopPropagation();
+      try { if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"; } catch (error) { /* ignore */ }
+    }, true);
+    document.addEventListener("drop", (event) => {
+      if (!state.active) return;
+      const target = loraTarget(event);
+      if (!target) return;
+      const lora = loraFromTransfer(event.dataTransfer);
+      if (!lora) return;
+      event.preventDefault(); event.stopPropagation();
+      appendLoraToNode(target, lora);
+    }, true);
     /* Double-clicking empty canvas opens the canvas's own node list at the
        pointer. Vue Flow gives us screen->flow conversion, so the new node lands
        exactly under the cursor -- same contract as LiteGraph's
@@ -2178,6 +2372,16 @@
          must never open the add-node menu underneath them. */
       if (event.target.closest?.(".ic-group, .ic-group-ui, .ic-selection-tools")) return;
       const point = flow().screenToFlow(event.clientX, event.clientY);
+      /* The group backdrop is pointer-events:none, so a double-click in the
+         empty space INSIDE a group reaches the pane, not `.ic-group-ui`.
+         Hit-test the actual group rectangle in graph units before opening the
+         add-node menu; group titles still rename via their own handler above. */
+      const inGroup = (flow()?.state?.groups?.value || []).some((group) =>
+        Number.isFinite(group.x) && Number.isFinite(group.y) &&
+        Number.isFinite(group.w) && Number.isFinite(group.h) &&
+        point.x >= group.x && point.x <= group.x + group.w &&
+        point.y >= group.y && point.y <= group.y + group.h);
+      if (inGroup) return;
       NS.ui?.showAddNodeMenu?.({
         clientX: event.clientX, clientY: event.clientY,
         world: [point.x, point.y],
@@ -2357,6 +2561,13 @@
     }
     /* Ctrl+G groups the current selection, like ComfyUI's group command.
        At least two nodes are required; a single node is not a selection. */
+    /* Ctrl+V itself is left to the native paste event; stamping it lets the
+       paste handler recognise a right-click-copied graph when the browser
+       refuses to write a system clipboard entry. */
+    if (mod && key === "v" && !event.shiftKey) {
+      pasteKeyAt = Date.now();
+      return;
+    }
     if (mod && key === "g" && !event.shiftKey) {
       const selected = flow()?.selectedNodes?.() || [];
       if (selected.length >= 2) {
@@ -2396,8 +2607,9 @@
     document.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("keydown", onKeyBubble, false);
     document.addEventListener("keyup", onKeyBubble, false);
-    /* System clipboard paste -> nodes. Capture phase so Vue Flow / ComfyUI's
-       own handlers see it after us, and we can cancel a plain-text paste. */
+    /* System clipboard copy/paste. Capture phase so our graph payload wins
+       over Vue Flow / ComfyUI's own text handling. */
+    document.addEventListener("copy", onCopy, true);
     document.addEventListener("paste", onPaste, true);
     document.addEventListener("pointermove", rememberPointer, true);
     document.addEventListener("pointerdown", rememberPointer, true);
@@ -2433,9 +2645,11 @@
   NS.api = {
     init, enter, exit, toast, confirmDialog, promptDialog, viewUrl, resolveMediaUrl,
     markDirty, saveActive, closeDoc, closeDocsAt, openByName, newCanvas,
+    copySelection: copyGraphSelection,
     renameDoc, duplicateDoc, switchDoc,
     renameCanvas, duplicateCanvas, isBookmarked, toggleBookmark,
-    addNodeByType, removeNode, revealNode, freeSpot, activeDoc, kindFromFile, esc, readTextFile, pickFiles,
+    addNodeByType, removeNode, revealNode, freeSpot, pastePoint, activeDoc, kindFromFile, esc,
+    readTextFile, pickFiles,
     addToFavorites, loraNames, listPrompts, addPrompt, removePrompt, updatePrompt,
     docs: () => state.docs, activeId: () => state.activeId,
     isActive: () => state.active,

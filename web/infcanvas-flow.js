@@ -183,6 +183,48 @@ import {
     onDirty: null,                    // set by core
   };
 
+  /* Last-selected wins: move the touched items to the end of their list.
+     Vue Flow renders nodes in array order with equal z-index, and our groups
+     render in array order too, so later DOM = visually on top. Unlike a
+     z-index counter this never outgrows the fixed overlay layers (toolbars,
+     palettes, minimap). */
+  function bringToFront(list, ids) {
+    const wanted = new Set(ids);
+    if (!wanted.size) return;
+    const current = list.value;
+    const front = current.filter((entry) => wanted.has(entry.id));
+    if (!front.length) return;
+    const rest = current.filter((entry) => !wanted.has(entry.id));
+    list.value = rest.concat(front);
+  }
+
+  /* A node created inside a group belongs to that group. Creation places the
+     card by its top-left corner, so testing its CENTER is what matches "I
+     dropped it in here"; full containment (the drag rule) would reject most
+     newly created cards. Overlapping groups pick the smallest rectangle, the
+     same tie-break used when dragging a node into a group. */
+  function groupForNewNode(node, anchor = null) {
+    let cx, cy;
+    /* A drop carries the pointer's FINAL release position in graph units:
+       that is where the user says the material landed, even when the card's
+       own centre ends up elsewhere (small group, multi-file stagger, ...). */
+    if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      cx = anchor.x;
+      cy = anchor.y;
+    } else {
+      const pos = node?.position;
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return null;
+      const size = Array.isArray(node.data?.size) ? node.data.size : [480, 270];
+      cx = pos.x + (Number(size[0]) || 480) / 2;
+      cy = pos.y + (Number(size[1]) || 270) / 2;
+    }
+    const hits = state.groups.value.filter((group) =>
+      cx >= group.x && cx <= group.x + group.w &&
+      cy >= group.y && cy <= group.y + group.h);
+    if (hits.length > 1) hits.sort((a, b) => a.w * a.h - b.w * b.h);
+    return hits[0] || null;
+  }
+
   /* --------------------------- audio waveform ---------------------------- */
 
   const peakCache = new Map();
@@ -496,6 +538,11 @@ import {
     audio: { label: "音频", measure: "段" },
     text:  { label: "文本", measure: "段" },
   };
+  /* Edge-centre labels: 文本1 / 图像2 / 视频1 … Only shown when one target
+     receives 2+ wires whose sources are ALL the same kind. */
+  const EDGE_LABEL_KIND = {
+    text: "文本", image: "图像", video: "视频", audio: "音频", lora: "LoRA",
+  };
   /* Fixed slot layout of the wired-assets row; null = follow actual wires. */
   const MODE_ASSET_SLOTS = {
     "参考生视频": null,
@@ -648,7 +695,7 @@ import {
        every generator already accepts them and incomingKindCounts ignores them
        (a cleanup wire must never change a generator's available modes). */
     if (d.role === "cleanup") return "lora";
-    if (d.role === "text") return "text";
+    if (d.role === "text" || d.role === "text_merge") return "text";
     return d.asset?.kind || d.result?.kind || d.kind || null;
   }
   /* Count currently wired MEDIA assets per kind, optionally ignoring one edge.
@@ -761,6 +808,34 @@ import {
         innerHTML: ICONS[props.name] || "",
       });
     },
+  };
+
+  /* --------------------- shared tag palette (nodes + groups) -------------
+     ONE palette for both the node header tag and the group title tag. The
+     caller owns the open flag and the pick handler; this only renders the
+     seven colour rows, the check on the active one and the clear row, using
+     the same .icn__tagmenu* classes so both look identical. */
+  const TagMenu = {
+    name: "TagMenu",
+    components: { IcIcon },
+    props: {
+      tags: { type: Array, default: () => NODE_TAGS },
+      current: { type: String, default: "" },
+    },
+    emits: ["pick"],
+    template: `
+      <div class="icn__tagmenu nodrag nopan" data-node-tag
+           @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
+        <button v-for="tg in tags" :key="tg.name" type="button" class="icn__tagmenu-item"
+                @click.stop="$emit('pick', tg.name)">
+          <span class="icn__tagmenu-dot" :style="{ background: tg.color }"></span>
+          <span class="icn__tagmenu-name">{{ $t(tg.name) }}</span>
+          <IcIcon v-if="current === tg.name" name="check" :size="13" />
+        </button>
+        <button v-if="current" type="button" class="icn__tagmenu-clear" @click.stop="$emit('pick', '')">
+          {{ $t('清除标签') }}
+        </button>
+      </div>`,
   };
 
   /* --------------------- wired-asset row (shared) ------------------------
@@ -1393,7 +1468,7 @@ import {
 
   const IcNode = {
     name: "IcNode",
-    components: { Handle, IcIcon, MediaSlots },
+    components: { Handle, IcIcon, MediaSlots, TagMenu },
     props: { id: { type: String, required: true }, data: { type: Object, required: true }, selected: Boolean },
     setup(props) {
       const data = props.data;
@@ -1424,6 +1499,12 @@ import {
       /* Quick-cleanup pill: a 30px solid bar with one AnyType socket on each
          end. Clicking the bar runs the cleanup (no generator panel involved). */
       const isCleanup = data.role === "cleanup";
+      /* Text-merge pill: same 30px bar as a cleanup pill, but instead of running
+         a job it joins every upstream text node with newlines into its own
+         data.text (read downstream as an ordinary text input). */
+      const isMerge = data.role === "text_merge";
+      /* 30px-bar nodes share the pill chrome: cleanup actions and the merge. */
+      const isPill = isCleanup || isMerge;
       /* A material node shows its material; a generator shows its last result.
          Material wins: once a node flips to material it never flips back, so a
          stale result can never shadow the file the user dropped on it. */
@@ -1507,7 +1588,7 @@ import {
          the stored size on completion. Ports stay centred via handleTop. */
       const GEN_RUN_BODY_H = 40; // absolute floor: one 16px text row + breathing room
       const bodyH = computed(() => {
-        if (isCleanup) return 0; // the whole pill IS the title bar — no body
+        if (isPill) return 0; // the whole pill IS the title bar — no body
         if (isGen.value && data.status === "running") {
           return data.genPreviewUrl && genPreviewH.value > 0
             ? Math.max(GEN_RUN_BODY_H, genPreviewH.value)
@@ -1518,14 +1599,14 @@ import {
           : Math.max(80, size.value[1] - HEAD_H);
       });
       const rootStyle = computed(() => ({
-        width: Math.max(isCleanup ? 160 : isLora ? LORA_MIN_W : 0, size.value[0]) + "px",
-        height: (isCleanup ? 30 : bodyH.value + HEAD_H) + "px",
+        width: Math.max(isPill ? 160 : isLora ? LORA_MIN_W : 0, size.value[0]) + "px",
+        height: (isPill ? 30 : bodyH.value + HEAD_H) + "px",
       }));
       /* Ports sit on the body, not on the card: keep them centred on the content
          area so a wire never lands on the header edge. A cleanup pill has no body,
          so its single socket sits dead centre of the 30px bar. */
       const handleTop = (index, count = 1) =>
-        isCleanup ? "50%" : `calc(50% + ${HEAD_H / 2 + (index - (count - 1) / 2) * SLOT_STEP}px)`;
+        isPill ? "50%" : `calc(50% + ${HEAD_H / 2 + (index - (count - 1) / 2) * SLOT_STEP}px)`;
 
       /* ---- resize (four corners) ---- */
       /* `corner` is a compass label: "nw" | "ne" | "sw" | "se". Each handle
@@ -1556,8 +1637,8 @@ import {
         /* LoRA stacks share the 320px media floor and a content-derived height
            floor (never smaller than fitHeight for the current row count), so a
            manual resize can't shrink them back over their own rows. */
-        const MINW = isCleanup ? 160 : (isMediaLike || isLora) ? ASSET_MIN_W : 160;
-        const MINH = isCleanup ? 30 : isLora
+        const MINW = isPill ? 160 : (isMediaLike || isLora) ? ASSET_MIN_W : 160;
+        const MINH = isPill ? 30 : isLora
           ? loraFitHeight(loras.value.length)
           : HEAD_H + 80;
         resizing.value = corner;
@@ -1607,6 +1688,31 @@ import {
         if (options?.silent) NS.flow?.history?.absorb?.();
         NS.flow?.markDirty?.();
       };
+      /* ---- Text-merge pill: join every wired upstream text with newlines ----
+         The merged result lives in data.text, exactly where a hand-typed text
+         node keeps its content. Downstream readers (buildPrompt/collectInputs
+         for generators, audioWired/wiredText for audio panels) therefore need
+         NO special case: they already read source.data.text. Follow incoming
+         edges in wire order, take each source node's text (plain text node, a
+         generator's result, or another merge pill), drop empties, join with a
+         single newline. Re-runs whenever any upstream text or edge changes. */
+      const mergedText = computed(() => {
+        if (!isMerge) return "";
+        const nodes = NS.flow?.nodesOf?.() || [];
+        const edges = NS.flow?.edgesOf?.() || [];
+        const parts = [];
+        for (const edge of edges) {
+          if (edge.target !== props.id) continue;
+          const src = nodes.find((n) => n.id === edge.source);
+          if (!src || src.data?.role === "lora" || src.data?.role === "cleanup") continue;
+          const value = String(src.data?.text || src.data?.result?.text || "").trim();
+          if (value) parts.push(value);
+        }
+        return parts.join("\n");
+      });
+      watch(mergedText, (value) => {
+        if (data.text !== value) patch({ text: value }, { silent: true });
+      }, { immediate: true });
       /* ---- LoRA stack: list / add / remove / weight / enable ----
          All writes go through patch() so the Vue Flow copy AND the document
          array stay in sync (see the comment above). Entries are always rebuilt
@@ -1717,7 +1823,12 @@ import {
       const setField = (key, value) => patch(
         key === "prompt" ? { prompt: value, promptEdited: true } : { [key]: value }
       );
-      const run = () => NS.generate?.run?.(props.id);
+      const run = () => {
+        /* A mode whose category has no workflow must not be runnable even if
+           the click is triggered from elsewhere than the disabled button. */
+        if (noWorkflow.value) return;
+        NS.generate?.run?.(props.id);
+      };
       const cancelGen = () => NS.generate?.cancel?.(props.id);
       /* Generate-node control bar: compact selects mirroring the reference
          video-generator toolbar, wired to this node's real parameters. */
@@ -1979,57 +2090,48 @@ import {
         if (!field) return;
         patch({ apiValues: { ...apiValues.value, [fieldId(field)]: value } });
       };
-      /* Which exposed text field each area writes to. Keywords first, then the
-         remaining text fields in wire order, so a workflow that names them
-         differently still ends up with two usable areas. */
-      const SLOT_KEYWORDS = {
-        music: { a: /caption|prompt|style|desc|风格|提示|描述|曲风/i, b: /lyric|歌词/i },
-        voice: { a: /tone|emotion|mood|style|语气|情感|情绪|风格/i, b: /speech|text|content|script|朗读|文本|台词|内容/i },
-      };
+      /* Every exposed multiline-text field gets its OWN area on the node, in
+         the exact order the workflow exposes them — no name lock, so a field
+         called 风格描述 / 歌词 / anything else still renders with its own name
+         above the box. The FIRST area stays the node's rich `prompt` slot (wired
+         text nodes, @mention chips, core's promptMap); the SECOND one on audio
+         stays `lyrics` (core's audioMap.b); every other area reads/writes
+         apiValues keyed by field id, which core already writes into the real
+         workflow input at run time. */
       const isTextField = (field) => field?.type === "text" || field?.type === "textarea";
-      /* The prompt is edited in the node's OWN text area (the panel's 提示词 box,
-         the video editor, the text generator's area), so its exposed field is
-         not a settings row -- it is bound to that area instead (syncPromptMap)
-         and written into the workflow's real input at run time. */
-      const promptField = computed(() => {
-        if (isGenAudio.value) return null;   /* audio binds its two areas itself */
-        const textFields = apiFields.value.filter(isTextField);
-        return textFields.find((field) => /^(提示词|prompt)$/i.test(String(field.label || "").trim()))
-          || textFields.find((field) => !/negative|负面/i.test(String(field.label || ""))
-            && /^(prompt|positive|positive_prompt|prompt_text|caption)$/i.test(String(field.key || "")))
-          || null;
-      });
-      const audioFieldSlots = computed(() => {
-        const textFields = apiFields.value.filter(isTextField);
-        const used = {};
-        const take = (pattern) => {
-          const hit = textFields.find((field) => !used[fieldId(field)]
-            && (pattern.test(String(field.key || "")) || pattern.test(String(field.label || ""))));
-          if (hit) used[fieldId(hit)] = true;
-          return hit || null;
-        };
-        const keywords = SLOT_KEYWORDS[audioFamily.value];
-        return { a: take(keywords.a) || take(/.+/), b: take(keywords.b) || take(/.+/) };
-      });
-      /* One source of truth for the on-screen prompt area. A workflow takes
-         prompts either through an exposed text field bound to the area or
+      const promptTextFields = computed(() => apiFields.value.filter(isTextField));
+      const promptField = computed(() => promptTextFields.value[0] || null);
+      const audioFieldSlots = computed(() => ({
+        a: promptTextFields.value[0] || null,
+        b: promptTextFields.value[1] || null,
+      }));
+      /* First two slots keep the node's own values so wired text and core's
+         applyNodeInputs keep working unchanged; the rest live in apiValues. */
+      const textAreaValue = (field, i) => {
+        if (i === 0) return data.prompt ?? "";
+        if (i === 1 && isGenAudio.value) return data.lyrics ?? "";
+        return fieldValue(field);
+      };
+      const setTextArea = (field, i, value) => {
+        if (i === 0) return setField("prompt", value);
+        if (i === 1 && isGenAudio.value) return setField("lyrics", value);
+        return setFieldValue(field, value);
+      };
+      /* The field's own label wins (a renamed field must keep working); only
+         an unlabelled field falls back to the built-in slot name. */
+      const textAreaLabel = (field, i) => String(field?.label || "").trim()
+        || (i === 1 && isGenAudio.value ? t(audioSlots.value.b.label)
+          : i === 0 ? t(audioSlots.value.a.label) : "");
+      /* One source of truth for the on-screen text areas. A workflow takes
+         prompts either through an exposed text field bound to an area or
          through a literal placeholder in the template. With neither, drawing
-         the box would promise an input the workflow cannot receive. */
-      const hasPromptArea = computed(() => promptSlot.value
-        || (isGenAudio.value ? !!(audioFieldSlots.value.a || audioFieldSlots.value.b)
-          : !!promptField.value));
-      /* Everything else the API exposes belongs in the settings popover (the
-         prompt and the audio areas are already on screen). */
+         a box would promise an input the workflow cannot receive. */
+      const hasPromptArea = computed(() => promptTextFields.value.length > 0 || promptSlot.value);
+      /* All exposed text fields live on the node surface as their own boxes;
+         none of them belongs in the settings popover. */
       const apiBarFields = computed(() => {
-        const skip = {};
-        const mark = (field) => { if (field) skip[fieldId(field)] = true; };
-        /* The prompt has its own text area in every generator panel. */
-        mark(promptField.value);
-        /* The audio generator excludes the two text areas of its main panel. */
-        if (isGenAudio.value) {
-          mark(audioFieldSlots.value.a); mark(audioFieldSlots.value.b);
-        }
-        return apiFields.value.filter((field) => !skip[fieldId(field)] && BAR_FIELD_TYPES[field.type]);
+        const skip = new Set(promptTextFields.value.map(fieldId));
+        return apiFields.value.filter((field) => !skip.has(fieldId(field)) && BAR_FIELD_TYPES[field.type]);
       });
       /* Advanced vs basic: ComfyUI folds everything a node does not need for a
          first run behind its footer toggle (nodeFooter's showAdvanced). The
@@ -3097,6 +3199,7 @@ import {
       const DEFAULT_TITLE = {
         image: "图像", video: "视频", audio: "音频", text: "文本", lora: "LoRA 栈",
         cleanup_vram: "清理显存", cleanup_ram: "清理内存", cleanup_both: "清理显存和内存",
+        text_merge: "文本拼贴",
       };
       /* Titles are persisted as the Chinese medium name (an internal key, same
          as the category keys), but the capsule must read Text / Image / Video /
@@ -3110,6 +3213,8 @@ import {
         "清理显存": "cleanup_vram", "Clear VRAM": "cleanup_vram",
         "清理内存": "cleanup_ram", "Clear RAM": "cleanup_ram",
         "清理显存和内存": "cleanup_both", "Clear VRAM & RAM": "cleanup_both",
+        "文本拼贴": "text_merge", "Text Collage": "text_merge",
+        "文本合并": "text_merge", "Merge Text": "text_merge", "Text Merge": "text_merge",
         "节点": "node", "Node": "node",
       };
       const canonicalTitle = (name) => {
@@ -3175,6 +3280,29 @@ import {
         tagOpen.value = false;
         const next = name || null;
         if (next !== data.tag) patch({ tag: next });
+      };
+
+      /* Right-click a node: Copy / Delete / Add tag. A right-click on a node
+         that is already in a multi-selection keeps that selection; otherwise
+         the menu acts on the node under the pointer alone. */
+      const openNodeMenu = (event) => {
+        if (event.target?.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable='']")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!state.selectedIds.value.includes(props.id)) NS.flow?.selectNodes?.([props.id]);
+        else bringToFront(state.nodes, [props.id]);   /* re-clicking a selected node raises it */
+        const anchor = { getBoundingClientRect: () => ({ left: event.clientX, bottom: event.clientY }) };
+        NS.tools?.openMenu?.(anchor, [
+          { label: t("复制"), onPick: () => NS.api?.copySelection?.() },
+          { label: t("删除"), onPick: () => {
+            const ids = state.selectedIds.value;
+            const targets = ids.includes(props.id) && ids.length > 1 ? ids.slice() : [props.id];
+            NS.flow?.removeNodes?.(targets);
+            NS.api?.markDirty?.();
+            NS.flow?.history?.schedule?.();
+          } },
+          { label: t("添加标签"), onPick: () => { tagOpen.value = true; } },
+        ]);
       };
 
       /* Kept for extensions written against the earlier two-button build. */
@@ -3291,7 +3419,8 @@ import {
         isGenAudio, audioModes, audioMode, setAudioMode, audioSlots, audioFamily,
         isGenText, textModes, textMode, setTextMode, textModeReason, textModeAvailable,
         audioModeReason, audioModeAvailable, wiredAudio, wiredTextNodes, wiredText,
-        apiFields, hasPromptArea, apiBarFields, visibleBarFields, advancedCount, toggleAdvanced,
+        apiFields, promptTextFields, hasPromptArea, textAreaValue, setTextArea, textAreaLabel,
+        apiBarFields, visibleBarFields, advancedCount, toggleAdvanced,
         plainParams, paramLabel, paramText, openSetFromBar,
         fieldId, fieldValue, setFieldValue,
         setOpen, toggleSet, popStyle, fieldText, fieldFill, bumpField, commitFieldNum,
@@ -3309,14 +3438,14 @@ import {
         emptyIcon, emptyIconSize, canUpload, hasIncoming,
         actions, onAction, editing, draft, setEditor, textHtml, startEdit, commitEdit, onEditKey,
         renaming, setNameBox, startRename, commitRename, cancelRename, onNameKey, onNamePaste, displayTitle,
-        hasText, isCleanup,
-        NODE_TAGS, tagOpen, tagInfo, toggleTag, pickTag,
+        hasText, isCleanup, isMerge, isPill,
+        NODE_TAGS, tagOpen, tagInfo, toggleTag, pickTag, openNodeMenu,
       };
     },
     template: `
       <div class="icn" :class="['icn--' + data.role, { 'is-selected': selected, 'is-running': isRunningFrame, 'is-waiting': isWaiting, 'is-error': isError }]" :style="rootStyle"
            :data-cleanup="isCleanup ? data.cleanupMode : null"
-           @dblclick.stop="isCleanup ? null : startEdit">
+           @dblclick.stop="isPill ? null : startEdit" @contextmenu="openNodeMenu">
         <div class="icn__head" :class="{ 'is-generating': isGen && data.status === 'running' }" :title="$t('双击标题可重命名')">
           <div v-if="isGen && data.status === 'running'" class="icn__head-progress"
                :style="{ width: Math.round((data.genProgress || 0) * 100) + '%' }"></div>
@@ -3338,18 +3467,7 @@ import {
         </div>
         <!-- Tag palette hangs off the node root: the header clips overflow, so
              the menu must be a sibling of .icn__head, not its child. -->
-        <div v-if="tagOpen" class="icn__tagmenu nodrag nopan" data-node-tag
-             @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop>
-          <button v-for="tg in NODE_TAGS" :key="tg.name" type="button" class="icn__tagmenu-item"
-                  @click.stop="pickTag(tg.name)">
-            <span class="icn__tagmenu-dot" :style="{ background: tg.color }"></span>
-            <span class="icn__tagmenu-name">{{ $t(tg.name) }}</span>
-            <IcIcon v-if="tagInfo && tagInfo.name === tg.name" name="check" :size="13" />
-          </button>
-          <button v-if="tagInfo" type="button" class="icn__tagmenu-clear" @click.stop="pickTag('')">
-            {{ $t('清除标签') }}
-          </button>
-        </div>
+        <TagMenu v-if="tagOpen" :current="data.tag || ''" @pick="pickTag" />
         <div class="icn__body" :style="{ height: bodyH + 'px' }">
           <!-- Live generation progress (native ComfyUI WebSocket events, routed
                by prompt_id in core.js genProgress). The HEADER band carries the
@@ -3542,6 +3660,7 @@ import {
           </div>
           <!-- Wired assets: shared row (shared with the image & audio panels). -->
           <MediaSlots :slots="assetSlots" />
+          <label v-if="hasPromptArea && promptTextFields.length" class="icn__gpv-label">{{ textAreaLabel(promptTextFields[0], 0) }}</label>
           <div v-if="hasPromptArea" class="icn__gpv-input">
             <!-- "@" picker: floats above the prompt box so it never fights the
                  bottom parameter bar. mousedown is prevented on purpose — the
@@ -3593,6 +3712,17 @@ import {
                 <div v-if="refPreview.kind !== 'audio'" class="icn__gpv-preview-name">{{ refPreview.label }}</div>
               </div>
             </Teleport>
+          </div>
+          <!-- Any further exposed multiline-text fields get their own box,
+               in the workflow's own order, right under the rich editor. -->
+          <div v-if="promptTextFields.length > 1" class="icn__gpv-extras">
+            <label v-for="(field, i) in promptTextFields.slice(1)" :key="fieldId(field)" class="icn__gpa-box">
+              <span class="icn__gpa-label">{{ textAreaLabel(field, i + 1) }}</span>
+              <textarea class="icn__gpa-area icn__gpa-area--b" :value="textAreaValue(field, i + 1)"
+                        :placeholder="$t('输入内容…')" spellcheck="false"
+                        @input="setTextArea(field, i + 1, $event.target.value)"
+                        @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
+            </label>
           </div>
           <div class="icn__gpv-bar">
             <div class="icn__bar2-row icn__bar2-setrow">
@@ -3793,8 +3923,8 @@ import {
               <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
                       :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
               <button class="icn__gpv-send" type="button"
-                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
-                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+                      :title="noWorkflow ? $t('该分类下暂无工作流') : (data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成'))"
+                      :disabled="data.status === 'running' || noWorkflow" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
             </div>
             </div>
           </div>
@@ -3816,36 +3946,37 @@ import {
           <!-- Wired assets (音频 only: 音乐翻唱 / 语音克隆 wait for one clip; the
                pure-prompt modes render nothing). Same row as the other two. -->
           <MediaSlots :slots="assetSlots" />
+          <!-- Every exposed multiline-text field, in the workflow's own order,
+               gets a box here with its own name above it. The first box keeps
+               the rich prompt slot (wired text / core's promptMap); audio's
+               second box keeps lyrics; the rest bind by field id. -->
           <div v-if="isGenText && hasPromptArea" class="icn__gpa-inputs">
-            <label class="icn__gpa-box">
-              <span class="icn__gpa-label">{{ textMode === '语音转录' ? $t('转写提示') : $t('提示词') }}
-                <span v-if="wiredTextNodes.length" class="icn__gpa-wired"
+            <label v-for="(field, i) in promptTextFields" :key="fieldId(field)" class="icn__gpa-box">
+              <span class="icn__gpa-label">{{ textAreaLabel(field, i) }}
+                <span v-if="i === 0 && wiredTextNodes.length" class="icn__gpa-wired"
                       :title="wiredText">· {{$t('文本节点已接入')}}</span>
               </span>
-              <textarea class="icn__gpa-area icn__gpa-area--a" :value="data.prompt"
-                        :placeholder="wiredText || (textMode === '语音转录'
+              <textarea class="icn__gpa-area" :class="i === 0 ? 'icn__gpa-area--a' : 'icn__gpa-area--b'"
+                        :value="textAreaValue(field, i)"
+                        :placeholder="i === 0 ? (wiredText || (textMode === '语音转录'
                           ? $t('可选：说明转写语言、领域词等；音频由上游节点接入')
-                          : $t('描述你想要生成的内容…'))" spellcheck="false"
-                        @input="setField('prompt', $event.target.value)"
+                          : $t('描述你想要生成的内容…'))) : $t('输入内容…')" spellcheck="false"
+                        @input="setTextArea(field, i, $event.target.value)"
                         @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
             </label>
           </div>
           <div v-else-if="hasPromptArea" class="icn__gpa-inputs">
-            <label class="icn__gpa-box">
-              <span class="icn__gpa-label">{{ $t(audioSlots.a.label) }}
-                <span v-if="wiredTextNodes.length" class="icn__gpa-wired"
+            <label v-for="(field, i) in promptTextFields" :key="fieldId(field)" class="icn__gpa-box">
+              <span class="icn__gpa-label">{{ textAreaLabel(field, i) }}
+                <span v-if="i === 0 && wiredTextNodes.length" class="icn__gpa-wired"
                       :title="wiredText">· {{$t('文本节点已接入')}}</span>
               </span>
-              <textarea class="icn__gpa-area icn__gpa-area--a" :value="data.prompt"
-                        :placeholder="wiredText || $t(audioSlots.a.ph)" spellcheck="false"
-                        @input="setField('prompt', $event.target.value)"
-                        @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
-            </label>
-            <label class="icn__gpa-box">
-              <span class="icn__gpa-label">{{ $t(audioSlots.b.label) }}</span>
-              <textarea class="icn__gpa-area icn__gpa-area--b" :value="data.lyrics"
-                        :placeholder="$t(audioSlots.b.ph)" spellcheck="false"
-                        @input="setField('lyrics', $event.target.value)"
+              <textarea class="icn__gpa-area" :class="i === 0 ? 'icn__gpa-area--a' : 'icn__gpa-area--b'"
+                        :value="textAreaValue(field, i)"
+                        :placeholder="i === 0 ? (wiredText || $t(audioSlots.a.ph))
+                          : (i === 1 && isGenAudio ? $t(audioSlots.b.ph) : $t('输入内容…'))"
+                        spellcheck="false"
+                        @input="setTextArea(field, i, $event.target.value)"
                         @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
             </label>
           </div>
@@ -4048,8 +4179,8 @@ import {
               <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
                       :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
               <button class="icn__gp-send icn__gpa-send" type="button"
-                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
-                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+                      :title="noWorkflow ? $t('该分类下暂无工作流') : (data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成'))"
+                      :disabled="data.status === 'running' || noWorkflow" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
             </div>
             </div>
           </div>
@@ -4066,6 +4197,7 @@ import {
                图像编辑 / 图像放大 / 背景移除 shows WHICH image is feeding it
                instead of leaving the user to read the wire on the canvas. -->
           <MediaSlots :slots="assetSlots" />
+          <label v-if="hasPromptArea && promptTextFields.length" class="icn__gpv-label">{{ textAreaLabel(promptTextFields[0], 0) }}</label>
           <div v-if="hasPromptArea" class="icn__gpv-input">
             <!-- "@" picker + rich prompt box: identical to the video generator
                  (same markup, same handlers, same chip hover card). -->
@@ -4111,6 +4243,17 @@ import {
                 <div v-if="refPreview.kind !== 'audio'" class="icn__gpv-preview-name">{{ refPreview.label }}</div>
               </div>
             </Teleport>
+          </div>
+          <!-- Any further exposed multiline-text fields get their own box,
+               in the workflow's own order, right under the rich editor. -->
+          <div v-if="promptTextFields.length > 1" class="icn__gpv-extras">
+            <label v-for="(field, i) in promptTextFields.slice(1)" :key="fieldId(field)" class="icn__gpa-box">
+              <span class="icn__gpa-label">{{ textAreaLabel(field, i + 1) }}</span>
+              <textarea class="icn__gpa-area icn__gpa-area--b" :value="textAreaValue(field, i + 1)"
+                        :placeholder="$t('输入内容…')" spellcheck="false"
+                        @input="setTextArea(field, i + 1, $event.target.value)"
+                        @pointerdown.stop @mousedown.stop @dblclick.stop @wheel.stop></textarea>
+            </label>
           </div>
           <div class="icn__gp-bar">
             <div class="icn__bar2-row icn__bar2-setrow">
@@ -4311,8 +4454,8 @@ import {
               <button v-if="data.status === 'running'" class="icn__gp-cancel" type="button"
                       :title="$t('取消任务')" @click.stop="cancelGen">{{$t('取消')}}</button>
               <button class="icn__gp-send" type="button"
-                      :title="data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成')"
-                      :disabled="data.status === 'running'" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
+                      :title="noWorkflow ? $t('该分类下暂无工作流') : (data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行生成'))"
+                      :disabled="data.status === 'running' || noWorkflow" @click.stop="run">{{ data.status === 'running' ? (isWaiting ? $t('等待中...') : $t('运行中...')) : $t('运行') }}</button>
             </div>
             </div>
           </div>
@@ -4408,7 +4551,7 @@ import {
 
         <Handle v-if="isGen" id="in" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
         <Handle v-if="isText" id="text" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
-        <Handle v-if="isCleanup" id="in" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
+        <Handle v-if="isCleanup || isMerge" id="in" type="target" :position="'left'" :style="{ top: handleTop(0) }" />
         <Handle id="out" type="source" :position="'right'" :style="{ top: handleTop(0) }" />
 
         <div class="icn__rz icn__rz--nw nodrag" @pointerdown="onResizeDown($event, 'nw')" :class="{ 'is-active': resizing === 'nw' }"><svg viewBox="0 0 12 12"><path d="M11 1L1 11M11 6L6 11" /></svg></div>
@@ -4447,18 +4590,45 @@ import {
         const ids = state.selectedIds.value;
         return ids.length > 0 && (ids.includes(props.source) || ids.includes(props.target));
       });
+      /* One target with 2+ incoming wires, all from the SAME kind of source:
+         label each wire 文本1 / 文本2, 图像1 / 图像2 … A single wire or a mix
+         of kinds stays unlabelled (only the original centre dot shows). */
+      const edgeLabel = computed(() => {
+        const incoming = state.edges.value.filter((e) => e.target === props.target);
+        if (incoming.length < 2) return "";
+        const nodes = state.nodes.value;
+        const kinds = incoming.map((e) => assetKindOf(nodes.find((n) => n.id === e.source)));
+        if (kinds.some((kind) => !kind || kind !== kinds[0])) return "";
+        const base = EDGE_LABEL_KIND[kinds[0]];
+        if (!base) return "";
+        const index = incoming.findIndex((e) => e.id === props.id) + 1;
+        return index ? t(base + "{n}", { n: index }) : "";
+      });
+      /* Same metrics as .icn__tag-chip: 20px tall, 9px side padding, 12px
+         glyphs (CJK 12px, latin/digits ~7px), no dot. */
+      const labelWidth = computed(() => {
+        const text = edgeLabel.value;
+        if (!text) return 0;
+        let units = 0;
+        for (const ch of text) units += /[\u3400-\u9fff]/.test(ch) ? 12 : 7;
+        return Math.ceil(units + 18);
+      });
       const cut = (event) => {
         event.preventDefault();
         event.stopPropagation();
         NS.flow?.removeEdges?.([props.id]);
       };
-      return { path, cx, cy, highlighted, cut };
+      return { path, cx, cy, highlighted, edgeLabel, labelWidth, cut };
     },
     template: `
       <g class="ic-edge-g" :class="{ 'is-hl': highlighted }">
         <path :d="path" class="ic-edge-border" />
         <BaseEdge :id="id" :path="path" class="ic-edge" />
-        <g class="ic-edge-dot-hit" @pointerdown.stop @click.stop="cut">
+        <g v-if="edgeLabel" class="ic-edge-label-hit" @pointerdown.stop @click.stop="cut">
+          <rect class="ic-edge-label-bg" :x="cx - labelWidth / 2" :y="cy - 10" :width="labelWidth" height="20" rx="10"></rect>
+          <text class="ic-edge-label-text" :x="cx" :y="cy + 1">{{ edgeLabel }}</text>
+        </g>
+        <g v-else class="ic-edge-dot-hit" @pointerdown.stop @click.stop="cut">
           <circle class="ic-edge-dot-halo" :cx="cx" :cy="cy" r="9"></circle>
           <circle class="ic-edge-dot ic-edge-dot-core" :cx="cx" :cy="cy" r="5"></circle>
           <circle class="ic-edge-dot-center" :cx="cx" :cy="cy" r="3"></circle>
@@ -4604,6 +4774,21 @@ import {
    2px #9a9 outer ring (user spec: 中心黑 + 保留外圈2px). core size never changes. */
 .ic-edge-dot-center { fill:transparent; pointer-events:none; transition:fill .1s ease; }
 .ic-edge-dot-hit:hover .ic-edge-dot-center { fill:#000; }
+/* Same-type multi-wire label: same capsule metrics as .icn__tag-chip
+   (20px tall, 10px radius, 12px/400 white text, .02em tracking), no dot. */
+.ic-edge-label-hit { pointer-events:all; cursor:pointer; }
+/* Capsule fill follows the wire stroke: #9a9 idle, #b3c9b3 selected, #fff
+   when the whole branch is highlighted. Dark text on the white highlight
+   keeps the label readable. */
+.ic-edge-label-bg { fill:#9a9; }
+.ic-edge-label-text { fill:#fff; font-family:Inter, Arial, sans-serif; font-size:12px;
+  line-height:1; font-weight:400; letter-spacing:.02em;
+  text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+.ic-edge-label-hit:hover .ic-edge-label-bg { filter:brightness(1.12); }
+.vue-flow__edge.selected .ic-edge-label-bg { fill:#b3c9b3; }
+.ic-edge-g.is-hl .ic-edge-label-bg { fill:#fff; }
+.ic-edge-g.is-hl .ic-edge-label-text { fill:#000; }
+.ic-flow.is-far .ic-edge-label-hit { display:none; }
 .ic-flow.is-far .ic-edge-dot-hit { display:none; }
 .ic-flow.is-far .ic-edge-dot { display:none; }   /* legacy check_edges.js reads .ic-edge-dot display */
 .ic-edge-g.is-hl .vue-flow__edge-path.ic-edge { stroke:#fff; }
@@ -4648,15 +4833,33 @@ import {
   outline:3px solid #fff; outline-offset:0; }
 .ic-group-ui.is-drop-target .ic-group-title { color:#fff; }
 /* The layer itself is inert (the pane already is); only its children take
-   pointers, and z-index keeps them clickable above the node cards. */
-.ic-group-ui { position:absolute; z-index:3; pointer-events:none; box-sizing:border-box;
+   pointers. No z-index here on purpose: this must NOT be a stacking context,
+   so the title can sit BELOW node cards (a group is a backdrop, not an overlay)
+   while its tools/grips/palette stay above them via their own z-index. */
+.ic-group-ui { position:absolute; pointer-events:none; box-sizing:border-box;
   font-size:20px; }
 .ic-group-ui.is-selected .ic-group-title { color:#fff; }
-.ic-group-title { display:flex; align-items:center; box-sizing:border-box;
+.ic-group-title { position:relative; z-index:-1; display:flex; align-items:center; box-sizing:border-box;
   width:100%; height:var(--ic-group-title-h, 40px); padding:0 10px;
   border-radius:12px 12px 0 0; background:rgba(255,255,255,.10);
-  color:inherit; white-space:nowrap; pointer-events:auto; cursor:move; user-select:none; }
-.ic-group-title-input { display:block; box-sizing:border-box; width:100%;
+  color:inherit; white-space:nowrap; pointer-events:auto; cursor:grab; user-select:none; }
+/* Same dragging feedback as Vue Flow's .vue-flow__node.draggable.dragging. */
+.ic-group-ui.is-dragging .ic-group-title { cursor:grabbing; }
+/* Group tag reuses the node chip markup verbatim (.icn__tag-chip + dot/name)
+   and only scales it up for the 40px title band; the node header is 28px.
+   Two-class selectors win over the single-class node chip rules regardless
+   of where this block sits in the stylesheet. */
+.ic-group-title .ic-group-tag-chip { height:28px; max-width:190px; padding:0 13px;
+  gap:8px; border-radius:14px; font-size:17px; letter-spacing:.02em; margin-right:10px; }
+.ic-group-title .ic-group-tag-chip .icn__tag-chip-dot { width:7px; height:7px; }
+.ic-group-title .ic-group-tag-add { width:24px; height:24px; border-radius:6px;
+  margin-right:8px; color:rgba(255,255,255,.75); }
+.ic-group-title .ic-group-tag-add:hover { color:#fff; background:rgba(255,255,255,.12); }
+/* The palette is the very same .icn__tagmenu component; just anchor it under
+   the taller group title instead of the 28px node header. */
+.icn__tagmenu.ic-group-tagmenu { left:12px; right:auto; width:max-content;
+  top:calc(var(--ic-group-title-h,40px) + 4px); pointer-events:auto; }
+.ic-group-title-input { position:relative; z-index:-1; display:block; box-sizing:border-box; width:100%;
   height:var(--ic-group-title-h, 40px); padding:0 10px; border:1px solid rgba(255,255,255,.5);
   border-radius:12px 12px 0 0; outline:none; background:rgba(38,39,41,.92);
   color:#fff; font:inherit; line-height:1; pointer-events:auto; }
@@ -4777,24 +4980,29 @@ import {
    The bar IS the header (body is 0px), so no two-tone card, no tag chip, no
    tools and no resize grips. Colour follows the action, text is always the
    node title (already centred by the rules below). Click anywhere runs it. */
-.icn--cleanup { border-radius:8px; cursor:default; }
+.icn--cleanup, .icn--text_merge { border-radius:8px; cursor:default; }
 /* The bar IS the node header strip: same charcoal as every node title, same
    title text colour and weight. Just shorter, centred and click-to-run. */
-.icn--cleanup .icn__head {
+.icn--cleanup .icn__head, .icn--text_merge .icn__head {
   height:100%; border-radius:8px; padding:0 10px; justify-content:center;
   background:var(--ic-head-bg, #202121); pointer-events:auto;
 }
-.icn--cleanup .icn__name { max-width:100%; color:#cdcdcd; font-size:12px;
+.icn--cleanup .icn__name, .icn--text_merge .icn__name { max-width:100%; color:#cdcdcd; font-size:12px;
   font-weight:500; text-align:center; pointer-events:none; }
 /* The header strip fills the whole bar at z-index 6 — keep the sockets above
    it so their inner half is not clipped/covered by the opaque head background. */
-.icn--cleanup .vue-flow__handle { z-index:10; }
-.icn--cleanup .icn__body { display:none; }
+.icn--cleanup .vue-flow__handle, .icn--text_merge .vue-flow__handle { z-index:10; }
+.icn--cleanup .icn__body, .icn--text_merge .icn__body { display:none; }
 .icn--cleanup .icn__tag,
 .icn--cleanup .icn__tools,
 .icn--cleanup .icn__rz,
 .icn--cleanup .icn__file,
-.icn--cleanup .icn__tagmenu { display:none !important; }
+.icn--cleanup .icn__tagmenu,
+.icn--text_merge .icn__tag,
+.icn--text_merge .icn__tools,
+.icn--text_merge .icn__rz,
+.icn--text_merge .icn__file,
+.icn--text_merge .icn__tagmenu { display:none !important; }
 /* A quick click flash confirms the job was queued. */
 .icn--cleanup.is-cleaning .icn__head { box-shadow:inset 0 0 0 1px #0B8CE9; }
 
@@ -4849,18 +5057,22 @@ import {
    one dark floating panel with a border/radius/shadow, transparent buttons that
    highlight on hover. Centred above the node via left:50% + translate, which
    also carries the show/hide slide so the transform never fights for both. */
+/* Layer-outside chrome: the action row lives inside VueFlow's scale(zoom)
+   pane, so it is multiplied by --ic-iz (= 1/zoom) to stay a constant SCREEN
+   size. transform-origin is the bottom-centre anchor so the inverse scale
+   never drags it off the node's top edge. */
 .icn__tools { position:absolute; left:50%; bottom:calc(100% + 10px); width:max-content; z-index:30;
   display:flex; align-items:center; gap:2px; height:32px; padding:2px; box-sizing:border-box;
   white-space:nowrap; pointer-events:none; opacity:0; visibility:hidden;
-  transform:translate(-50%, 4px);
+  transform-origin:bottom center; transform:translate(-50%, 4px) scale(var(--ic-iz, 1));
   transition:opacity .12s ease, transform .12s ease, visibility 0s linear .12s;
   border:1px solid var(--border, #494a50); border-radius:8px;
-  background:var(--ic-panel, #262729); box-shadow:0 6px 20px rgba(0,0,0,.45); }
+  background:var(--background, #171718); box-shadow:0 2px 16px 0 var(--shadow-color, rgba(0,0,0,.4)); }
 /* The panel belongs to the SELECTED node only: hovering a node no longer pops
    a floating toolbar over its neighbours. Selecting is one click on the node
    itself (or a Ctrl box-select), so the row is still one click away. */
 .icn.is-selected .icn__tools {
-  opacity:1; visibility:visible; transform:translate(-50%, 0);
+  opacity:1; visibility:visible; transform:translate(-50%, 0) scale(var(--ic-iz, 1));
   transition:opacity .12s ease, transform .12s ease, visibility 0s; }
 .icn__tool { pointer-events:auto; display:inline-flex; align-items:center; gap:5px;
   height:26px; padding:0 8px; border:0; border-radius:6px; background:transparent;
@@ -5126,15 +5338,19 @@ import {
    popover grows UPWARD out of the panel, and a workflow with a dozen exposed
    parameters makes it tall enough to reach the 上传/删除 buttons — at 24 those
    buttons' labels showed through the popover's rows. */
+/* Layer-outside like the action row: inverse-scaled by --ic-iz so the panel
+   keeps a constant SCREEN size at any canvas zoom. Anchor is the top-centre
+   (top:calc(100% + 20px)), so scale about that edge to keep it pinned under
+   the node. Chrome matches .ic-menu / .icn__tools — one floating-panel look. */
 .icn__genpanel { position:absolute; left:50%; top:calc(100% + 20px); z-index:32;
   box-sizing:border-box; width:max(100%, 420px);
   display:flex; flex-direction:column; gap:0;
-  padding:8px; border-radius:var(--ic-radius, 10px); border:1px solid var(--ic-line, #494a50);
-  background:var(--ic-panel, #262729); box-shadow:0 8px 28px rgba(0,0,0,.5); color:var(--ic-text, #ffffff);
-  opacity:0; visibility:hidden; transform:translate(-50%, -6px);
+  padding:8px; border-radius:8px; border:1px solid var(--border, #494a50);
+  background:var(--background, #171718); box-shadow:0 2px 16px 0 var(--shadow-color, rgba(0,0,0,.4)); color:var(--foreground, #ffffff);
+  opacity:0; visibility:hidden; transform-origin:top center; transform:translate(-50%, -6px) scale(var(--ic-iz, 1));
   transition:opacity .14s ease, transform .14s ease, visibility 0s linear .14s; }
 .icn--media.is-selected .icn__genpanel,
-.icn--text.is-selected .icn__genpanel { opacity:1; visibility:visible; transform:translateX(-50%);
+.icn--text.is-selected .icn__genpanel { opacity:1; visibility:visible; transform:translateX(-50%) scale(var(--ic-iz, 1));
   transition:opacity .14s ease, transform .14s ease, visibility 0s; }
 /* Ctrl/Shift multi-selection is a bulk gesture (move / delete), not an edit
    session: the per-node action row and parameter panel would overlap every
@@ -5318,6 +5534,10 @@ import {
 /* Prompt box + the "@" quick-reference picker. The picker is a Nodes 2.0
    popover: secondary surface, 8px radius, 12px label, accent hover,
    20px thumbnail. It floats ABOVE the box so it never fights the param bar. */
+/* Every exposed multiline-text field is labelled above its own box. */
+.icn__gpv-label { display:block; margin-bottom:4px; font-size:12px; line-height:1.4;
+  color:var(--ic-soft, #8a8a8a); }
+.icn__gpv-extras { display:flex; flex-direction:column; gap:8px; margin-bottom:9px; }
 .icn__gpv-input { position:relative; margin-bottom:9px; }
 .icn__gpv-atmenu { position:absolute; left:0; right:0; bottom:calc(100% + 6px); z-index:8;
   display:flex; flex-direction:column; gap:2px; padding:4px; max-height:132px; overflow:auto;
@@ -5393,7 +5613,7 @@ import {
 .icn__genpanel.icn__gpa { width:max(100%, 520px); padding:10px; }
 .icn__gpa-inputs { display:flex; flex-direction:column; gap:8px; margin-bottom:9px; }
 .icn__gpa-box { display:flex; flex-direction:column; gap:4px; min-width:0; }
-.icn__gpa-label { font-size:10px; line-height:1.4; color:var(--ic-soft, #8a8a8a); }
+.icn__gpa-label { font-size:12px; line-height:1.4; color:var(--ic-soft, #8a8a8a); }
 /* Wired text node marker: the text is a PROMPT, it feeds this first area at
    run time (never the lyrics / reading-text area below). */
 .icn__gpa-wired { color:var(--ic-brand, #0b8ce9); white-space:nowrap; }
@@ -5463,7 +5683,7 @@ import {
      that centring would otherwise leak into the widget values. */
   text-align:left;
   border-radius:12px; background:var(--ic-head-bg, #202121); border:0;
-  box-shadow:0 10px 30px rgba(0,0,0,.55); }
+  box-shadow:none; }
 /* NodeHeader.vue is p-1 around a 20px control row -> a 28px band. */
 .icn__gpa-pophead { display:flex; align-items:center; gap:6px; box-sizing:border-box;
   height:28px; padding:0 12px; }
@@ -5517,7 +5737,9 @@ import {
 .icn__rz--nw { left:-4px; top:-4px; cursor:nw-resize; }
 .icn__rz--nw svg { bottom:4px; right:4px; transform:scale(-1,-1); }
 
-.ic-minimap-wrap { position:absolute; right:8px; bottom:54px; z-index:1000; display:flex; flex-direction:row; }
+/* The console panel publishes its live height as --ic-console-h on the shared
+   shell (infcanvas-console.js), so the minimap rides up above it when open. */
+.ic-minimap-wrap { position:absolute; right:8px; bottom:calc(54px + var(--ic-console-h, 0px)); z-index:1000; display:flex; flex-direction:row; }
 .ic-minimap { position:relative; width:253px; height:200px; border:1px solid var(--border,#333);
   border-radius:8px; background:var(--background,#1a1a1a); box-shadow:0 4px 12px rgba(0,0,0,.35); overflow:hidden; }
 .ic-minimap .vue-flow__minimap { background:transparent!important; width:100%; height:100%; }
@@ -5561,7 +5783,6 @@ import {
      its prompt area — accepting the wire here would silently drop it. Read
      the node's own snapshot so this gate follows the same frozen/new rule
      as the panel; an old node with no snapshot keeps the old behaviour. */
-  const PROMPT_KEY_RE = /^(prompt|positive|positive_prompt|prompt_text|caption)$/i;
   function workflowAcceptsText(data) {
     if (!data) return true;
     const snap = data.fieldSnapshot;
@@ -5573,18 +5794,15 @@ import {
     }
     if (!isImageGenData(data) && !isVideoGenData(data) && !isTextGenData(data)) return true;
     if (!list) return true;
-    return list.some((f) => {
-      if (f?.type !== "text" && f?.type !== "textarea") return false;
-      const label = String(f.label || "").trim();
-      if (/^(提示词|prompt)$/i.test(label)) return true;
-      return !/negative|负面/i.test(label) && PROMPT_KEY_RE.test(String(f.key || ""));
-    });
+    /* The node shows EVERY exposed multiline-text field by name, so any of
+       them accepts a wired text node — no 提示词/prompt name lock. */
+    return list.some((f) => f?.type === "text" || f?.type === "textarea");
   }
 
   /* -------------------------------- root app ------------------------------ */
 
   const Root = {
-    components: { VueFlow: VueFlowComponent, MiniMap, Background, IcConnectionLine, IcIcon },
+    components: { VueFlow: VueFlowComponent, MiniMap, Background, IcConnectionLine, IcIcon, TagMenu },
     setup() {
       const showMinimap = ref(state.minimap.value);
       const zoomFar = ref(state.viewport.value.zoom < 0.6);   // <60% hides link dots
@@ -5631,6 +5849,14 @@ import {
           (ids) => { state.selectedIds.value = ids; }, { immediate: true, deep: true });
         NS.flow?.onReady?.();
       };
+
+      /* Inverse zoom for the node-attached floating chrome (action row +
+         generator panel). These overlays live INSIDE VueFlow's scale(zoom)
+         pane so they follow their node for free; multiplying their own
+         transform by 1/zoom cancels that scale, keeping them at a constant
+         SCREEN size — the same "outside the scaled layer" feel as the menus.
+         Bound as a CSS var on .ic-flow so Vue applies it to every node at once. */
+      const iz = computed(() => 1 / (state.viewport.value.zoom || 1));
 
       const onViewportChange = (viewport) => {
         state.viewport.value = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
@@ -5778,12 +6004,15 @@ import {
           const kind = assetKindOf(from);
           if (!kind) return [];
           return specs.filter((spec) => (spec.role === "text" || spec.role === "cleanup"
+            || spec.role === "text_merge"
             ? true
             : spec.role === "media" && acceptsKind(spec.kind, kind)));
         }
         /* Drag started on an INPUT handle: offer the types that can feed it.
-           Text and cleanup nodes accept every kind, so their menu lists all. */
-        if (from.data?.role === "text" || from.data?.role === "cleanup") return specs.slice();
+           Text, text-merge and cleanup nodes accept every kind, so their menu
+           lists all. */
+        if (from.data?.role === "text" || from.data?.role === "text_merge"
+          || from.data?.role === "cleanup") return specs.slice();
         if (from.data?.role !== "media") return [];
         const accepts = GEN_ACCEPTS[from.data.kind] || [];
         return specs.filter((spec) => accepts.indexOf(spec.kind) >= 0);
@@ -5791,42 +6020,44 @@ import {
 
       /* Create the picked node at the drop point and land the wire on it, using
          the same handle ids a manual drag would produce ("out" -> "in"). */
-      const createAndConnect = (spec, origin, point) => {
+      const createAndConnect = (spec, origin, point, anchor = null) => {
         const spot = NS.api?.freeSpot?.([point.x, point.y], spec.size, spec.role)
           || [point.x, point.y];
-        const created = NS.api?.addNodeByType?.(spec.type, spot);
+        const created = NS.api?.addNodeByType?.(spec.type, spot, null, null, anchor);
         if (!created) return;
-        const fromSource = origin.handleType === "source";
-        /* A text node exposes one target handle named "text", every media node
-           names its own "in" — land the wire on whichever the created node
-           actually renders, or the edge would point at a handle that is not
-           there and Vue Flow would silently drop the line. */
-        NS.flow?.addEdge?.({
-          id: "e_" + Math.random().toString(36).slice(2, 10),
-          source: fromSource ? origin.nodeId : created.id,
-          sourceHandle: "out",
-          target: fromSource ? created.id : origin.nodeId,
-          targetHandle: fromSource
-            ? (created.data?.role === "text" ? "text" : "in")
-            : (origin.handleId || "in"),
-          type: "ic",
-        });
         NS.flow?.selectNodes?.([created.id]);
-        /* A brand new generator sits on its pure-prompt mode, which takes no
-           media — the wire we just landed would leave it on an unavailable
-           mode. Same rule as onConnect: switch instead of dropping the wire. */
-        if (fromSource) {
-          const target = created;
-          const srcKind = assetKindOf(state.nodes.value.find((n) => n.id === origin.nodeId));
-          if (isVideoGenData(target.data)) {
-            const counts = incomingKindCounts(target.id, state.edges.value, state.nodes.value);
-            if (modeReasonFor(target.data.videoMode || "文生视频", counts)) {
-              NS.flow?.updateNodeData?.(target.id, { videoMode: "参考生视频" });
-            }
-          } else if (isAudioGenData(target.data) && srcKind === "audio") {
-            const audioMode = target.data.audioMode || AUDIO_MODES[0];
-            if (!AUDIO_INPUT_RULES[audioMode]?.audio) {
-              NS.flow?.updateNodeData?.(target.id, { audioMode: audioRefMode(audioMode) });
+        if (origin) {
+          const fromSource = origin.handleType === "source";
+          /* A text node exposes one target handle named "text", every media
+             node names its own "in" — land the wire on whichever the created
+             node actually renders, or the edge would point at a handle that is
+             not there and Vue Flow would silently drop the line. */
+          NS.flow?.addEdge?.({
+            id: "e_" + Math.random().toString(36).slice(2, 10),
+            source: fromSource ? origin.nodeId : created.id,
+            sourceHandle: "out",
+            target: fromSource ? created.id : origin.nodeId,
+            targetHandle: fromSource
+              ? (created.data?.role === "text" ? "text" : "in")
+              : (origin.handleId || "in"),
+            type: "ic",
+          });
+          /* A brand new generator sits on its pure-prompt mode, which takes no
+             media — the wire we just landed would leave it on an unavailable
+             mode. Same rule as onConnect: switch instead of dropping it. */
+          if (fromSource) {
+            const target = created;
+            const srcKind = assetKindOf(state.nodes.value.find((n) => n.id === origin.nodeId));
+            if (isVideoGenData(target.data)) {
+              const counts = incomingKindCounts(target.id, state.edges.value, state.nodes.value);
+              if (modeReasonFor(target.data.videoMode || "文生视频", counts)) {
+                NS.flow?.updateNodeData?.(target.id, { videoMode: "参考生视频" });
+              }
+            } else if (isAudioGenData(target.data) && srcKind === "audio") {
+              const audioMode = target.data.audioMode || AUDIO_MODES[0];
+              if (!AUDIO_INPUT_RULES[audioMode]?.audio) {
+                NS.flow?.updateNodeData?.(target.id, { audioMode: audioRefMode(audioMode) });
+              }
             }
           }
         }
@@ -5842,72 +6073,148 @@ import {
       let placeHandlers = null;
       const endPlacement = () => {
         if (placeHandlers) {
-          document.removeEventListener("pointermove", placeHandlers.move, true);
-          document.removeEventListener("pointerdown", placeHandlers.down, true);
-          document.removeEventListener("keydown", placeHandlers.key, true);
+          /* WINDOW capture runs before every document-level group/marquee
+             handler, so a final click inside a group cannot be swallowed by
+             the group's drag hit-test. */
+          window.removeEventListener("pointermove", placeHandlers.move, true);
+          window.removeEventListener("pointerdown", placeHandlers.down, true);
+          window.removeEventListener("keydown", placeHandlers.key, true);
           placeHandlers = null;
         }
         placing.value = null;
         document.getElementById("infcanvas-root")?.classList.remove("is-placing");
       };
-      const beginPlacement = (spec, origin, point) => {
+      /* A placement's FINAL left-click is its real drop point: membership is
+         re-decided there (creation-time membership was only a preview). */
+      const setPlacementGroup = (id, point) => {
+        const groups = state.groups.value;
+        const live = NS.flow?.findNode?.(id) || state.nodes.value.find((node) => node.id === id);
+        const target = groupForNewNode(live, point);
+        const current = groupOfNode(groups, id);
+        if (current && current !== target) {
+          current.nodes = current.nodes.filter((nodeId) => nodeId !== id);
+        }
+        if (target && current !== target) {
+          if (!Array.isArray(target.nodes)) target.nodes = [];
+          if (!target.nodes.includes(id)) target.nodes.push(id);
+        }
+      };
+      const detachNodeGroups = (id) => {
+        for (const group of state.groups.value) {
+          if (Array.isArray(group.nodes) && group.nodes.includes(id)) {
+            group.nodes = group.nodes.filter((nodeId) => nodeId !== id);
+          }
+        }
+      };
+      /* Follow-the-pointer core shared by every manual creation: each entry is
+         { id, off } for an already-created node; `off` puts the pointer at the
+         centre of that node's title bar (plus a per-node stair-step for a
+         multi-file upload). The FINAL left click commits position + membership,
+         Esc removes every node (and its wires). */
+      const startFollowing = (entries, point) => {
         endPlacement();
-        /* Create the real node + real wire at the release point immediately. */
-        const before = new Set(state.nodes.value.map((n) => n.id));
-        createAndConnect(spec, origin, { x: point.x, y: point.y });
-        const created = state.nodes.value.find((n) => !before.has(n.id));
-        if (!created) { clearFrozenConn(); return; }
-        const nodeId = created.id;
-        placing.value = { nodeId, origin };
-        clearFrozenConn();
+        if (!entries.length) return;
+        placing.value = { entries };
         const toGraph = (clientX, clientY) => state.flow?.screenToFlowCoordinate
           ? state.flow.screenToFlowCoordinate({ x: clientX, y: clientY })
           : { x: clientX, y: clientY };
-        /* The pointer sits at the CENTRE of the title band, not the node's
-           top-left corner. Graph units == unscaled CSS px, so half the node
-           width and half the header height offset the node's origin. */
-        const nodeW = Number(spec?.size?.[0]) || 480;
-        const headH = spec?.role === "cleanup" ? (Number(spec?.size?.[1]) || 30) : 28;
-        const offsetX = nodeW / 2, offsetY = headH / 2;
-        NS.flow?.setNodePosition?.(nodeId, { x: point.x - offsetX, y: point.y - offsetY });
+        const placeAt = (g) => {
+          for (const e of entries) {
+            NS.flow?.setNodePosition?.(e.id, { x: g.x + e.off.x, y: g.y + e.off.y });
+          }
+        };
+        placeAt(point);
         /* Keep a normal arrow cursor for the whole ride (connection dragging
            leaves a crosshair/grabbing cursor behind). */
         document.getElementById("infcanvas-root")?.classList.add("is-placing");
         const move = (event) => {
           if (!placing.value) return;
-          const g = toGraph(event.clientX, event.clientY);
-          NS.flow?.setNodePosition?.(nodeId, { x: g.x - offsetX, y: g.y - offsetY });
+          placeAt(toGraph(event.clientX, event.clientY));
         };
         const down = (event) => {
           if (event.button !== 0) return;
           event.stopPropagation();
           event.preventDefault();
-          const p = placing.value;
+          const wasPlacing = placing.value;
+          const drop = toGraph(event.clientX, event.clientY);
+          placeAt(drop);
+          for (const e of entries) setPlacementGroup(e.id, drop);
           endPlacement();
-          if (p) NS.api?.markDirty?.();
+          if (wasPlacing) {
+            historySchedule();
+            NS.api?.markDirty?.();
+          }
         };
         const key = (event) => {
           if (event.key !== "Escape") return;
           event.stopPropagation();
           event.preventDefault();
-          const p = placing.value;
+          const wasPlacing = placing.value;
           endPlacement();
-          if (!p) return;
-          /* Remove the just-created node AND its wire, restoring the pre-menu
-             state: the frozen wire is gone, no trace of the cancelled pick. */
-          state.edges.value = state.edges.value.filter((e) => e.source !== nodeId && e.target !== nodeId);
-          NS.api?.removeNode?.(nodeId);
+          if (!wasPlacing) return;
+          /* Remove the just-created nodes AND their wires, restoring the
+             pre-menu state: no trace of the cancelled pick. */
+          const ids = new Set(entries.map((e) => e.id));
+          state.edges.value = state.edges.value.filter((e) => !ids.has(e.source) && !ids.has(e.target));
+          for (const e of entries) {
+            detachNodeGroups(e.id);
+            NS.api?.removeNode?.(e.id);
+          }
         };
         placeHandlers = { move, down, key };
         /* Defer binding one tick so the click that picked the menu item (and the
            pointerdown that opened it) can't be mistaken for the placement click. */
         setTimeout(() => {
           if (placeHandlers && placeHandlers.move === move) {
-            document.addEventListener("pointermove", move, true);
-            document.addEventListener("pointerdown", down, true);
-            document.addEventListener("keydown", key, true);
+            window.addEventListener("pointermove", move, true);
+            window.addEventListener("pointerdown", down, true);
+            window.addEventListener("keydown", key, true);
           }
         }, 0);
+      };
+
+      const beginPlacement = (spec, origin, point) => {
+        endPlacement();
+        /* Create the real node + real wire at the release point immediately. */
+        const before = new Set(state.nodes.value.map((n) => n.id));
+        createAndConnect(spec, origin, { x: point.x, y: point.y }, point);
+        const created = state.nodes.value.find((n) => !before.has(n.id));
+        if (!created) { clearFrozenConn(); return; }
+        clearFrozenConn();
+        const off = NS.flow?.createAnchorOffset?.(created) || { x: 0, y: 0 };
+        startFollowing([{ id: created.id, off }], point);
+      };
+      /* Multi-file upload: the nodes were created asynchronously by core.js and
+         handed over here. Lay them out as an aligned grid (60px gutter) and use
+         the same follow/commit/cancel flow. The pointer grips 14px below the
+         grid's TOP-CENTRE, so the whole batch rides under the cursor. */
+      const beginNodePlacement = (ids, point) => {
+        const nodes = ids
+          .map((id) => NS.flow?.findNode?.(id) || state.nodes.value.find((n) => n.id === id))
+          .filter(Boolean);
+        if (!nodes.length) return;
+        const count = nodes.length;
+        const cols = count <= 2 ? count : 3;
+        const GAP = 60;
+        /* One cell size for the whole grid keeps rows/columns aligned even when
+           the uploaded media have different default dimensions. */
+        let cellW = 0, cellH = 0;
+        for (const n of nodes) {
+          const sz = Array.isArray(n.data?.size) ? n.data.size : [480, 270];
+          cellW = Math.max(cellW, Number(sz[0]) || 480);
+          cellH = Math.max(cellH, Number(sz[1]) || 270);
+        }
+        cellW += GAP;
+        cellH += GAP;
+        const gridW = cols * cellW - GAP; /* no trailing gutter after last column */
+        const entries = nodes.map((n, index) => {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+          /* Grid top-left sits (-gridW/2, -14) from the pointer; add this
+             node's cell offset within the grid. */
+          return { id: n.id, off: { x: col * cellW - gridW / 2, y: row * cellH - 14 } };
+        });
+        startFollowing(entries, point);
       };
 
       const onConnectEnd = (event) => {
@@ -6171,6 +6478,17 @@ import {
       };
 
       watch(() => state.minimap.value, (value) => { showMinimap.value = value; });
+      /* Selection order drives stacking: newly selected nodes/groups move to
+         the front of their own kind. Groups stay below all nodes by using
+         negative layers only (see groupLayerStyle). */
+      watch(state.selectedIds, (ids, previous = []) => {
+        const added = ids.filter((id) => !previous.includes(id));
+        if (added.length) bringToFront(state.nodes, added);
+      });
+      watch(state.selectedGroupIds, (ids, previous = []) => {
+        const added = ids.filter((id) => !previous.includes(id));
+        if (added.length) bringToFront(state.groups, added);
+      });
 
       /* ---- Alt + left drag slices links (ComfyUI-style canvas knife) --------
          Starting the drag ON the pane means we stopPropagation, so Vue Flow
@@ -6655,9 +6973,11 @@ import {
            leaving any selected nodes alone — the same "add" intent ComfyUI's
            resolveClickSelection uses for nodes. */
         if (additive) {
-          state.selectedGroupIds.value = current.includes(id)
-            ? current.filter((entry) => entry !== id)
-            : current.concat(id);
+          if (current.includes(id)) state.selectedGroupIds.value = current.filter((entry) => entry !== id);
+          else {
+            state.selectedGroupIds.value = current.concat(id);
+            bringToFront(state.groups, [id]);
+          }
           return;
         }
         /* A plain group click joins an existing node multi-selection instead
@@ -6665,9 +6985,11 @@ import {
            selection (ComfyUI picks a single item on a plain click). */
         if (state.selectedIds.value.length > 1) {
           if (!current.includes(id)) state.selectedGroupIds.value = current.concat(id);
+          bringToFront(state.groups, [id]);
           return;
         }
         state.selectedGroupIds.value = [id];
+        bringToFront(state.groups, [id]);
         const api = state.flow;
         const currentNodes = api?.getSelectedNodes?.value || [];
         if (currentNodes.length) api?.removeSelectedNodes?.(currentNodes);
@@ -6689,6 +7011,7 @@ import {
           return node ? { id, x: node.position.x, y: node.position.y } : null;
         }).filter(Boolean);
         let moved = false;
+        groupDraggingId.value = group.id;
         /* Same 10px grid as node dragging. Snap the GROUP first, then move
            every child by the group's ACTUAL (snapped) delta — not the raw dx.
            Rounding only the group while children kept the fractional dx made
@@ -6712,6 +7035,7 @@ import {
         const up = () => {
           window.removeEventListener("pointermove", move, true);
           window.removeEventListener("pointerup", up, true);
+          groupDraggingId.value = null;
           if (moved) { NS.api?.markDirty?.(); NS.flow?.history?.schedule?.(); }
         };
         window.addEventListener("pointermove", move, true);
@@ -6775,6 +7099,11 @@ import {
       let suppressPaneClick = false;
       const onGroupPointerDown = (event) => {
         suppressPaneClick = false;
+        /* The group palette shares [data-node-tag] with the node palette: a
+           press outside it (canvas, a node, another group) closes it. */
+        if (groupTagOpen.value && !(event.target instanceof Element && event.target.closest("[data-node-tag]"))) {
+          groupTagOpen.value = false;
+        }
         if (!NS.api?.isActive?.()) return;
         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return;
         const target = event.target;
@@ -6787,7 +7116,7 @@ import {
            over a group. Groups only ever live in the stage, so ignore press
            targets outside it. */
         if (!target.closest("#infcanvas-stage")) return;
-        if (target.closest(".vue-flow__node, .ic-group, .ic-group-ui, .ic-selection-tools, .ict-menu, .ic-menu, input, textarea, [contenteditable]")) return;
+        if (target.closest(".vue-flow__node, .ic-group, .ic-group-ui, .ic-selection-tools, .ic-menu, input, textarea, [contenteditable]")) return;
         const group = groupAtScreen(event.clientX, event.clientY);
         if (!group) return;
         event.preventDefault();
@@ -6797,6 +7126,22 @@ import {
            else inside the rectangle (i.e. not on a node) now starts the same
            group+children drag; startGroupDrag also selects the group. */
         startGroupDrag(event, group);
+      };
+      /* Right-click anywhere in the group rectangle, not just the title.
+         The body is pointer-transparent, so it cannot carry its own handler;
+         hit-test it exactly like the left-drag above. Titles/chips/tools and
+         nodes already own their contextmenu and are excluded here. */
+      const onGroupContextMenu = (event) => {
+        if (!NS.api?.isActive?.()) return;
+        const target = event.target;
+        if (!(target instanceof Element) || !target.closest("#infcanvas-stage")) return;
+        if (target.closest(".vue-flow__node, .ic-group-title, .ic-group-tools, .ic-group__rz, "
+          + ".ic-selection-tools, .ic-menu, [data-node-tag], input, textarea, [contenteditable]")) return;
+        const group = groupAtScreen(event.clientX, event.clientY);
+        if (!group) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openGroupMenu(event, group);
       };
       /* Ctrl/Cmd + drag marquee: Vue Flow only selects nodes (groups are DOM
          overlays in the zoom pane), so add every group rectangle the marquee
@@ -6825,7 +7170,7 @@ import {
         if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
         const target = event.target;
         if (!(target instanceof Element) || !target.closest("#infcanvas-stage")) return;
-        if (target.closest(".vue-flow__node, .ic-group-ui, .ic-selection-tools, .ict-menu, .ic-menu, input, textarea, [contenteditable]")) return;
+        if (target.closest(".vue-flow__node, .ic-group-ui, .ic-selection-tools, .ic-menu, input, textarea, [contenteditable]")) return;
         marqueeStart = { x: event.clientX, y: event.clientY };
         /* Every new stroke starts blue/solid; pointermove switches to green
            dashed once a leftward drag is detected. */
@@ -6876,12 +7221,14 @@ import {
         state.selectedGroupIds.value = [];
       };
       onMounted(() => {
+        document.addEventListener("contextmenu", onGroupContextMenu, true);
         document.addEventListener("pointerdown", onGroupPointerDown, true);
         document.addEventListener("pointerdown", onMarqueePointerDown, true);
         document.addEventListener("pointermove", onMarqueePointerMove, true);
         document.addEventListener("pointerup", onMarqueePointerUp, true);
       });
       onBeforeUnmount(() => {
+        document.removeEventListener("contextmenu", onGroupContextMenu, true);
         document.removeEventListener("pointerdown", onGroupPointerDown, true);
         document.removeEventListener("pointerdown", onMarqueePointerDown, true);
         document.removeEventListener("pointermove", onMarqueePointerMove, true);
@@ -6940,12 +7287,50 @@ import {
       };
       const deleteGroup = (id) => deleteGroups([id]);
 
-      /* Right-clicking the title strip exposes the two group actions from
-       LGraphGroup.getMenuOptions(): Title (rename) and Remove (delete group). */
+      /* Right-click the group title strip: Copy / Delete / Add tag. The tag is
+         stored on the group object itself and rendered with the very same
+         chip markup as a node tag, only scaled up for the taller title band;
+         renaming stays on double-click. */
+      const groupTagColor = (group) => TAG_BY_NAME[group?.tag]?.color || "";
+      const groupTagInfo = (group) => TAG_BY_NAME[group?.tag] || null;
+      /* The group uses the SAME TagMenu component as a node header — no
+         second palette implementation. Only the open flag and the write-back
+         live here; the component owns the markup and the seven colour rows. */
+      const groupTagOpen = ref(false);
+      const groupTagTarget = ref(null);
+      /* Reactive so Vue's class patch cannot strip the drag feedback when
+         group.x/y change and the template re-renders mid-drag. */
+      const groupDraggingId = ref(null);
+      const openGroupTagMenu = (group) => {
+        groupTagTarget.value = group;
+        groupTagOpen.value = true;
+      };
+      const toggleGroupTag = (group) => {
+        if (groupTagOpen.value && groupTagTarget.value === group) groupTagOpen.value = false;
+        else openGroupTagMenu(group);
+      };
+      const pickGroupTag = (name) => {
+        const group = groupTagTarget.value;
+        groupTagOpen.value = false;
+        if (!group) return;
+        const next = name || null;
+        if (next !== group.tag) {
+          group.tag = next;
+          NS.api?.markDirty?.();
+          NS.flow?.history?.schedule?.();
+        }
+      };
       const openGroupMenu = (event, group) => {
-        NS.tools?.openMenu?.(event.currentTarget, [
-          { label: t("重命名"), onPick: () => startGroupRename(group) },
-          { label: t("删除组"), onPick: () => deleteGroup(group.id) },
+        if (!state.selectedGroupIds.value.includes(group.id)) {
+          state.selectedGroupIds.value = [group.id];
+          NS.flow?.selectNodes?.([]);
+        }
+        bringToFront(state.groups, [group.id]);
+        const anchor = { getBoundingClientRect: () => ({ left: event.clientX, bottom: event.clientY }) };
+        NS.tools?.openMenu?.(anchor, [
+          { label: t("复制"), onPick: () => NS.api?.copySelection?.() },
+          { label: t("删除"), onPick: () => deleteGroup(group.id) },
+          { label: t("添加标签"), onPick: () => openGroupTagMenu(group) },
         ]);
       };
       /* Let core.js's single keydown handler reuse this setup-scoped action. */
@@ -6963,7 +7348,10 @@ import {
           if (src) src.position = { x, y };
         },
       };
-      onBeforeUnmount(() => { state.groupActions = null; });
+      /* Let menu-driven creation reuse the same live placement used by the
+         wire-release flow: node follows the pointer, left click commits. */
+      state.placementActions = { beginPlacement, beginNodePlacement };
+      onBeforeUnmount(() => { state.groupActions = null; state.placementActions = null; });
 
       /* Groups are re-fit ONLY when their member set changes (add/remove or
          group creation). Plain moves — dragging nodes, arranging, panning a
@@ -7182,6 +7570,16 @@ import {
         width: group.w + "px",
         height: group.h + "px",
       });
+      /* Last group in state.groups is the most recently selected one. Negative
+         layers keep every group below node cards (z=0), while giving each
+         group's backdrop AND title the same rank so a newer group covers an
+         older one completely. */
+      const groupLayer = (group) => {
+        const index = state.groups.value.findIndex((entry) => entry.id === group.id);
+        return -(state.groups.value.length - Math.max(index, 0));
+      };
+      const groupBackdropStyle = (group) => ({ ...groupStyle(group), zIndex: groupLayer(group) });
+      const groupTitleStyle = (group) => ({ zIndex: groupLayer(group) });
 
       /* The toolbox is graph-positioned too: convert the screen-space
          selection box back into graph units, then keep it 10 graph px above
@@ -7199,12 +7597,14 @@ import {
 
       return {
         mode, showMinimap, multiSelect, selectionRect, groupEditing, selectedGroupIds, groupDisplayTitle,
-        dropTargetGroupIds,
+        dropTargetGroupIds, iz,
         groups, createGroup, selectGroup, onPaneClick, GROUP_CORNERS,
         startGroupRename, commitGroupRename, cancelGroupRename, startGroupDrag, startGroupResize,
-        openGroupMenu, openArrangeMenu, batchFavorite, batchDelete,
+        openGroupMenu, openGroupTagMenu, toggleGroupTag, pickGroupTag, groupTagOpen, groupTagTarget,
+        groupDraggingId,
+        openArrangeMenu, batchFavorite, batchDelete, groupTagColor, groupTagInfo,
         openGroupArrangeMenu, favoriteGroup, runGroup, ungroup: deleteGroup,
-        groupStyle, toolStyle,
+        groupStyle, groupBackdropStyle, groupTitleStyle, toolStyle,
         onInit, onViewportChange, onConnect, isValidConnection,
         onConnectStart, onConnectEnd, frozenConn, onConnFrame, clearFrozenConn,
         onNodeDrag, onNodeDragStop, onNodeClick, onSelectionChange,
@@ -7234,8 +7634,10 @@ import {
         :selection-mode="selectionMode"
         :zoom-on-scroll="true" :zoom-on-double-click="false" :prevent-scrolling="true"
         :delete-key-code="null" :fit-view-on-init="false" :elevate-edges-on-select="false"
+        :elevate-nodes-on-select="false"
         :default-edge-options="{ type: 'ic' }"
         :class="['ic-flow', 'mode-' + mode, { 'is-far': zoomFar, 'is-cut-mode': cutMode, 'is-multi-select': multiSelect, 'marquee-crossing': selectionMode === 'partial' }]"
+        :style="{ '--ic-iz': iz }"
         @init="onInit" @viewport-change="onViewportChange" @connect="onConnect"
         @pane-click="onPaneClick"
         @connect-start="onConnectStart" @connect-end="onConnectEnd"
@@ -7262,9 +7664,9 @@ import {
           </svg>
           <div v-for="group in groups" :key="group.id" class="ic-group" :data-id="group.id"
                :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-drop-target': dropTargetGroupIds.includes(group.id) }"
-               :style="groupStyle(group)"></div>
+               :style="groupBackdropStyle(group)"></div>
           <div v-for="group in groups" :key="'ui-' + group.id" class="ic-group-ui" :data-id="group.id"
-               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-multi': multiSelect, 'is-drop-target': dropTargetGroupIds.includes(group.id) }"
+               :class="{ 'is-selected': selectedGroupIds.includes(group.id), 'is-multi': multiSelect, 'is-drop-target': dropTargetGroupIds.includes(group.id), 'is-dragging': groupDraggingId === group.id }"
                :style="groupStyle(group)">
             <div class="ic-group-tools" @pointerdown.stop @mousedown.stop
                  @click.stop @dblclick.stop @wheel.stop @contextmenu.stop>
@@ -7282,14 +7684,25 @@ import {
               </button>
             </div>
             <input v-if="groupEditing && groupEditing.id === group.id"
-                   class="ic-group-title-input" v-model="groupEditing.value"
+                   class="ic-group-title-input" v-model="groupEditing.value" :style="groupTitleStyle(group)"
                    @keydown.enter.prevent="commitGroupRename" @keydown.esc.prevent="cancelGroupRename"
                    @blur="commitGroupRename" @pointerdown.stop @mousedown.stop
                    @dblclick.stop @wheel.stop @contextmenu.stop.prevent />
             <div v-else class="ic-group-title nopan nodrag" :title="$t('双击标题改名')"
+                 :style="groupTitleStyle(group)"
                  @pointerdown="startGroupDrag($event, group)" @mousedown.stop
                  @dblclick.stop.prevent="startGroupRename(group)"
-                 @contextmenu.prevent.stop="openGroupMenu($event, group)">{{ groupDisplayTitle(group.title) }}</div>
+                 @contextmenu.prevent.stop="openGroupMenu($event, group)"><button
+                 v-if="groupTagInfo(group)" class="icn__tag-chip ic-group-tag-chip nodrag nopan" type="button"
+                 :style="{ background: groupTagInfo(group).color }" :title="$t('更换标签')"
+                 @pointerdown.stop @click.stop="toggleGroupTag(group)"><span
+                 class="icn__tag-chip-dot"></span><span class="icn__tag-chip-name">{{ $t(groupTagInfo(group).name) }}</span></button
+                 ><button v-else class="icn__tag-add ic-group-tag-add nodrag nopan" type="button"
+                 :title="$t('添加标签')" @pointerdown.stop @click.stop="toggleGroupTag(group)">
+                   <IcIcon name="tag" :size="17" />
+                 </button>{{ groupDisplayTitle(group.title) }}</div>
+            <TagMenu v-if="groupTagOpen && groupTagTarget === group" class="ic-group-tagmenu"
+                     :current="group.tag || ''" @pick="pickGroupTag" />
             <div v-for="corner in GROUP_CORNERS" :key="corner" class="ic-group__rz nopan nodrag"
                  :class="'ic-group__rz--' + corner"
                  @pointerdown="startGroupResize($event, group, corner)" @mousedown.stop>
@@ -7476,6 +7889,122 @@ import {
     });
   }
 
+  /* -------------------------------- clipboard -------------------------------
+     Selection-level copy/paste for nodes, wires and groups. The payload uses
+     the same {nodes, edges, groups} shape as the history snapshots, so it
+     survives a document switch; the core module also puts it on the system
+     clipboard (custom MIME + a tagged text/plain fallback) for other tabs.
+     Every id is regenerated on paste and group membership follows the new
+     node ids — no reference is ever shared with the source graph. */
+  const CLIPBOARD_APP = "InfCanvas.Clipboard";
+  let lastPasteAt = { x: NaN, y: NaN, n: 0 };
+
+  /* Strict "what you selected is what you copy": a selected group copies the
+     rectangle alone — its member nodes are NOT pulled in unless they are
+     themselves selected. Likewise a wire only travels when both endpoints are
+     in the selection, so a lone wire is not silently expanded. */
+  function copySelection() {
+    syncLivePositions();
+    const wanted = new Set(state.selectedIds.value);
+    const groupIds = state.selectedGroupIds.value.slice();
+    if (!wanted.size && !groupIds.length) return null;
+    const nodes = JSON.parse(JSON.stringify(state.nodes.value)).filter((node) => wanted.has(node.id));
+    const edges = JSON.parse(JSON.stringify(state.edges.value))
+      .filter((edge) => wanted.has(edge.source) && wanted.has(edge.target));
+    const groups = JSON.parse(JSON.stringify(state.groups.value))
+      .filter((group) => groupIds.includes(group.id))
+      .map((group) => ({ ...group, nodes: (group.nodes || []).filter((id) => wanted.has(id)) }));
+    return { app: CLIPBOARD_APP, version: 1, nodes, edges, groups };
+  }
+
+  function pasteGraph(payload, point) {
+    if (!payload || payload.app !== CLIPBOARD_APP || !Array.isArray(payload.nodes)) return null;
+    syncLivePositions();
+    const src = payload.nodes.filter((node) => node && node.id && node.position && node.data);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of src) {
+      const x = Number(node.position.x), y = Number(node.position.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const size = node.data.size || [160, 30];
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + (Number(size[0]) || 160));
+      maxY = Math.max(maxY, y + (Number(size[1]) || 30));
+    }
+    const srcGroups = (Array.isArray(payload.groups) ? payload.groups : [])
+      .filter((group) => group && [group.x, group.y, group.w, group.h].every(Number.isFinite));
+    for (const group of srcGroups) {
+      minX = Math.min(minX, group.x); minY = Math.min(minY, group.y);
+      maxX = Math.max(maxX, group.x + group.w); maxY = Math.max(maxY, group.y + group.h);
+    }
+    /* A group-only copy has no nodes: the rectangle alone is still pasteable. */
+    if (!src.length && !srcGroups.length) return null;
+    if (!Number.isFinite(minX)) return null;
+    /* Same grip as a file/text paste: the TOP-LEFT NODE's top-left corner sits
+       30px ABOVE the pointer, its left edge aligned to the pointer's x. The
+       rest of the graph keeps its original layout by sharing this delta.
+       (This used to centre the whole bounding box on the pointer.) */
+    let anchorNode = null;
+    for (const node of src) {
+      const x = Number(node.position.x), y = Number(node.position.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (!anchorNode || x < anchorNode.x || (x === anchorNode.x && y < anchorNode.y)) {
+        anchorNode = { x, y };
+      }
+    }
+    const anchorX = anchorNode ? anchorNode.x : minX;
+    const anchorY = anchorNode ? anchorNode.y : minY;
+    const at = point && Number.isFinite(point.x) && Number.isFinite(point.y)
+      ? point : { x: anchorX, y: anchorY + 30 };
+    let dx = at.x - anchorX;
+    let dy = (at.y - 30) - anchorY;
+    /* Repeated pastes at the same spot stair-step instead of stacking exactly. */
+    if (Math.hypot(at.x - lastPasteAt.x, at.y - lastPasteAt.y) < 12) {
+      lastPasteAt.n += 1;
+      dx += (lastPasteAt.n % 5) * 24;
+      dy += (lastPasteAt.n % 5) * 24;
+    } else {
+      lastPasteAt = { x: at.x, y: at.y, n: 0 };
+    }
+    const idMap = new Map();
+    const newNodes = src.map((node) => {
+      const id = "n_" + Math.random().toString(36).slice(2, 10);
+      idMap.set(node.id, id);
+      const copy = JSON.parse(JSON.stringify(node));
+      copy.id = id;
+      copy.type = "ic";
+      copy.position = { x: node.position.x + dx, y: node.position.y + dy };
+      /* A copy is idle: never carry the source node's running/error state over. */
+      copy.data.status = "idle";
+      copy.data.error = "";
+      return copy;
+    });
+    const newEdges = (Array.isArray(payload.edges) ? payload.edges : [])
+      .filter((edge) => edge && idMap.has(edge.source) && idMap.has(edge.target))
+      .map((edge) => ({
+        id: "e_" + Math.random().toString(36).slice(2, 10),
+        source: idMap.get(edge.source), target: idMap.get(edge.target),
+        sourceHandle: edge.sourceHandle || "out",
+        targetHandle: edge.targetHandle || "in",
+        type: "ic",
+      }));
+    const newGroups = srcGroups.map((group) => ({
+      ...JSON.parse(JSON.stringify(group)),
+      id: "grp_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      x: group.x + dx, y: group.y + dy,
+      nodes: (group.nodes || []).map((id) => idMap.get(id)).filter(Boolean),
+    }));
+    state.nodes.value = state.nodes.value.concat(newNodes);
+    state.edges.value = dedupeEdges(state.edges.value.concat(newEdges));
+    state.groups.value = state.groups.value.concat(newGroups);
+    nextTick(() => {
+      flow.selectNodes(newNodes.map((node) => node.id));
+      if (newGroups.length) state.selectedGroupIds.value = newGroups.map((group) => group.id);
+    });
+    historySchedule();
+    NS.api?.markDirty?.();
+    return { nodes: newNodes.length, edges: newEdges.length, groups: newGroups.length };
+  }
+
   /* Set while the API dialog renames a workflow. The template name is the
      workflow id, so for a moment every node that referenced the old stem points
      at something the shared list no longer has -- the "adopt the category
@@ -7585,12 +8114,28 @@ import {
       };
     },
 
+    /* ---- selection clipboard ---- */
+    copySelection,
+    pasteGraph,
+
     /* ---- viewport ---- */
     getViewport() { return state.flow?.getViewport?.() || { ...state.viewport.value }; },
     setViewport(vp) {
       const value = { x: vp.x || 0, y: vp.y || 0, zoom: vp.zoom || 1 };
       state.viewport.value = value;
       state.flow?.setViewport(value, { duration: 0 });
+    },
+    /* Delta from the pointer to the node's top-left corner, in graph units.
+       The pointer marks the CENTRE OF THE TITLE BAR: half the card width to the
+       left, half the header height up. Pill nodes (cleanup / text collage) have
+       no body — their whole 30px is the title bar. */
+    createAnchorOffset(node) {
+      const size = Array.isArray(node?.data?.size) ? node.data.size : null;
+      const w = Number(size?.[0]) || 480;
+      const role = node?.data?.role;
+      const pill = role === "cleanup" || role === "text_merge";
+      const headH = pill ? (Number(size?.[1]) || 30) : HEAD_H;
+      return { x: -w / 2, y: -headH / 2 };
     },
     screenToFlow(clientX, clientY) {
       const box = this.host?.getBoundingClientRect();
@@ -7707,8 +8252,13 @@ import {
     syncPositions() { syncLivePositions(); },
 
     /* ---- nodes / edges ---- */
-    addNode(node) {
+    addNode(node, anchor = null) {
       state.nodes.value = state.nodes.value.concat([node]);
+      const group = groupForNewNode(node, anchor);
+      if (group) {
+        if (!Array.isArray(group.nodes)) group.nodes = [];
+        if (!group.nodes.includes(node.id)) group.nodes.push(node.id);
+      }
       return node;
     },
     removeNodes(ids) {

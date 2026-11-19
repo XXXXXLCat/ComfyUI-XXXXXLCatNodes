@@ -212,14 +212,6 @@
   animation:ict-spin .8s linear infinite; }
 @keyframes ict-spin { to { transform:rotate(360deg); } }
 .ict-progress-text { font-size:var(--ic-ctrl-fs, 12px); color:var(--ic-soft, #8a8a8a); }
-.ict-menu { position:fixed; z-index:10000; min-width:184px; padding:4px; border-radius:var(--icn2-r-md, 6px);
-  border:1px solid var(--ic-line, #494a50); background:var(--icn2-secondary, #262729);
-  box-shadow:0 14px 40px rgba(0,0,0,.55); }
-.ict-menu button { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;
-  height:26px; padding:0 8px; border:0; border-radius:var(--icn2-r, 4px); background:transparent; color:var(--icn2-fg, #ffffff);
-  font-family:inherit; font-size:12px; text-align:left; cursor:pointer; transition:background-color .12s ease; }
-.ict-menu button:hover { background:var(--icn2-accent, #313235); }
-.ict-menu button span { color:var(--icn2-muted, #8a8a8a); font-size:10px; }
 /* ---- video trim: preview + 10 thumbs + two handles + ruler ---- */
 .ict-video-preview { display:flex; justify-content:center; padding:8px; border-radius:var(--ic-radius, 10px); background:#000; }
 .ict-video-preview video { display:block; max-width:100%; max-height:280px; }
@@ -504,41 +496,61 @@
   function onMenuKey(event) {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(); }
   }
-  /* Anchored dropdown as used by the reference "抽帧" button: three entries,
-     closes on outside pointerdown / Escape, never on a backdrop click. */
+  /* Anchored dropdown (node/group context menu, selection arrange, frame menu).
+     Shares the EXACT `.ic-menu` surface the double-click add-node menu uses:
+     same classes, same ComfyUI tokens, same 14px type, and it lives on the
+     screen-space layer OUTSIDE the scaled pane. Unlike the old `.ict-menu` it
+     never scales with canvas zoom, so every menu in the canvas looks identical.
+     Closes on outside pointerdown / Escape, never on a backdrop click. */
   function openMenu(anchor, items) {
     closeMenu();
     const host = document.getElementById("infcanvas-root") || document.body;
     const el = document.createElement("div");
-    el.className = "ict-menu";
+    el.className = "ic-menu";
+    el.setAttribute("role", "menu");
     for (const item of items) {
+      if (item.separator) {
+        const sep = document.createElement("div");
+        sep.className = "ic-menu-sep";
+        el.appendChild(sep);
+        continue;
+      }
+      if (item.section) {
+        const section = document.createElement("div");
+        section.className = "ic-menu-section";
+        section.textContent = item.section;
+        el.appendChild(section);
+        continue;
+      }
       const button = document.createElement("button");
       button.type = "button";
-      button.appendChild(document.createTextNode(item.label));
+      button.className = "ic-menu-item";
+      button.setAttribute("role", "menuitem");
+      if (item.disabled) { button.disabled = true; button.setAttribute("aria-disabled", "true"); }
+      const label = document.createElement("span");
+      label.className = "ic-menu-label";
+      label.textContent = item.label;
+      button.appendChild(label);
       if (item.value) {
         const value = document.createElement("span");
+        value.className = "ic-menu-value";
         value.textContent = item.value;
         button.appendChild(value);
       }
-      button.addEventListener("click", () => { const pick = item.onPick; closeMenu(); pick?.(); });
+      button.addEventListener("click", () => { const pick = item.onPick; closeMenu(); if (!item.disabled) pick?.(); });
       el.appendChild(button);
     }
     host.appendChild(el);
-    /* Keep the menu as a screen-space fixed layer (so it never gets clipped by
-       the scaled pane), but scale its contents to match the canvas zoom so its
-       type size stays in step with the node toolbar it hangs off. Anchoring is
-       still the button's live screen rect, so it tracks pan/zoom while open. */
-    el.style.transformOrigin = "top left";
+    /* Screen-space fixed: no zoom transform, so glyphs stay 14px like every
+       other `.ic-menu`. Anchoring follows the button's live screen rect so the
+       menu still tracks pan/zoom while open. */
     menu = { el, raf: 0 };
     const place = () => {
       if (!menu || menu.el !== el) return;
-      const zoom = Number(NS.flow?.getViewport?.().zoom) || 1;
       const box = anchor.getBoundingClientRect();
-      const gap = 6 * zoom;
-      const width = (el.offsetWidth || 184) * zoom;
-      el.style.transform = "scale(" + zoom + ")";
+      const width = el.offsetWidth || 192;
       el.style.left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8)) + "px";
-      el.style.top = (box.bottom + gap) + "px";
+      el.style.top = (box.bottom + 6) + "px";
       menu.raf = requestAnimationFrame(place);
     };
     place();

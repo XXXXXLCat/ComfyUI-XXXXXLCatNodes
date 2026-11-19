@@ -1616,6 +1616,124 @@ async def process_video(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "action": action, "files": files})
 
 
+# --- LORA library (canvas sidebar browser) -----------------------------------
+# The lora list itself comes from ComfyUI's own folder_paths (this honours
+# extra_model_paths.yaml, e.g. a shared E:\Comfy-Org\Models\loras). Each entry
+# is a path relative to a lora root, e.g. "Krea2\35mmKrea2.safetensors", so the
+# subfolder prefix IS the on-disk category. Previews are the sibling files with
+# the same basename (Civitai puts <name>.jpeg/.webp/.png next to the weights).
+LORA_MODEL_EXTS = (".safetensors", ".ckpt", ".pt", ".bin", ".gguf")
+LORA_PREVIEW_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".mp4", ".webm")
+_lora_cache: dict[str, Any] = {"stamp": 0.0, "items": []}
+
+
+def _lora_roots() -> list[str]:
+    """All configured lora roots (defaults + extra_model_paths)."""
+    try:
+        paths = folder_paths.get_folder_paths("loras")
+    except Exception:
+        paths = []
+    roots = []
+    for p in paths or []:
+        try:
+            roots.append(os.path.abspath(p))
+        except Exception:
+            continue
+    return roots
+
+
+def _lora_preview_abs(rel: str) -> str | None:
+    """Return the absolute path of a lora-relative sibling preview if it exists.
+
+    ``rel`` is the lora path with a non-model extension, e.g.
+    "Krea2\\35mmKrea2.jpeg". Check every configured root (the shared library may
+    be mounted via extra_model_paths) and reject traversal.
+    """
+    rel_norm = str(rel or "").replace("/", os.sep)
+    if not rel_norm or os.path.isabs(rel_norm) or ".." in rel_norm.split(os.sep):
+        return None
+    for root in _lora_roots():
+        candidate = os.path.abspath(os.path.join(root, rel_norm))
+        try:
+            if os.path.commonpath((candidate, root)) != root:
+                continue
+        except ValueError:
+            continue
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+async def list_loras(request) -> web.Response:
+    """Return the lora library grouped by its on-disk subfolder.
+
+    Response: ``{"items":[{name, file, stem, subfolder, category, preview}], ...}``
+    where ``name`` is the exact lora_name to feed the workflow and ``preview``
+    is a same-basename sibling image/video path (lora-relative) or null.
+    """
+    try:
+        names = folder_paths.get_filename_list("loras") or []
+    except Exception:
+        names = []
+
+    # Cheap cache keyed on the roots' mtimes so repeated panel opens don't walk
+    # a few hundred files each time, but a newly added lora shows up promptly.
+    stamp = 0.0
+    for root in _lora_roots():
+        try:
+            stamp = max(stamp, os.path.getmtime(root))
+        except Exception:
+            pass
+    if _lora_cache["stamp"] == stamp and _lora_cache["items"]:
+        return web.json_response({"items": _lora_cache["items"]})
+
+    items: list[dict] = []
+    for raw in names:
+        name = str(raw)
+        if os.path.splitext(name)[1].lower() not in LORA_MODEL_EXTS:
+            continue
+        norm = name.replace("/", "\\")
+        directory, base = os.path.split(norm)
+        stem, _ext = os.path.splitext(base)
+        category = directory or "根目录"
+        preview: str | None = None
+        for ext in LORA_PREVIEW_EXTS:
+            candidate = (directory + "\\" if directory else "") + stem + ext
+            if _lora_preview_abs(candidate):
+                preview = candidate.replace("\\", "/")
+                break
+        items.append({
+            "name": name,
+            "file": base,
+            "stem": stem,
+            "subfolder": directory.replace("\\", "/"),
+            "category": category,
+            "preview": preview,
+        })
+    items.sort(key=lambda x: (x["category"], x["stem"].lower()))
+    _lora_cache["stamp"] = stamp
+    _lora_cache["items"] = items
+    return web.json_response({"items": items})
+
+
+async def lora_preview(request) -> web.Response:
+    """Serve a lora's same-basename preview file via a path-validated proxy.
+
+    ComfyUI's /view cannot serve type=loras (get_directory_by_type has no loras
+    branch), so this is the minimal controlled equivalent. Only paths that
+    resolve under a configured lora root and carry an image/video extension
+    are served.
+    """
+    rel = request.rel_url.query.get("file", "")
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in LORA_PREVIEW_EXTS:
+        return web.Response(status=400)
+    path = _lora_preview_abs(rel)
+    if not path:
+        return web.Response(status=404)
+    return web.FileResponse(path)
+
+
 def register_routes() -> None:
     """Idempotently attach routes to the running PromptServer application."""
     global _registered
@@ -1640,6 +1758,8 @@ def register_routes() -> None:
         ("POST", "/api/infcanvas/audio/process", process_audio),
         ("POST", "/api/infcanvas/video/process", process_video),
         ("GET", "/api/infcanvas/assets", list_assets),
+        ("GET", "/api/infcanvas/loras", list_loras),
+        ("GET", "/api/infcanvas/lora/preview", lora_preview),
         # API 配置弹窗：静态 /order 与 /fields 先于动态 /{name} 注册。
         ("GET", "/api/infcanvas/settings", api_config_ready),
         ("PUT", "/api/infcanvas/workflows/order", api_reorder_workflows),
